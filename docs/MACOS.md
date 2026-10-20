@@ -11,9 +11,9 @@ Best Enhance are unavailable in this package. Optional AI remains available thro
 ## Download and install
 
 1. Visit [JSummerer/AudioLab Releases](https://github.com/JSummerer/AudioLab/releases).
-2. Under the **v2.4.0b1** release's **Assets**, choose its **macOS arm64 DMG**. Check the release notes
-   for known issues and the validation actually performed. If there is no DMG asset, the binary has
-   not been published; GitHub's automatic source archive is not the app.
+2. Under the **v2.4.0b1** release's **Assets**, choose **AudioLab-2.4.0b1-macOS-arm64.dmg** (105.5 MB).
+   Check the release notes for known issues and the validation actually performed.
+   Testers only need the DMG; GitHub's source archives are for developers.
 3. Open the downloaded DMG, drag **AudioLab.app** into **Applications**, then eject the disk image.
 4. Open **AudioLab** from Applications. Keep it in the Dock if you like.
 

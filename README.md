@@ -32,9 +32,9 @@ The first downloadable app is **AudioLab Core 2.4.0b1**, for **Apple silicon Mac
 later**. It includes Python and its audio tools: no Terminal, Python setup or Apple developer account
 is needed to use it. Intel binaries are not yet a supported release target.
 
-1. Open [GitHub Releases](https://github.com/JSummerer/AudioLab/releases) and look for the
-   **v2.4.0b1 macOS arm64 DMG** under **Assets**. If no DMG is attached, a binary has not been published;
-   the automatically generated source ZIP is the [source installation](docs/INSTALLATION.md#install-from-source).
+1. Open the [v2.4.0b1 beta release](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b1) and download
+   **AudioLab-2.4.0b1-macOS-arm64.dmg** under **Assets** (105.5 MB).
+   The source archives are for developers; testers only need the DMG.
 2. Open the DMG and drag **AudioLab.app** into **Applications**. Eject the disk image, then open the app
    from Applications.
 3. This beta is ad-hoc signed, without an Apple Developer ID or Apple notarization. macOS may block
@@ -43,8 +43,8 @@ is needed to use it. Intel binaries are not yet a supported release target.
 
 The Core app supports **Save / Convert, Check, and Light/Standard Enhance**. **Split and Best Enhance
 are unavailable in this package**; there is no in-app AI installation. Processing stays on your Mac.
-The release's notes describe the checks actually completed; this guide does not certify an unpublished
-or untested artifact. See the [Mac guide](docs/MACOS.md) for opening, updates and safe removal.
+The release notes describe the checks completed and the beta's validation limits.
+See the [Mac guide](docs/MACOS.md) for opening, updates and safe removal.
 
 ## Install from source
 

@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.4.0b1 (prerelease candidate)
+## 2.4.0b1 (2026-10-20, public beta)
 
 ### Changed
 - Self-contained **macOS Core** beta build and GitHub prerelease delivery path: Python, FFmpeg and

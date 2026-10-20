@@ -1,8 +1,17 @@
-AudioLab — core tester app
+AudioLab — Mac tester app
+
+For Apple silicon Macs with macOS 14 or later.
+Check Apple menu > About This Mac for your chip and macOS version.
+
+Current setup guide and troubleshooting:
+https://github.com/JSummerer/AudioLab/blob/main/docs/MACOS.md
 
 INSTALL
-Drag AudioLab.app to Applications. Eject this disk image, then open AudioLab
-from Applications. No Terminal, Python installation or account is needed.
+1. Drag AudioLab.app to Applications and wait for Finder to finish copying.
+2. Eject this disk image.
+3. Open AudioLab from Applications.
+No Terminal, Python installation or AudioLab account is needed. After it opens,
+you can delete the downloaded DMG file.
 
 This personal tester build is not verified/notarized by Apple. If macOS blocks
 it, first check that you downloaded it from JSummerer/AudioLab on GitHub.
@@ -13,18 +22,21 @@ Do not disable Gatekeeper or run commands that remove security protections.
 The core app includes Save/Convert, Check and Light/Standard Enhance.
 
 OPTIONAL AI
-In a build with a compatible AI release catalog, open Settings > AI & system
-and choose Enable AI features for Split and Best enhancement. This optional
-download includes its own runtime and both model choices. Once installed,
+Open Settings > AI & system and choose Enable AI features for Split and Best
+enhancement. This optional download includes its own runtime and both model
+choices. Once installed,
 local audio works offline. No Terminal, Python, Homebrew or uv setup is needed.
-Settings shows known sizes, progress and errors. Allow extra disk space for
-unpacking and audio work. Hardware and performance are not yet qualified.
+Keep AudioLab open during setup. Settings shows download progress, then
+Installing and Checking. Wait for Ready before starting an AI job. A full
+download counter is not the end of setup; unpacking and checks still follow.
+Allow extra disk space for installation and audio work. Minimum hardware and
+long-recording performance are not yet established.
 Cancel install keeps a partial download; Resume continues it. Repair reinstalls
 the compatible version. Update AI add-on follows the app's release catalog.
 Remove AI add-on clears its owned runtime, models, cache and partial downloads
 after confirmation; your recordings, Library and settings stay. Finish or
 cancel AI jobs before updating or removing it. Shared/source packages stay.
-Published 2.4.0b1 has no AI installer; this option is for the upcoming 2.4.0b2 beta.
+AI installation is available from 2.4.0b2 onward; update an older 2.4.0b1 app first.
 
 UPDATE
 Quit AudioLab and replace AudioLab.app with the newer copy from GitHub Releases.

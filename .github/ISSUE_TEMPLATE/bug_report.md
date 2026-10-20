@@ -14,12 +14,14 @@ assignees: ""
 
 **Your setup**
 - Operating system and version:
+- Mac chip, if using the Mac app (Apple menu → About This Mac):
 - AudioLab version (Settings → About):
-- Commit or download date, if known:
-- Native app or browser:
+- Downloaded file name or download date, if known:
+- Downloaded Mac app, source installation or browser:
 
 **Relevant error details**
-Paste the relevant part of “Copy details for a bug report” or “Copy system report”.
+Paste the relevant part of “Copy details for a bug report” or Settings → About → “Copy system report”.
+If the app cannot open, the exact macOS warning is enough to start.
 Review it first: remove private filenames, links, cookies and credentials.
 
 If a sample is necessary, use a short generated or shareable recording. Please do not upload

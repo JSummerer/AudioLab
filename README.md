@@ -10,6 +10,33 @@ No AudioLab account or cloud processing service is required.
 please report reproducible problems through [GitHub Issues](https://github.com/JSummerer/AudioLab/issues).
 AudioLab is a working project name, not a claim of affiliation with other apps using that name.
 
+## Download for Mac
+
+**[Download AudioLab 2.4.0b2 for Mac](https://github.com/JSummerer/AudioLab/releases/download/v2.4.0b2/AudioLab-2.4.0b2-macOS-arm64.dmg)** · about 106 MB
+
+For **Apple silicon Macs with macOS 14 or later**. Check **Apple menu → About This Mac**:
+look for a **Chip** entry, such as Apple M1 or later, and your macOS version.
+There is no packaged Intel, Windows or Linux app yet.
+
+1. **Download** using the link above. This is the only file you need from GitHub.
+2. **Install:** open the downloaded `.dmg` file and drag **AudioLab.app** into **Applications**.
+   Eject the AudioLab disk image in Finder.
+3. **Open AudioLab** from Applications. No Terminal, Python installation or AudioLab account is needed.
+
+**Blocked on first opening?** This personal beta has not been verified by Apple. After trying to open
+it, follow [System Settings → Privacy & Security → Open Anyway](docs/MACOS.md#first-opening).
+That guide explains the expected warning and when to stop.
+
+**AI is optional:** Save / Convert, Check and Light/Standard Enhance work immediately.
+For Split and Best Enhance, choose **Settings → AI & system → Enable AI features** and wait for
+**Ready**. AudioLab downloads and manages the extra files for you; no separate installer is needed.
+Allow roughly **0.6 GB to download and 1 GB installed**, plus extra space for installation and audio work.
+You can resume an interrupted download or remove the add-on in Settings.
+
+[Mac setup and help](docs/MACOS.md) · [First recording](#your-first-recording) ·
+[Updates](docs/MACOS.md#updates) · [Uninstall](docs/MACOS.md#uninstall) ·
+[Release notes](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b2)
+
 ![AudioLab with a local audio sample ready to enhance](docs/img/app.png)
 
 ## What can I do?
@@ -26,38 +53,6 @@ tracklist. **Library** keeps finished Save, Enhance and Split results with their
 Enhancement cannot restore information missing from a recording; use the comparison player to decide
 which version you prefer.
 
-## Mac app for testers
-
-The downloadable beta is **AudioLab 2.4.0b2**, for **Apple silicon Macs running macOS 14 or
-later**. It includes Python and its audio tools: no Terminal, Python setup or Apple developer account
-is needed to use it. Intel binaries are not yet a supported release target.
-
-1. Open the [v2.4.0b2 beta release](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b2) and download
-   **AudioLab-2.4.0b2-macOS-arm64.dmg** under **Assets**.
-   The source archives are for developers; testers only need the DMG.
-2. Open the DMG and drag **AudioLab.app** into **Applications**. Eject the disk image, then open the app
-   from Applications.
-3. This beta is ad-hoc signed, without an Apple Developer ID or Apple notarization. macOS may block
-   its first opening. After checking the download came from this repository, follow the
-   [Open Anyway steps](docs/MACOS.md#first-opening) in System Settings.
-
-The main download supports **Save / Convert, Check, and Light/Standard Enhance**. For **Split** and
-**Best Enhance**, open **Settings → AI & system → Enable AI features**. The optional download includes
-its own runtime and both model choices, with no Terminal or Python setup. Settings handles download
-resuming, repair, compatible updates and removal. Processing stays on your Mac.
-For this beta, the AI add-on is about **570 MB to download** and **1.02 GB installed**; allow extra
-space for installation and audio work. These are disk sizes, not memory requirements.
-The release notes describe the checks completed and the beta's validation limits.
-See the [Mac guide](docs/MACOS.md) for opening, updates and safe removal.
-
-## Install from source
-
-Source installation remains available, including optional AI. Download and extract **Code → Download
-ZIP**, keep the folder, and follow the [installation guide](docs/INSTALLATION.md#install-from-source).
-On macOS, **AudioLab.command** opens Terminal for setup and creates a shortcut app. Windows and Linux
-use browser launchers and remain experimental. This source route installs dependencies and may obtain
-Python with uv; it is separate from the self-contained Mac app.
-
 ## Your first recording
 
 1. Choose **New → Choose files** and select an audio file, or paste a supported web link and press **Load**.
@@ -71,16 +66,15 @@ preserves your output files, but may remove its kept original copy when no other
 When enabled, kept original copies live separately in AudioLab's app-data folder and can also be
 cleared in **Settings → Storage**.
 
-**AI is optional.** It adds Split and Best enhancement. The packaged option downloads
-software and both model choices together; source installations keep their existing installer. See
-[optional AI and resource notes](docs/INSTALLATION.md#optional-ai) before enabling it. Download size,
-installed files, processing memory and temporary audio space are different requirements.
+See [optional AI](docs/MACOS.md#optional-ai) for download progress, removal and hardware notes.
+The add-on includes both model choices; local files can be processed offline once it is installed.
 
 ## Help and feedback
 
-- **Setup stops:** keep the error message and use the [installation troubleshooting steps](docs/INSTALLATION.md#troubleshooting).
+- **Setup stops:** use [Mac troubleshooting](docs/MACOS.md#troubleshooting).
+  Source installations have [separate help](docs/INSTALLATION.md#troubleshooting).
 - **A job fails:** use **Copy details for a bug report** on the job. For general problems, use
-  **Settings → Copy system report**. Include your operating system and the steps that led to the problem.
+  **Settings → About → Copy system report**. Include your operating system and the steps that led to the problem.
   Review the report before sharing: filenames, source links or tool output may be personal.
 - **Security concern:** follow [SECURITY.md](SECURITY.md) to report it privately.
 - **A link fails:** site support varies and can change. For the Mac app, check for a newer app release
@@ -90,6 +84,11 @@ installed files, processing memory and temporary audio space are different requi
 
 Use recordings and links you have permission to process, and follow their licenses and the source
 service's terms. AudioLab is not affiliated with any content-hosting service.
+
+## Install from source
+
+For development or experimental Windows/Linux use, follow the [source installation guide](docs/INSTALLATION.md#install-from-source).
+This route uses Terminal and installs dependencies. Mac testers can use the downloadable app above.
 
 ## For contributors
 

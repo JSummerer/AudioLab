@@ -2,6 +2,9 @@
 
 ## 2.4.0b2 (2026-10-21, public beta)
 
+- Documentation follow-up: direct Mac download, a short installation path, AI progress/completion
+  guidance and navigable update/removal help. The published binary is unchanged; the revised
+  disk-image read-me will be included in future builds.
 - Optional managed AI for the self-contained macOS arm64 app: one explicit download includes the
   isolated runtime and both Standard/Fine-tuned model choices for offline Split and Best Enhance.
   A bundled catalog pins the compatible release; the main app's Python packages stay immutable.

@@ -1,6 +1,9 @@
 # Using AudioLab
 
-For first-time setup, start with the [README](../README.md) or [installation guide](INSTALLATION.md).
+For first-time setup, use the [Mac app guide](MACOS.md) or [source installation guide](INSTALLATION.md#install-from-source).
+
+[Sources and results](#sources-and-results) · [Enhancement](#automatic-enhancement) ·
+[Command line](#command-line) · [Home server](#docker--home-server)
 
 ## Sources and results
 

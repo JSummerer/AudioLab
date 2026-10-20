@@ -1,28 +1,33 @@
 # Install AudioLab
 
+**Trying the Mac app? Start with the [Mac setup guide](MACOS.md).** It covers the direct download,
+first opening, optional AI, updates and removal without Terminal commands.
+
 Choose the self-contained **Mac app** for everyday testing on Apple silicon, or install from
 source for development, Windows or Linux. They use the same processing code and normally
 share app data for the same computer user; quit one before opening the other.
+
+**On this page:** [Mac app](#mac-app) · [Source setup](#install-from-source) ·
+[AI](#optional-ai) · [Source AI](#optional-ai-in-source-installations) ·
+[Updates](#update-audiolab) · [Troubleshooting](#troubleshooting) · [Uninstall](#uninstall)
 
 ## Mac app
 
 The initial binary target is **macOS 14 or later on Apple silicon (arm64)**. No Python installation,
 Terminal setup or Apple developer account is required. Intel support is not yet qualified.
 
-Download the **v2.4.0b2 macOS arm64 DMG** from
-[GitHub Releases](https://github.com/JSummerer/AudioLab/releases), when it is attached under Assets.
+Download the [**v2.4.0b2 Mac app**](https://github.com/JSummerer/AudioLab/releases/download/v2.4.0b2/AudioLab-2.4.0b2-macOS-arm64.dmg).
 Open it, drag **AudioLab.app** into **Applications**, eject the image and open the app from Applications.
-If a release has no DMG asset, it has no published binary; **Source code (zip)** needs source setup.
+This is the only file testers need. **Source code (zip)** is for the separate source setup below.
 
 This beta uses ad-hoc signing and is not Apple Developer ID signed or notarized. For the expected
 first-opening warning, use the [Mac guide's graphical Open Anyway steps](MACOS.md#first-opening).
-That guide also covers updates, storage and uninstall. The release notes state which native checks
-were completed; documentation of this path is not evidence that a candidate has passed them.
+That guide also covers updates, storage and uninstall. The
+[release notes](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b2) describe testing and beta limitations.
 
 The **2.4.0b2** app includes **Save / Convert**, **Check**, and **Light/Standard Enhance**, plus the
 Library. Settings offers the [optional managed AI download](#optional-ai) for Split and Best Enhance.
-The main app and its
-downloader update by replacing the app; the packaged app does not change Python packages through pip.
+The main app and its downloader update by replacing the app.
 
 ## Install from source
 

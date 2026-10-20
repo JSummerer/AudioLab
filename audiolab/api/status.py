@@ -79,7 +79,8 @@ def _dir_bytes(path: Path, seen: set | None = None) -> int:
                     if e.is_dir(follow_symlinks=False):
                         total += _dir_bytes(Path(e.path), seen)
                     elif e.is_file(follow_symlinks=False):
-                        st = e.stat(follow_symlinks=False)
+                        # DirEntry's cached Windows metadata omits hard-link identity.
+                        st = os.stat(e.path, follow_symlinks=False)
                         if st.st_nlink > 1:
                             if (st.st_dev, st.st_ino) in seen:
                                 continue

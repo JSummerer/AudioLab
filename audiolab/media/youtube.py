@@ -1065,7 +1065,7 @@ def ytdlp_age_days(version: str | None) -> int | None:
 
 _REPAIR_EVERY_S = 6 * 3600
 _repair_lock = threading.Lock()
-_last_repair: dict[str, Any] = {}  # {'at': monotonic end time, 'result': (before, after) | None}
+_last_repair: dict[str, Any] = {}  # {'at': monotonic end time, 'generation': int, 'result': (before, after) | None}
 
 
 def self_repair_update() -> tuple[str, str] | None:
@@ -1074,10 +1074,13 @@ def self_repair_update() -> tuple[str, str] | None:
     else None. A job that waited here while another job ran the update gets that
     update's result. Deliberately not cancellable: killing pip mid-install can leave
     no downloader at all."""
+    generation = _last_repair.get('generation', 0)
     called = time.monotonic()
     with _repair_lock:
         last = _last_repair.get('at')
-        if last is not None and last >= called:
+        # Clock ticks can be equal for sequential calls; only an update while we
+        # waited grants this caller the previous update's retry.
+        if _last_repair.get('generation', 0) != generation:
             return _last_repair['result']
         if last is not None and called - last < _REPAIR_EVERY_S:
             return None
@@ -1086,5 +1089,7 @@ def self_repair_update() -> tuple[str, str] | None:
         except Exception:
             res = {'ok': False}
         changed = bool(res.get('ok') and res.get('after') and res.get('before') != res.get('after'))
-        _last_repair.update(at=time.monotonic(), result=(res['before'], res['after']) if changed else None)
+        _last_repair.update(
+            at=time.monotonic(), generation=generation + 1, result=(res['before'], res['after']) if changed else None
+        )
         return _last_repair['result']

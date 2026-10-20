@@ -18,6 +18,8 @@ no build step; reload the page after editing.
 CI runs on public pushes to `main`, pull requests and manual starts, using Python 3.12 on macOS,
 Windows and Linux. These are generated-signal and unit/integration tests; they do not establish that
 the native UI, fresh-machine setup or optional AI work on every computer.
+CI also repeats comparison-playback regressions with the bundled FFmpeg, so an installed system
+version cannot hide differences in the fallback used by a fresh installation.
 
 ```bash
 .venv/bin/ruff check . && .venv/bin/ruff format --check .   # lint + formatting (config in pyproject.toml)

@@ -458,6 +458,9 @@ def _decode(path: Path, offset: int, frames: int, progress: Progress, seek: bool
     cmd = [ffmpeg_path(), '-hide_banner', '-nostdin', '-v', 'error']
     if not seek:  # from the start, like a full decode
         cmd += ['-i', str(path), '-map', '0:a:0', '-vn', '-sn', '-dn']
+        # A chunk offset is relative to the first decoded sample, not container
+        # timestamps (older FFmpeg retains a WebM/Opus start offset here).
+        cmd += ['-af', 'asetpts=PTS-STARTPTS']
         if offset:
             cmd += ['-ss', _seconds(offset)]
     else:

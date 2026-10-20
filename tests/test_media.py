@@ -191,13 +191,18 @@ def test_decode_pcm_chunks_join_like_a_full_decode(name, rate, args, tmp_path, m
     g = ffmpeg.PCM_GRID  # 1920 frames = 0.04 s
     pcm = lambda offset, frames: np.frombuffer(ffmpeg.decode_pcm(src, offset, frames), np.float32).reshape(-1, 2)
     full = pcm(0, 100 * g)
-    assert len(full) == 3 * 48000 and np.abs(full).max() > 0.1
+    # AAC encoders/decoders differ in end padding. Compare with an independent whole-file
+    # decode from the same toolchain, rather than assuming the encoded file has exactly 3 s.
+    reference = tmp_path / 'reference.wav'
+    ffmpeg.decode_reference(src, reference)
+    expected, sr = sf.read(reference, dtype='float32', always_2d=True)
+    assert sr == 48000 and np.array_equal(full, expected) and np.abs(full).max() > 0.1
     # Opus decoders can differ at -150 dB (float rounding of their filter state); every other format: not at all
     same = (lambda a, b: a.shape == b.shape and np.abs(a - b).max() < 1e-6) if name.endswith('webm') else np.array_equal
     first, second = pcm(5 * g, 10 * g), pcm(15 * g, 41 * g)  # 0.2–0.6 s from the start, 0.6–2.24 s by a seek
     assert same(np.concatenate([first, second]), full[5 * g : 56 * g])
-    last = pcm(70 * g, 10 * g)  # 2.8 s: only 0.2 s left
-    assert len(last) == 5 * g and same(last, full[70 * g :])
+    last = pcm(70 * g, 10 * g)  # 2.8 s: the remaining tail includes any codec padding
+    assert same(last, expected[70 * g : 80 * g])
     if name == '48.wav':
         assert ffmpeg.decode_pcm(src, 80 * g, g) == b''  # past the end
         for offset, frames in ((640, g), (0, 640), (0, 0), (-g, g)):

@@ -39,4 +39,21 @@ jobs:
         run: find audiolab/web -name '*.js' -print0 | xargs -0 -n1 node --check
       - name: Launcher syntax
         run: bash -n start.sh && bash -n AudioLab.command
+      - name: Selected media tool
+        run: python -c "from audiolab.media.ffmpeg import ffmpeg_info; print(ffmpeg_info())"
       - run: python -m pytest
+      - name: Bundled FFmpeg comparison playback
+        run: |
+          python - <<'PY'
+          import os
+          import subprocess
+          import sys
+          import imageio_ffmpeg
+          os.environ["AUDIOLAB_FFMPEG"] = imageio_ffmpeg.get_ffmpeg_exe()
+          from audiolab.media.ffmpeg import ffmpeg_info
+          print(ffmpeg_info(), flush=True)
+          subprocess.run(
+              [sys.executable, "-m", "pytest", "tests/test_pcm.py", "tests/test_media.py",
+               "-k", "decode_pcm or webm"], check=True
+          )
+          PY

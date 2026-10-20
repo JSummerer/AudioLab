@@ -53,6 +53,9 @@
   from those levels.
 
 ### Fixed
+- Comparison playback aligns WebM chunks with the full decode when using the bundled FFmpeg as well
+  as newer system builds. Storage totals count hard-linked originals once on Windows. Downloader
+  self-repair no longer treats a later job in the same clock tick as a job waiting for an update.
 - Launcher recovery explains how to rebuild an unusable Python environment and how to retry a failed
   uv bootstrap. The Windows launcher preserves the application's failure exit status after showing it.
 - Removed jobs stay removed even when completion and clearing history happen together. Cancel remains

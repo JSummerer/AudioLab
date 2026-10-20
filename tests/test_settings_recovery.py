@@ -53,8 +53,24 @@ def test_malformed_settings_fall_back_without_overwriting_file(payload):
     assert path.read_bytes() == raw
 
 
-@pytest.mark.parametrize('folder', ['relative/path', '~audiolab-missing-user-for-test/music'])
-def test_invalid_saved_fields_do_not_discard_valid_preferences(folder):
+@pytest.mark.parametrize(
+    'folder, expansion_fails',
+    [('relative/path', False), ('~audiolab-missing-user-for-test/music', True)],
+    ids=['relative-folder', 'unexpandable-folder'],
+)
+def test_invalid_saved_fields_do_not_discard_valid_preferences(folder, expansion_fails, monkeypatch):
+    if expansion_fails:
+        # Windows guesses a sibling profile path for ~user, even if no such user
+        # exists. Exercise an expansion failure explicitly on every platform.
+        original_expanduser = settings.Path.expanduser
+        unexpandable = settings.Path(folder)
+
+        def expanduser(path):
+            if path == unexpandable:
+                raise RuntimeError('Synthetic unknown user')
+            return original_expanduser(path)
+
+        monkeypatch.setattr(settings.Path, 'expanduser', expanduser)
     saved = {
         'theme': 'dark',
         'keep_originals': 'false',

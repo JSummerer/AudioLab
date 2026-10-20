@@ -25,12 +25,13 @@ uv pip sync --python "$BUILD_PYTHON" "$ROOT/packaging/macos/requirements.lock"
 uv pip install --python "$BUILD_PYTHON" --no-deps -e "$ROOT"
 export AUDIOLAB_BUILD_PYTHON="$BUILD_PYTHON"
 export AUDIOLAB_MEDIA_BUILD_DIR="$WORK/media"
+# Obtain all pinned inputs before spending time compiling the media engine.
+"$BUILD_PYTHON" "$ROOT/packaging/macos/third_party.py" fetch --directory "$WORK/media/downloads"
 bash "$ROOT/packaging/macos/build_ffmpeg.sh"
 export AUDIOLAB_PACKAGE_FFMPEG="$WORK/media/install/bin/ffmpeg"
 
 # Exact notices/source companion are assembled before freezing, not downloaded on the user's Mac.
 export AUDIOLAB_PACKAGE_NOTICES="$WORK/ThirdParty"
-"$BUILD_PYTHON" "$ROOT/packaging/macos/third_party.py" fetch --directory "$WORK/media/downloads"
 "$BUILD_PYTHON" "$ROOT/packaging/macos/third_party.py" native-notices \
   --groups media,soundfile,certifi,scipy-runtime,deno-roots \
   --directory "$WORK/media/downloads" --output "$WORK/native-notices"

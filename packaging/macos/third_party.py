@@ -9,16 +9,32 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
 import importlib.metadata
 import json
 import shutil
+import socket
 import tarfile
+import time
+import urllib.error
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 MANIFEST = HERE / 'sources.json'
+DOWNLOAD_ATTEMPTS = 3
+
+
+def temporary_download_error(error: Exception) -> bool:
+    """Retry transport interruptions and temporary HTTP responses, never integrity errors."""
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code in (408, 429, 500, 502, 503, 504)
+    if isinstance(error, urllib.error.URLError):
+        error = error.reason
+    return isinstance(error, (TimeoutError, ConnectionError, http.client.IncompleteRead)) or (
+        isinstance(error, socket.gaierror) and error.errno == socket.EAI_AGAIN
+    )
 
 
 def artifacts(groups: str) -> list[dict]:
@@ -41,16 +57,34 @@ def fetch(groups: str, directory: Path) -> list[dict]:
         if not target.exists():
             partial = target.with_suffix(target.suffix + '.partial')
             request = urllib.request.Request(row['url'], headers={'User-Agent': 'AudioLab-source-archive/1'})
-            with urllib.request.urlopen(request, timeout=120) as response, partial.open('wb') as output:
-                shutil.copyfileobj(response, output)
+            for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+                try:
+                    with urllib.request.urlopen(request, timeout=120) as response, partial.open('wb') as output:
+                        shutil.copyfileobj(response, output)
+                    break
+                except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.IncompleteRead) as error:
+                    detail = f'{row["filename"]} ({row["url"]}), attempt {attempt}/{DOWNLOAD_ATTEMPTS}: {error}'
+                    if attempt == DOWNLOAD_ATTEMPTS or not temporary_download_error(error):
+                        raise RuntimeError(f'Source download failed: {detail}') from error
+                    delay = 2 ** (attempt - 1)
+                    print(f'Retrying source download in {delay}s: {detail}', flush=True)
+                    time.sleep(delay)
             if digest(partial) != row['sha256']:
-                raise RuntimeError(f'Source checksum failed: {row["filename"]}; retained {partial}')
+                raise RuntimeError(f'Source checksum failed: {row["filename"]} ({row["url"]}); retained {partial}')
             partial.replace(target)
         if digest(target) != row['sha256']:
             raise RuntimeError(f'Source checksum failed: {target}')
 
     with ThreadPoolExecutor(max_workers=4) as workers:
-        list(workers.map(fetch_one, rows))
+        pending = [workers.submit(fetch_one, row) for row in rows]
+        try:
+            for future in as_completed(pending):
+                future.result()
+        except Exception:
+            # An unavailable host must not incur retries for every queued source.
+            for future in pending:
+                future.cancel()
+            raise
     print(f'Verified {len(rows)} pinned source archives.', flush=True)
     return rows
 

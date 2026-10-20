@@ -398,10 +398,11 @@ function renderLook() {
 // ---------------------------------------------------------------------------
 function renderDownloads() {
   const dl = store.health?.downloader || {};
+  const canUpdate = dl.update_supported !== false && !store.health?.packaged;
   const age = dl.age_days;
   const stale = dl.ok && age != null && age > STALE_DOWNLOADER_DAYS;
-  const updateBtn = h('button', { type: 'button', class: 'btn btn-key btn-sm', id: 'updateDownloader' }, icon('retry', 14), 'Update downloader');
-  updateBtn.addEventListener('click', async () => {
+  const updateBtn = canUpdate ? h('button', { type: 'button', class: 'btn btn-key btn-sm', id: 'updateDownloader' }, icon('retry', 14), 'Update downloader') : null;
+  updateBtn?.addEventListener('click', async () => {
     updateBtn.disabled = true;
     updateBtn.textContent = 'Updating…';
     try {
@@ -415,15 +416,16 @@ function renderDownloads() {
     }
   });
   fill('downloads',
-    statusRow(dl.ok ? 'ok' : 'bad', 'Downloader (yt-dlp)', dl.ok ? `Version ${dl.version || '?'} — update it if downloads start failing` : 'Not available', updateBtn,
+    statusRow(dl.ok ? 'ok' : 'bad', 'Downloader (yt-dlp)', dl.ok ? `Version ${dl.version || '?'}${canUpdate ? ' — update it if downloads start failing' : ' · built into the app'}` : 'Not available', updateBtn,
       stale ? h('div', { class: 'adv-help nudge' },
-        `This version is ${Math.round(age)} days old. Sites like YouTube change often — updating takes a moment.`) : null),
-    row('Fix the downloader automatically', 'When a download fails because the site changed, update the downloader and try once more.',
+        `This version is ${Math.round(age)} days old. Sites like YouTube change often${canUpdate ? ' — updating takes a moment.' : '.'}`) : null,
+      !canUpdate ? h('div', { class: 'adv-help' }, 'Install a newer AudioLab app to update the built-in downloader. Your Library and output files stay in place.') : null),
+    canUpdate ? row('Fix the downloader automatically', 'When a download fails because the site changed, update the downloader and try once more.',
       switchControl({
         id: 'autoUpdateDownloader',
         checked: (store.settings || {}).auto_update_downloader !== false, label: 'Fix the downloader automatically',
         onChange: (v) => save({ auto_update_downloader: v }),
-      }), { setting: 'auto_update_downloader' }),
+      }), { setting: 'auto_update_downloader' }) : null,
     signInRow(),
     bookmarklet());
 }
@@ -474,6 +476,7 @@ function bookmarklet() {
 function renderSystem() {
   const ff = store.health?.ffmpeg || {};
   const ai = store.health?.ai || {};
+  const canInstall = ai.install_supported !== false && !store.health?.packaged;
   let aiAction = null;
   let aiDetail;
   if (ai.available) {
@@ -482,6 +485,8 @@ function renderSystem() {
     aiDetail = 'Installing… this can take a few minutes.';
   } else {
     aiDetail = ai.reason || 'Not installed. Needed for Split and for Enhance → Best.';
+  }
+  if (!ai.available && !ai.installing && canInstall) {
     // The one main action on this page when it's there (the AI status in the sidebar links here).
     aiAction = h('button', { type: 'button', class: 'btn btn-primary btn-sm', id: 'enableAi' }, icon('download', 14), 'Enable AI features');
     aiAction.addEventListener('click', async () => {
@@ -501,7 +506,9 @@ function renderSystem() {
     h('div', { dataset: { spot: 'ai' } },
       // Not installed is a choice, not a fault: a dim light, not a red one.
       statusRow(ai.available ? 'ok' : ai.installing ? 'on' : 'dim', 'AI add-on', aiDetail, aiAction,
-        !ai.available && !ai.installing ? h('div', { class: 'adv-help' }, 'Adds stem splitting and the “Best” quality for Enhance. It is a one-time download of about 1–2 GB and runs entirely on this computer.') : null),
+        !ai.available && !ai.installing ? h('div', { class: 'adv-help' }, canInstall
+          ? 'Adds stem splitting and the “Best” quality for Enhance. It is a one-time download of about 1–2 GB and runs entirely on this computer.'
+          : 'Save, Convert, Check, and Standard or Light enhancement work in this core app.') : null),
       ai.installing || (ai.install_log && !ai.available) ? h('pre', { class: 'install-log' }, ai.install_log || 'Starting…') : null),
     statusRow(ff.ok ? 'ok' : 'bad', 'Audio engine (ffmpeg)', ff.ok ? `Version ${ff.version || '?'} · ${ff.source === 'bundled' ? 'built in' : 'installed on this computer'}` : (ff.error || 'Not found')));
 }
@@ -601,12 +608,27 @@ function originalsRow(d) {
 // ---------------------------------------------------------------------------
 function renderAbout() {
   const hth = store.health || {};
+  const folderActions = hth.local ? h('div', { class: 'block-actions' },
+    [
+      ['/api/reveal-data', 'Open app data', 'openAppData'],
+      ['/api/reveal-logs', 'Open logs', 'openLogs'],
+    ].map(([path, label, id]) => h('button', {
+      type: 'button', class: 'btn btn-ghost btn-sm', id,
+      onclick: async () => {
+        try { await api(path, { method: 'POST' }); } catch (e) { toastError(e); }
+      },
+    }, icon('folder', 14), label))) : null;
   fill('about',
     h('dl', { class: 'facts' },
       [h('dt', null, 'Version'), h('dd', null, `${appName()} ${hth.version || ''}`)],
       hth.output_dir ? [h('dt', null, 'Output folder'), h('dd', null, pathValue(hth.output_dir, 'output folder', 'copyOutputDir'))] : null,
       hth.data_dir ? [h('dt', null, 'Work folder'), h('dd', null, pathValue(hth.data_dir, 'work folder', 'copyDataDir'))] : null,
+      hth.logs_dir ? [h('dt', null, 'Logs folder'), h('dd', null, pathValue(hth.logs_dir, 'logs folder', 'copyLogsDir'))] : null,
       hth.limits?.max_duration_s ? [h('dt', null, 'Longest allowed'), h('dd', null, durationLimit(hth.limits.max_duration_s))] : null),
+    folderActions,
+    hth.packaged ? row('Remove AudioLab',
+      'Quit AudioLab, then move AudioLab.app to Trash in Finder. For optional cleanup, open the app data and logs folders first. '
+      + 'Deleting app data removes your Library, settings and kept originals. Keep your output files unless you want to delete them too.') : null,
     h('div', { class: 'block-actions' },
       h('button', { type: 'button', class: 'btn btn-ghost btn-sm', id: 'copyReport', onclick: () => copyDiagnostics() }, icon('clipboard', 15), 'Copy system report'),
       h('span', { class: 'muted small' }, 'For bug reports: versions, tools and recent log lines. No tokens.')));

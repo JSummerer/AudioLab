@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "runtime": {
+    "name": "deno",
+    "version": "2.9.7",
+    "target": "aarch64-apple-darwin",
+    "sha256": "b73737579d5a84c160e3316487594783fa5c15f4e13252a6a07050b755317f1a"
+  },
+  "complete": true,
+  "generator": {
+    "cargo_about": "0.9.2",
+    "rust_toolchain": "1.95.0",
+    "target": "aarch64-apple-darwin"
+  },
+  "production_rust_crates": 821,
+  "original_rust_license_texts": 381,
+  "native_original_notice_texts": 182,
+  "v8_revision": "ac1e23989121713ca642f6650b34deff7b686896",
+  "typescript": {
+    "version": "6.0.3",
+    "url": "https://raw.githubusercontent.com/microsoft/TypeScript/v6.0.3/LICENSE.txt",
+    "sha256": "a7d00bfd54525bc694b6e32f64c7ebcf5e6b7ae3657be5cc12767bce74654a47"
+  },
+  "coverage": "Default V8 production Rust graph; original native notice union at exact source pins, with duplicate texts deduplicated. Source union does not assert every optional native file is linked.",
+  "source_reconstruction_group": "deno-reconstruction",
+  "files": {
+    "DENO-LICENSE.md": "f62497fffecc0852960c8d3e6934b9db86d16396e9b604072e923892cae3a588",
+    "GLIBC-MATH-NOTICE.txt": "5f1e11bb398ed6c1c5df3e4cdc8bb743bc3b10ad0e443bfa03ecaa2fda343147",
+    "NATIVE_COMPONENTS.json": "6f73d2813210c6ee98263efeca5435ab4b10cf344992fd015a07a8dc44bf5a90",
+    "NATIVE_NOTICES.txt": "562f9c6db33d45b6ba688da0906e02305e1e88b5d8b4c113a02b44973c99335d",
+    "RUST_CRATES.json": "bd78e37d9b6e3f001ee3cf4b3bf971ff46f652d6ea352d3f0c5444ae261bee43",
+    "RUST_NOTICES.txt": "0df0c9e0db7a12fd0f23ccc99c15a8eb653784be4e746ab24b8f63477c1b1a5f",
+    "SOURCE-REBUILD.md": "9960bb09f10aa335311df7d627cb63d701bdb23e3a30cbd3588983f06ae8e79a",
+    "deno-original/LICENSE.md": "f62497fffecc0852960c8d3e6934b9db86d16396e9b604072e923892cae3a588",
+    "deno-original/cli/tsc/dts/node/LICENSE": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+    "deno-original/cli/tsc/dts/node/undici/LICENSE": "a6db8096b2707bc0102d256917d4d33f298ba36d8c3f25de067a2b5bb379db27",
+    "deno-original/ext/webgpu/LICENSE.md": "f62497fffecc0852960c8d3e6934b9db86d16396e9b604072e923892cae3a588",
+    "rust-standard/COPYRIGHT": "172020dbfd5b53a226dfde77616190a48dcff519b0bc0e6deb91a8450782c4af",
+    "rust-standard/COPYRIGHT-library.html": "90567e2718bf7fd65a71a3a43c5596488e80e5f51ed02bfea6fec54458b5f3d1",
+    "rust-standard/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "rust-standard/LICENSE-MIT": "b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1",
+    "typescript/LICENSE.txt": "a7d00bfd54525bc694b6e32f64c7ebcf5e6b7ae3657be5cc12767bce74654a47",
+    "typescript/NOTICE.txt": "67165f468e918227992bb398931fdc1517c5afa04eda950c0daa6d1bff7cfa4b"
+  }
+}

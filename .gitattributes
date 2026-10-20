@@ -4,3 +4,5 @@
 *.bat text eol=crlf
 *.icns binary
 *.png binary
+# Preserve original notice bytes: their hashes are checked before packaging.
+packaging/macos/notices/** -text -whitespace

@@ -35,6 +35,7 @@ line and the Docker image.
 |---|---|
 | `__init__.py` | Brand (`APP_NAME`, `APP_SLUG`) and version — see "Renaming" below |
 | `desktop.py` | Starts the app: picks a free port, runs the server, opens the native window (pywebview; default on macOS) or the browser, one instance per data folder, clean quit |
+| `runtime.py` | Source/frozen-runtime boundary: packaged downloader command, private bundled-tool lookup, certificate trust and app-owned cache/temp setup before helpers start; source mode retains its existing environment |
 | `cli.py` | `audiolab [app\|serve\|download\|enhance\|separate\|analyze\|doctor\|update\|install-ai\|shortcut]` |
 | `api/` | FastAPI app (`app.py`: `create_app`, lifespan, error format, static UI), `security.py` (local-mode Host/Origin checks, token, upload cap), `state.py` (per-app runtime state: manager, live-event hub, caches, health), `jobs.py` (probe + job routes, files, ZIP, excerpt PCM), `status.py` (health, settings, storage, diagnostics, maintenance), `events.py` (SSE), `library.py` (Library list and entries, files, PCM chunks for comparing, removal) |
 | `jobs.py` | Job records, FIFO queue, worker threads, cancel/retry, restart recovery, event fan-out, the one bounded `shutdown()` |
@@ -61,6 +62,27 @@ Everything that differs between macOS, Windows and Linux lives in `system.py`; o
 functions and never branch on the platform themselves. The only exceptions are the Windows ffmpeg shim
 in `media/ffmpeg.py` (the `.exe` suffix and copying instead of symlinking), and `cli.py`, which prints
 the platform in `doctor`. Porting a feature to another OS means filling in its branch in `system.py`.
+
+### Self-contained macOS Core build
+
+The source launchers remain for development and optional AI. The downloadable Core app has a separate
+entry, `packaging/macos/entry.py`, frozen with the spec and pinned build inputs in `packaging/macos/`.
+It starts the same native window/server/task pipeline without `start.sh`, uv, pip or a user's Python.
+Its private downloader mode dispatches yt-dlp inside the frozen executable; that executable is not a
+general-purpose Python interpreter. `runtime.py` chooses this mode and the bundled FFmpeg/Deno.
+
+Core exposes Save/Convert, Check and Light/Standard Enhance. AI dependencies/weights are excluded;
+Split, Best, package installation and downloader self-updates are refused in packaged mode. Health
+capabilities let the UI explain this boundary; server validation also enforces it. Source/CLI/Docker
+keep their existing optional-AI and update paths. Replace the whole app to update the binary delivery.
+
+The initial release target is macOS 14+ arm64 with identifier `io.github.jsummerer.audiolab`. The build
+produces an ad-hoc-signed `.app`/DMG, checksums and a corresponding third-party source companion.
+It has no Developer ID or Apple notarization. The build's selected FFmpeg is compiled from its
+recorded LGPL sources rather than using the source setup's imageio fallback. See the
+[packaging guide](../packaging/macos/README.md) for build inputs, licensing and artifact checks, and
+the [Mac guide](MACOS.md) for the tester's installation/update/uninstall path. Native artifact checks
+and fresh-download Gatekeeper checks are separate from ordinary source regressions.
 
 ## The web UI (`audiolab/web/`)
 
@@ -181,7 +203,15 @@ audio array to the chain rather than retaining a second obsolete buffer through 
 | Jobs, settings, tool shims | macOS `~/Library/Application Support/AudioLab`, Linux `~/.local/share/audiolab`, Windows `%LOCALAPPDATA%\AudioLab` (`AUDIOLAB_DATA_DIR`) |
 | Library records and kept originals | `<data>/library/` (`originals/` = the downloaded stream or uploaded file, as it came; cleared in Settings → Storage) |
 | Log file | macOS `~/Library/Logs/AudioLab`, elsewhere (and with a custom data folder) `<data>/logs` |
-| AI models | torch hub cache (`~/.cache/torch`, `TORCH_HOME`) |
+| Packaged Core caches/temp | `<data>/cache/yt-dlp`, `<data>/cache/deno`, `<data>/cache/tmp`; configured by `runtime.py` before use |
+| Native WebKit website data | macOS-managed default Cocoa website store under the app identity; separate from app data (see [Mac cleanup](MACOS.md#uninstall)) |
+| Source-mode AI models | Hugging Face cache (`HF_HOME` / `HF_HUB_CACHE`) and/or Torch hub (`~/.cache/torch`, `TORCH_HOME`); can be shared with other software |
+
+Output is user-owned and is never deleted by removing jobs, Library records or the app. App data also
+contains user audio copies: do not treat the whole folder as a disposable cache. Settings → About
+opens the actual app data/log folders for optional manual cleanup. The app has no recursive uninstall
+endpoint; a chosen output folder can overlap a custom data path, so automatic root deletion would be
+unsafe. The Core app's cache setup does not redirect `HOME` or claim to contain all macOS/WebKit data.
 
 ## Renaming
 
@@ -190,10 +220,12 @@ distribution is currently named `audiolab-app` until a final name is chosen. To 
 
 1. `audiolab/__init__.py`: `APP_NAME` (window/tab titles, CLI, UI header, app bundle, output folder, and
    the data folder on macOS and Windows — the web UI reads it from `/api/health`) and `APP_SLUG` (the
-   Linux data folder, `<SLUG>_` environment-variable prefix, bundle id).
+   Linux data folder and `<SLUG>_` environment-variable prefix).
 2. `pyproject.toml`: `name` (must be free on PyPI) and the console-script name under `[project.scripts]`.
 3. Launchers and containers: `AudioLab.command`, `start.sh`, `start.bat`, `docker/` (image/container
    names, `AUDIOLAB_*` variables).
+   Update the packaged identifier and artifact names in `packaging/macos/` separately; keep the
+   identifier stable across releases so macOS can associate native app data with the same app.
 4. Docs: README, this file, `docs/API.md` (`X-AudioLab-Token` header, also in `api/security.py` and
    `web/js/api.js`).
 5. `grep -rni audiolab audiolab/` for the few remaining literals (some error messages, the

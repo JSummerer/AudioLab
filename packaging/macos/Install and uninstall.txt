@@ -1,0 +1,39 @@
+AudioLab — core tester app
+
+INSTALL
+Drag AudioLab.app to Applications. Eject this disk image, then open AudioLab
+from Applications. No Terminal, Python installation or account is needed.
+
+This personal tester build is not verified/notarized by Apple. If macOS blocks
+it, first check that you downloaded it from JSummerer/AudioLab on GitHub.
+If you choose to trust it, open System Settings > Privacy & Security, find the
+blocked AudioLab entry, click Open Anyway, and follow macOS's confirmation.
+Do not disable Gatekeeper or run commands that remove security protections.
+
+The core app includes Save/Convert, Check and Light/Standard Enhance.
+Split and Best enhancement are not included. The app downloads no AI models.
+
+UPDATE
+Quit AudioLab and replace AudioLab.app with the newer copy from GitHub Releases.
+Your recordings and Library remain separate from the application.
+
+UNINSTALL
+Quit AudioLab and move AudioLab.app to the Trash.
+To also remove AudioLab's settings, Library and kept original copies, first use
+Settings > About > Open app data / Open logs. After quitting,
+move the AudioLab folders shown there to the Trash if you no longer need them.
+Keep any audio you want before removing app data. Your finished recordings
+(normally Music/AudioLab) are your files and are not automatically removed.
+
+macOS may retain its own WebKit caches, preferences and system records.
+Detailed optional cleanup paths and troubleshooting:
+https://github.com/JSummerer/AudioLab/blob/main/docs/MACOS.md
+
+Downloads and feedback:
+https://github.com/JSummerer/AudioLab/releases
+
+LICENSES
+AudioLab's source is MIT licensed. Its dependencies retain their own licenses.
+In Finder, right-click AudioLab.app > Show Package Contents > Contents > Resources:
+LICENSE covers AudioLab, and ThirdParty contains the dependency notices.
+Matching third-party sources and build instructions are a separate release download.

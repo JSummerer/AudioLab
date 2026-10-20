@@ -5,6 +5,7 @@ import plistlib
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -109,3 +110,26 @@ def test_shortcut_elsewhere_is_not_available_yet(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, 'platform', 'linux')
     with pytest.raises(NotImplementedError):
         system.install_shortcut(['x'], icon=APP_ICON, version='1', dest=tmp_path)
+
+
+@pytest.mark.parametrize('identifier', ['io.github.jsummerer.audiolab', 'another.app', None, 'malformed'])
+def test_source_shortcut_preserves_unrecognized_apps(tmp_path, monkeypatch, identifier):
+    from audiolab import cli
+
+    monkeypatch.setattr(system, 'sys', SimpleNamespace(platform='darwin'))
+    monkeypatch.setattr(cli, 'is_packaged', lambda: False)
+    monkeypatch.setattr(cli, '_app_command', lambda: (['/not-executed'], None, ''))
+    app = tmp_path / f'{APP_NAME}.app'
+    contents = app / 'Contents'
+    contents.mkdir(parents=True)
+    info = contents / 'Info.plist'
+    if identifier == 'malformed':
+        info.write_bytes(b'broken plist')
+    elif identifier is not None:
+        info.write_bytes(plistlib.dumps({'CFBundleIdentifier': identifier}))
+    marker = contents / 'valuable-file'
+    marker.write_text('preserve')
+    before = {str(p.relative_to(app)): p.read_bytes() for p in app.rglob('*') if p.is_file()}
+    assert cli.cmd_shortcut(SimpleNamespace(dest=tmp_path)) == 1
+    assert {str(p.relative_to(app)): p.read_bytes() for p in app.rglob('*') if p.is_file()} == before
+    assert list(tmp_path.iterdir()) == [app]

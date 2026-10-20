@@ -513,13 +513,25 @@ def install_shortcut(
     """Add the app to the system's app list so it opens like any other app. macOS: writes
     `~/Applications/<name>.app` (or into `dest`), a small bundle whose launcher runs `command`
     (in `folder`, when given) and shows `missing` when command[0] is gone (folder moved or
-    deleted). Re-running replaces the bundle. Returns its path.
+    deleted). Re-running replaces only a recognized source launcher. Returns its path.
+    Raises FileExistsError if another app already occupies the destination.
     Raises NotImplementedError elsewhere (Windows .lnk / Linux .desktop: not yet)."""
     if sys.platform != 'darwin':
         raise NotImplementedError('An app shortcut can only be created on macOS so far.')
     dest = Path(dest) if dest else Path.home() / 'Applications'
-    dest.mkdir(parents=True, exist_ok=True)
     app = dest / f'{APP_NAME}.app'
+    if os.path.lexists(app):
+        try:
+            with (app / 'Contents/Info.plist').open('rb') as stream:
+                identifier = plistlib.load(stream).get('CFBundleIdentifier')
+        except (OSError, ValueError, TypeError, AttributeError):
+            identifier = None
+        if app.is_symlink() or identifier != f'org.{APP_SLUG}.app':
+            raise FileExistsError(
+                f'An existing app at {app} is not an {APP_NAME} source launcher. '
+                'It was left untouched. Move it yourself if you want a source launcher there.'
+            )
+    dest.mkdir(parents=True, exist_ok=True)
     # Built under a unique hidden name (no ".app" ending, so not listed as an app), then swapped in.
     tmp = Path(tempfile.mkdtemp(dir=dest, prefix=f'.{APP_NAME}.app.'))
     old = tmp.with_name(tmp.name + '.old')

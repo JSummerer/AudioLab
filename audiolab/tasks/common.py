@@ -15,6 +15,7 @@ from ..context import Progress, TaskContext
 from ..errors import AudioLabError, storage_error
 from ..media import export, ffmpeg, youtube
 from ..resources import preflight
+from ..runtime import is_packaged
 from ..settings import SETTINGS
 from ..util import PLAYABLE_EXT, human_bytes, human_duration, sanitize_filename, unique_path
 
@@ -137,7 +138,7 @@ def _acquire(
         try:
             return _acquire_url(ctx, source, progress, task, quality, video, device)
         except AudioLabError as e:
-            if e.fix != 'update_downloader' or not SETTINGS.get().auto_update_downloader:
+            if is_packaged() or e.fix != 'update_downloader' or not SETTINGS.get().auto_update_downloader:
                 raise
             progress(2, 'Updating the downloader and trying again…')
             update = youtube.self_repair_update()

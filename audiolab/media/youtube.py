@@ -1,8 +1,8 @@
 """yt-dlp integration: probing links, downloading audio/video, thumbnails,
 and keeping the downloader itself up to date.
 
-yt-dlp always runs as `python -m yt_dlp` from AudioLab's own environment (no
-PATH lottery), with our ffmpeg directory and — for YouTube — the deno
+yt-dlp runs in AudioLab's own environment, or in the packaged app's private
+downloader mode, with our ffmpeg directory and — for YouTube — the deno
 JavaScript runtime that recent YouTube extraction requires.
 """
 
@@ -19,8 +19,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from .. import runtime
 from ..context import Progress
-from ..errors import AudioLabError, Cancelled, DownloadError
+from ..errors import AudioLabError, Cancelled, DownloadError, ToolMissingError
 from ..settings import LIMITS, SETTINGS
 from ..util import human_duration, unique_path
 from . import export, proc
@@ -306,18 +307,27 @@ def tracklist_problem(errors: list[dict[str, Any]]) -> str:
 # yt-dlp invocation
 # ---------------------------------------------------------------------------
 def ytdlp_version() -> str | None:
+    if not runtime.is_packaged():
+        try:
+            return importlib.metadata.version('yt-dlp')
+        except importlib.metadata.PackageNotFoundError:
+            pass
     try:
-        return importlib.metadata.version('yt-dlp')
-    except importlib.metadata.PackageNotFoundError:
-        pass
-    try:
-        res = proc.run([sys.executable, '-m', 'yt_dlp', '--version'], timeout_s=30, what='downloader check')
+        res = proc.run([*runtime.downloader_command(), '--version'], timeout_s=30, what='downloader check')
         return res.stdout.strip() or None if res.returncode == 0 else None
     except Exception:
         return None
 
 
 def _deno_path() -> str | None:
+    if runtime.is_packaged():
+        path = runtime.bundled_tool('deno')
+        if path is None:
+            raise ToolMissingError(
+                'The app is missing its JavaScript engine for web downloads.',
+                hints=['Replace the AudioLab app with a fresh copy.'],
+            )
+        return str(path)
     try:
         import deno
 
@@ -330,10 +340,10 @@ def _deno_path() -> str | None:
 def ytdlp_cmd() -> list[str]:
     """Base yt-dlp command line with AudioLab's tool locations."""
     cmd = [
-        sys.executable,
-        '-m',
-        'yt_dlp',
+        *runtime.downloader_command(),
         '--ignore-config',
+        '--cache-dir',
+        str(SETTINGS.data_dir / 'cache' / 'yt-dlp'),
         '--color',
         'never',
         '--socket-timeout',
@@ -351,6 +361,12 @@ def ytdlp_cmd() -> list[str]:
 
 
 _UPDATE_HINT = 'Update the downloader: Settings → Downloads & sign-in → "Update downloader".'
+
+
+def _update_hint() -> str:
+    return 'Install a newer AudioLab app to update its built-in downloader.' if runtime.is_packaged() else _UPDATE_HINT
+
+
 _SIGN_IN_HINT = (
     'Settings → Downloads & sign-in → "YouTube sign-in": pick the browser you use YouTube in '
     '(Firefox works most reliably).'
@@ -473,13 +489,13 @@ def _friendly_error(stderr: str, url: str) -> DownloadError:
                 [
                     f'Open YouTube in {name}, check that you are signed in, then try again.',
                     'Or wait a while (often 30–60 minutes).',
-                    _UPDATE_HINT,
+                    _update_hint(),
                 ],
                 fix='update_downloader',
             )
         return e(
             "YouTube is asking to confirm this isn't a bot, so the download was blocked.",
-            [_SIGN_IN_HINT, 'Or wait a while (often 30–60 minutes) and try again.', _UPDATE_HINT],
+            [_SIGN_IN_HINT, 'Or wait a while (often 30–60 minutes) and try again.', _update_hint()],
             fix='use_cookies',
         )
     if 'confirm your age' in low or 'age-restricted' in low or 'inappropriate for some users' in low:
@@ -556,7 +572,7 @@ def _friendly_error(stderr: str, url: str) -> DownloadError:
     if 'http error 403' in low:
         return e(
             'The site refused the download (HTTP 403). This usually means the downloader needs an update.',
-            [_UPDATE_HINT, 'Then try again.'],
+            [_update_hint(), 'Then try again.'],
             fix='update_downloader',
         )
     if any(
@@ -601,7 +617,7 @@ def _friendly_error(stderr: str, url: str) -> DownloadError:
         return e(
             "The site changed something and the downloader can't read it right now.",
             [
-                _UPDATE_HINT,
+                _update_hint(),
                 'If it still fails after updating, the site may need a fix upstream — try again in a day or two.',
             ],
             fix='update_downloader',
@@ -610,7 +626,9 @@ def _friendly_error(stderr: str, url: str) -> DownloadError:
         "The download didn't work.",
         [
             'Check that the link opens in your browser, and try again later.',
-            'If it keeps happening, update the downloader: Settings → Downloads & sign-in → "Update downloader".',
+            _update_hint()
+            if runtime.is_packaged()
+            else 'If it keeps happening, update the downloader: Settings → Downloads & sign-in → "Update downloader".',
         ],
     )
 
@@ -654,7 +672,7 @@ def probe(url: str, progress: Progress | None = None) -> dict[str, Any]:
     except (json.JSONDecodeError, ValueError) as e:
         raise DownloadError(
             'The downloader returned unreadable information for this link.',
-            hints=[_UPDATE_HINT],
+            hints=[_update_hint()],
             fix='update_downloader',
         ) from e
     progress(100)
@@ -886,7 +904,7 @@ def _download(
     if 'larger than max-filesize' in (res.stdout + res.stderr_tail).lower():
         raise _friendly_error('larger than max-filesize', norm)
     raise DownloadError(
-        'The download finished but no file was produced.', hints=['Try again.', _UPDATE_HINT], fix='update_downloader'
+        'The download finished but no file was produced.', hints=['Try again.', _update_hint()], fix='update_downloader'
     )
 
 
@@ -1016,6 +1034,11 @@ def download_thumbnail(thumb_url: str, dest_jpg: Path, progress: Progress | None
 # ---------------------------------------------------------------------------
 def update_ytdlp(progress: Progress | None = None) -> dict[str, Any]:
     """Upgrade yt-dlp (+ its YouTube helpers) inside AudioLab's environment."""
+    if runtime.is_packaged():
+        raise AudioLabError(
+            'The downloader is built into this AudioLab app.',
+            hints=['Install a newer AudioLab app to update it. Your Library and output files stay in place.'],
+        )
     progress = progress or Progress.null()
     before = ytdlp_version()
     progress(5, 'Updating the downloader…')
@@ -1074,6 +1097,8 @@ def self_repair_update() -> tuple[str, str] | None:
     else None. A job that waited here while another job ran the update gets that
     update's result. Deliberately not cancellable: killing pip mid-install can leave
     no downloader at all."""
+    if runtime.is_packaged():
+        return None
     generation = _last_repair.get('generation', 0)
     called = time.monotonic()
     with _repair_lock:

@@ -1,8 +1,22 @@
 # Changelog
 
-## 2.4.0 (unreleased)
+## 2.4.0b1 (prerelease candidate)
 
 ### Changed
+- Self-contained **macOS Core** beta build and GitHub prerelease delivery path: Python, FFmpeg and
+  Deno travel with the app, with no tester-side Terminal/Python setup. The initial target is macOS
+  14+ on Apple silicon; Intel support remains unqualified. The app uses ad-hoc signing without
+  Apple Developer ID or notarization. Release notes record artifact validation/publication separately.
+- Core includes Save/Convert, Check, Light/Standard Enhance and the Library. Split and Best are
+  unavailable in this package; source installations retain optional AI. Core updates by replacing
+  the app, with no in-app AI installer or automatic pip/downloader package update.
+- Packaged downloader/runtime caches and temporary files stay below the app-data folder; macOS
+  still manages native WebKit data separately. About can open app data and logs. The Mac guide
+  covers the graphical first opening, updates and optional cleanup while preserving output and
+  explaining that app data includes Library/settings and valuable kept originals.
+- The source launcher only replaces its own recognized shortcut. It preserves existing packaged or
+  unrelated apps with the same name. The packaged app refuses the source-only shortcut command.
+  Unavailable maintenance commands explain the next step without a Python traceback.
 - Public source beta with a clean repository history, contributor and security guidance, and automated
   macOS/Windows/Linux regression checks.
 - Public introduction and package description now focus on local audio files and supported links.
@@ -47,7 +61,8 @@
   "Clear finished" asks first.
 - Error notices also say what you can try. Settings refuse values they can't use instead of quietly saving
   something else; the output folder must be a full path, for example `~/Music/AudioLab`.
-- The macOS app needs macOS 11.3 or newer.
+- The source native-window integration uses macOS APIs from 11.3; installed dependencies can impose
+  newer requirements. The self-contained Core beta targets macOS 14 or newer.
 - Noise reduction is now an explicit choice (Off, Light or Strong). Quiet programme levels cannot reliably
   identify background noise, so the voice recipe no longer switches it on automatically or diagnoses noise
   from those levels.

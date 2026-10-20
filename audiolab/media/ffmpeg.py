@@ -20,6 +20,7 @@ import numpy as np
 
 from ..context import Progress
 from ..errors import AudioLabError, ToolMissingError, storage_error_in
+from ..runtime import bundled_tool, is_packaged
 from ..settings import ENV_PREFIX, LIMITS, SETTINGS
 from . import proc
 
@@ -58,6 +59,16 @@ def _runs(path: str) -> str | None:
 
 @lru_cache(maxsize=1)
 def _locate() -> dict[str, str | None]:
+    if is_packaged():
+        # A self-contained app uses its tested engine, not another application's installation.
+        path = bundled_tool('ffmpeg')
+        version = _runs(str(path)) if path else None
+        return {
+            'path': str(path) if path and version else None,
+            'version': version,
+            'source': 'bundled',
+            'error': None if version else 'The built-in audio engine could not start. Download AudioLab again.',
+        }
     bundled = None
     try:
         import imageio_ffmpeg

@@ -1,0 +1,2 @@
+https://files.pythonhosted.org/packages/a5/78/abc4ce5920305780aeb36b4067a86253378b36e29ba96673a3deb02eb03a/pyobjc_core-12.2.2.tar.gz
+SHA256 3906452339cd06a3bb07df103c2511d4cb0f7a22d8771c0b802eba15d9a642b6

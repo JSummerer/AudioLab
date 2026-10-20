@@ -254,9 +254,11 @@ automatically replacing the saved file.
 | `DELETE /api/library/originals` | – | `{"deleted": n, "freed_bytes": b}` — "Delete kept originals" (Storage): deletes every kept original (only AudioLab's own files in that folder); the entries stay and are detached (`original.kept: false`, also if the same recording is kept again later) |
 | `POST /api/jobs/{id}/reveal` | – | opens the job's output folder (only when `health.local`): `{"ok": true}`; when it was moved or deleted, the output root instead: `{"ok": true, "fallback": "output"}` (say so); a job without a folder opens the output root (`{"ok": true}`). Neither there → `400` "This folder isn't there any more: <path>." with hints. Never creates a folder |
 | `POST /api/reveal-output` | – | `{"ok": true}` opens the output root folder — made first when it doesn't exist yet (before the first result). It can't be made (`health.output_dir_ok` false, e.g. a drive that isn't connected) → `400` "The output folder isn't available: …" with hints |
-| `POST /api/system/update-downloader` | – | `{"ok", "before", "after", "message"}` (takes ~10–60 s) |
-| `POST /api/system/install-ai` | – | `{"ok": true}` starts the AI pack install; watch `system` events / health |
-| `GET /api/storage` | – | `{"jobs_bytes", "job_count", "finished_bytes", "finished_count", "models_bytes", "library_count", "originals_bytes", "originals_count"}` — space used by AudioLab's own data (not your output files). `originals_*`: the kept originals (clear them with `DELETE /api/library/originals`). Disk space is counted once: an upload's kept original is a hard link to its job's input file, so it counts in `originals_bytes` only, and `freed_bytes` (here and in the Library deletes) counts only files whose last link went — deleting a kept original frees nothing while its job still holds the upload |
+| `POST /api/reveal-data` | – | `{"ok": true}` opens AudioLab's app data folder (Library, settings, kept originals and caches). Local mode only; `403` remotely. The target is fixed: no client-supplied path is used |
+| `POST /api/reveal-logs` | – | `{"ok": true}` opens AudioLab's logs folder. Local mode only; `403` remotely, `400` if the logs folder does not exist. The target is fixed: no client-supplied path is used. No files are deleted |
+| `POST /api/system/update-downloader` | – | `{"ok", "before", "after", "message"}` (takes ~10–60 s). When `health.downloader.update_supported` is false, returns `400` with instructions to replace the app, before any package installer is started |
+| `POST /api/system/install-ai` | – | `{"ok": true}` starts the AI pack install; watch `system` events / health. When `health.ai.install_supported` is false, returns `400` explaining that AI cannot be added to this core app, before any installer is started |
+| `GET /api/storage` | – | `{"jobs_bytes", "job_count", "finished_bytes", "finished_count", "models_bytes", "library_count", "originals_bytes", "originals_count"}` — app data usage (not your output files). `models_bytes` is zero in Core, without scanning shared AI caches; source installs count the Torch model cache, which other tools may share. `originals_*`: the kept originals (clear them with `DELETE /api/library/originals`). Disk space is counted once: an upload's kept original is a hard link to its job's input file, so it counts in `originals_bytes` only, and `freed_bytes` (here and in the Library deletes) counts only files whose last link went — deleting a kept original frees nothing while its job still holds the upload |
 | `GET /api/diagnostics` | `?job=<id>` optional | `text/plain` report for bug reports: versions, platform, tools, limits, settings (except the output path, shown separately), recent log lines (+ that job's journal). No tokens or file contents |
 | `GET /api/events` | – | Server-Sent Events (below) |
 
@@ -277,12 +279,12 @@ detail.
 ### Health
 ```jsonc
 {
-  "app": "AudioLab", "version": "2.3.0", "local": true,
+  "app": "AudioLab", "version": "2.4.0b1", "local": true, "packaged": false,
   "ffmpeg": {"ok": true, "version": "7.1", "source": "system" | "bundled", "error": null},
-  "downloader": {"ok": true, "version": "2026.08.19", "age_days": 47},   // age from the version date
-  "ai": {"available": false, "device": null, "reason": "AI pack not installed", "installing": false,
+  "downloader": {"ok": true, "version": "2026.08.19", "age_days": 47, "update_supported": true},
+  "ai": {"available": false, "device": null, "reason": "AI pack not installed", "install_supported": true, "installing": false,
          "install_log": "…last lines…"},
-  "output_dir": "/Users/me/Music/AudioLab", "output_dir_ok": true, "data_dir": "…",
+  "output_dir": "/Users/me/Music/AudioLab", "output_dir_ok": true, "data_dir": "…", "logs_dir": "…",
   "upload_extensions": [".3gp", ".aac", ".ac3", "…", ".wv"],   // sorted, with the dot: what `file` accepts
   "limits": {"max_upload_mb": 4096, "max_duration_s": 28800, "max_playlist_items": 200},
   "recipes": [{"key": "club", "name": "Club / DJ set", "short": "Punchy, loud, tight bass", "description": "…"}],
@@ -308,6 +310,17 @@ the UI's file picker and drop check use this one list.
 `output_dir_ok`: the output folder is there and writable, or can be made. `false` (e.g. on a drive that isn't
 connected): show a notice pointing to Settings → Files. Settings still load and save; jobs that write files fail
 before they start ("The output folder isn't available: …"); Check still works.
+`packaged`: the self-contained core app, with its own Python runtime, FFmpeg, Deno and downloader.
+It reports `ai.available: false`, `ai.install_supported: false`, and `downloader.update_supported: false`.
+Split and Best enhancement are unavailable; Save, Convert, Check, and Standard/Light enhancement remain available.
+The UI must suppress install/update actions and explain that replacing the app updates the downloader. Source
+installs keep the existing pip/uv maintenance behavior (`install_supported` and `update_supported` are true).
+`downloader.age_days` is calculated from its version date. In the packaged app, the version is read through
+the actual downloader worker. yt-dlp's cache is always under `<data>/cache/yt-dlp`; packaged Deno and temporary
+files also use `<data>/cache`, and direct HTTPS uses bundled certificate data.
+`data_dir` and `logs_dir` identify the fixed reveal targets. The two reveal actions only open folders: they do
+not uninstall the app or delete data. Optional manual deletion of app data also removes Library entries,
+settings and kept originals; output files at their existing locations are separate.
 
 ### Settings
 `{"output_dir", "download_format", "enhance_formats": [..], "separate_format", "ui_mode": "simple|advanced",
@@ -326,6 +339,8 @@ Split results no longer keep one (those kept before 2.4 stay until deleted).)
 "confirm you're not a bot" blocks. Only offered when `health.local`; Firefox works most reliably.
 Errors that need it carry `"fix": "use_cookies"`.)
 (`locked` lists keys pinned by environment variables — show them read-only.)
+(`auto_update_downloader`: retained as a preference across app replacements. It is effective only when
+`health.downloader.update_supported` is true; the packaged app never attempts an in-place package update.)
 
 ### Probe
 ```jsonc

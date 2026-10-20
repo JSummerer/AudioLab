@@ -14,15 +14,25 @@ import time
 from collections import deque
 from collections.abc import Callable
 
-from .. import APP_NAME, system
+from .. import APP_NAME, runtime, system
 from ..diagnostics import log_file
+from ..errors import AudioLabError
 
 AI_PACKAGES = ['torch>=2.1', 'demucs>=4.1']
 STALE_PID_S = 6 * 3600  # an older pid file is from a long-finished install (its pid may be reused)
 
 
+def require_install_supported() -> None:
+    if runtime.is_packaged():
+        raise AudioLabError(
+            'AI features cannot be added to this core AudioLab app.',
+            hints=['Save, Convert, Check, and Standard or Light enhancement work in this app.'],
+        )
+
+
 def install_command() -> list[str]:
     """pip (or uv) command that installs the AI pack for this Python."""
+    require_install_supported()
     if importlib.util.find_spec('pip') is not None:
         return [sys.executable, '-m', 'pip', 'install', '--progress-bar', 'off', *AI_PACKAGES]
     uv = shutil.which('uv')
@@ -62,6 +72,8 @@ class AIInstaller:
             return False
 
     def status(self) -> dict[str, object]:
+        if runtime.is_packaged():
+            return {'installing': False, 'install_ok': None, 'install_log': ''}
         log = '\n'.join(self.log)
         installing = self.running or self._left_running()
         if installing and not self.running:
@@ -72,6 +84,7 @@ class AIInstaller:
         return {'installing': installing, 'install_ok': self.ok, 'install_log': log}
 
     def start(self, on_done: Callable[[bool], None]) -> bool:
+        require_install_supported()
         with self._lock:
             if self.running or self._left_running():
                 return False

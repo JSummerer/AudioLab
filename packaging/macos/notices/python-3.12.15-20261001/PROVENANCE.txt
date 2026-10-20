@@ -1,0 +1,4 @@
+https://github.com/astral-sh/python-build-standalone/releases/tag/20261001
+cpython-3.12.15+20261001-aarch64-apple-darwin-pgo+lto-full.tar.zst
+SHA256 55745a8e72464507c44db62d1a3b7fac2214601cb0c09b6f85364fab49977bc8
+All vendor-provided license files retained; consult PYTHON.json for component scope.

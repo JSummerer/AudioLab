@@ -8,6 +8,7 @@ from typing import Any
 from ..context import TaskContext
 from ..errors import AudioLabError, ToolMissingError
 from ..media import export
+from ..runtime import is_packaged
 from ..settings import SETTINGS
 from ..util import sanitize_filename
 from . import common
@@ -40,6 +41,11 @@ def _scaled(src: Path, gain: float, dst: Path) -> Path:
 
 def validate(options: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
     if not common.ai_device():
+        if is_packaged():
+            raise ToolMissingError(
+                'Split is not included in this core app.',
+                hints=['This download supports Convert, Save, Check, and Light/Standard Enhance.'],
+            )
         raise ToolMissingError(
             'Splitting audio needs the AI features, which are not installed yet.',
             hints=['Open Settings and click "Enable AI features" (one-time download).'],

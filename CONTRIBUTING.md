@@ -3,6 +3,7 @@
 Thanks for helping! A few ground rules keep AudioLab friendly for people who are not audio engineers.
 
 For everyday use rather than development, follow the [installation guide](docs/INSTALLATION.md).
+Mac testers can use the [Core DMG](docs/MACOS.md); development still runs from source.
 
 ## Setup
 ```bash
@@ -37,8 +38,9 @@ a browser, profile or network. Browser smoke tests still need a separate headles
 
 Open an [issue](https://github.com/JSummerer/AudioLab/issues) with the expected behavior, what happened,
 steps to reproduce, OS and AudioLab version. For a Git checkout, include `git rev-parse --short HEAD`.
-The current development source still reports package version 2.3.0; unreleased changes are collected
-under 2.4.0 in the changelog. Use generated examples or recordings you may share, and remove personal
+For a downloaded app, include the release tag, exact asset name, Mac chip and macOS version. The
+2.4.0b1 candidate remains a prerelease; build checks and publication status belong in its release
+notes. Use generated examples or recordings you may share, and remove personal
 paths, links and credentials from logs. Report security issues [privately](SECURITY.md).
 
 Keep pull requests focused, explain the user-visible change and how you checked it, and update the
@@ -49,6 +51,28 @@ Contributions are distributed under the project's [MIT license](LICENSE).
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — the module map, the life of a job, and how to add a
 recipe, format, task, view or support for another OS. The HTTP contract between UI and server is
 [docs/API.md](docs/API.md); keep it in sync when you change an endpoint.
+
+## macOS binary delivery
+
+The initial binary is a **Core** build for macOS 14+ arm64. It excludes optional AI, supports
+Save/Convert, Check and Light/Standard Enhance, and refuses pip/package maintenance in the app.
+Source installation, optional AI and the Windows/Linux browser paths remain separate.
+See [packaging/macos/README.md](packaging/macos/README.md) for the pinned build environment, selected
+FFmpeg sources/licenses, app entry, smoke checks and release artifacts.
+
+Run the normal checks before artifact checks. Validate the exact frozen executable with generated
+short audio and isolated data/output directories; testing source Python alone cannot establish that
+the bundle includes every module, tool, certificate or resource. Native WebKit checks belong on a
+disposable runner/test user, with no personal browser profiles or recordings. State OS, architecture,
+artifact identity and residual limits. Intel output from an experimental workflow is not qualified
+support until it passes its own native checks.
+
+Distribute the DMG, checksums and matching third-party source companion through a GitHub prerelease.
+Do not include `.work/`, local audit evidence, private recordings, build environments or old private
+Git history. Keep the bundle identifier `io.github.jsummerer.audiolab` stable. This beta uses ad-hoc
+signing without Apple Developer ID/notarization; document [Apple's graphical opening
+flow](https://support.apple.com/en-us/102445), and do not claim ordinary CI proves fresh-download
+Gatekeeper acceptance. Downloaded apps update by replacement, not in-place package installation.
 
 ## Principles
 - **Plain language first.** Every error is an `AudioLabError` with a short message and `hints` a

@@ -1,5 +1,5 @@
 """App-level routes: ping, health, settings, storage use, the diagnostics report, the
-downloader update, the AI-pack install and opening the output folder — see docs/API.md."""
+downloader update, the AI-pack install and opening known app folders — see docs/API.md."""
 
 import os
 import tempfile
@@ -11,8 +11,10 @@ from fastapi.responses import PlainTextResponse
 from starlette.concurrency import run_in_threadpool
 
 from .. import ai, diagnostics, library
+from ..ai.install import require_install_supported
 from ..errors import AudioLabError
 from ..media import youtube
+from ..runtime import is_packaged
 from ..settings import SETTINGS
 from .state import AppState, State
 
@@ -67,6 +69,16 @@ def reveal_output(state: State):
     return state.reveal()
 
 
+@router.post('/api/reveal-data')
+def reveal_data(state: State):
+    return state.reveal_app_folder('data')
+
+
+@router.post('/api/reveal-logs')
+def reveal_logs(state: State):
+    return state.reveal_app_folder('logs')
+
+
 # --------------------------------------------------------------- storage
 def _dir_bytes(path: Path, seen: set | None = None) -> int:
     """Bytes used below `path`; hard-linked files (re-runs share their input) count once."""
@@ -113,7 +125,7 @@ def _storage_data(state: AppState) -> dict[str, Any]:
         'job_count': count,
         'finished_bytes': finished_bytes,
         'finished_count': len(finished),
-        'models_bytes': _dir_bytes(ai.model_cache_dir()),
+        'models_bytes': 0 if is_packaged() else _dir_bytes(ai.model_cache_dir()),
         'library_count': library.count(),
         'originals_bytes': originals['bytes'],
         'originals_count': originals['count'],
@@ -151,6 +163,7 @@ async def update_downloader(state: State):
 
 @router.post('/api/system/install-ai')
 def install_ai(state: State):
+    require_install_supported()
     if ai.ai_status().get('available'):
         return {'ok': True, 'message': 'AI features are already installed.'}
 

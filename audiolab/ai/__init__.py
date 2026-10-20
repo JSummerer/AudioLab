@@ -13,6 +13,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from .. import runtime
+
 _LOCK = threading.Lock()
 _CACHE: dict[str, Any] = {}
 
@@ -36,6 +38,14 @@ def model_choices() -> list[dict[str, str]]:
 
 
 def _detect() -> dict[str, Any]:
+    if runtime.is_packaged():
+        return {
+            'available': False,
+            'device': None,
+            'torch_version': None,
+            'demucs_version': None,
+            'reason': 'This core app does not include AI. Split and Best enhancement are unavailable.',
+        }
     missing = [m for m in ('torch', 'demucs') if importlib.util.find_spec(m) is None]
     if missing:
         return {
@@ -78,7 +88,7 @@ def ai_status(refresh: bool = False) -> dict[str, Any]:
             if refresh:
                 importlib.invalidate_caches()
             _CACHE['status'] = _detect()
-        return dict(_CACHE['status'])
+        return {**_CACHE['status'], 'install_supported': not runtime.is_packaged()}
 
 
 def model_cache_dir() -> Path:

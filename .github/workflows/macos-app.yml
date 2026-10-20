@@ -1,0 +1,157 @@
+name: Build macOS tester app
+
+'on':
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    # Native validation runs on macOS 15; the deployment target remains macOS 14.
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "1"
+      UV_NO_PROGRESS: "1"
+      UV_PYTHON_INSTALL_DIR: ${{ runner.temp }}/audiolab-python
+      UV_CACHE_DIR: ${{ runner.temp }}/audiolab-uv-cache
+      AUDIOLAB_PACKAGE_WORK_DIR: ${{ runner.temp }}/audiolab-package
+      AUDIOLAB_BUILD_JOBS: "3"
+      VALIDATION_DIR: ${{ runner.temp }}/audiolab-validation
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Record build host and source
+        run: |
+          mkdir -p "$VALIDATION_DIR"
+          [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]]
+          {
+            uname -a
+            sw_vers
+            xcodebuild -version
+            git rev-parse HEAD
+          } > "$VALIDATION_DIR/host-and-source.txt"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.3"
+          enable-cache: false
+
+      - name: Install the reviewed standalone Python build
+        run: |
+          # Python's version alone does not pin the standalone build or its native libraries.
+          cat > "$VALIDATION_DIR/python-downloads.json" <<'JSON'
+          {
+            "cpython-3.12.15-darwin-aarch64-none": {
+              "name": "cpython",
+              "arch": {"family": "aarch64", "variant": null},
+              "os": "darwin", "libc": "none",
+              "major": 3, "minor": 12, "patch": 15, "prerelease": "",
+              "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261001/cpython-3.12.15%2B20261001-aarch64-apple-darwin-install_only.tar.gz",
+              "sha256": "f1ee170bd7bb45bea526c4f9489b41f9c5d978c4cd7a08fd11809de56c39b736",
+              "variant": null, "build": "20261001"
+            }
+          }
+          JSON
+          uv --no-config python install --no-bin \
+            --python-downloads-json-url "$VALIDATION_DIR/python-downloads.json" \
+            cpython-3.12.15-macos-aarch64-none 2>&1 | tee "$VALIDATION_DIR/python-install.log"
+          build_python="$(uv --no-config python find --managed-python cpython-3.12.15-macos-aarch64-none)"
+          printf '%s\n' "AUDIOLAB_BUILD_PYTHON=$build_python" >> "$GITHUB_ENV"
+          "$build_python" - <<'PY'
+          import json
+          import os
+          import platform
+          import sys
+          from pathlib import Path
+
+          build = (Path(sys.base_prefix) / 'BUILD').read_text().strip()
+          assert sys.version_info[:3] == (3, 12, 15), sys.version
+          assert platform.machine() == 'arm64', platform.machine()
+          assert build == '20261001', build
+          report = {'version': sys.version, 'executable': sys.executable, 'base_prefix': sys.base_prefix,
+                    'machine': platform.machine(), 'standalone_build': build}
+          (Path(os.environ['VALIDATION_DIR']) / 'python-provenance.json').write_text(json.dumps(report, indent=2) + '\n')
+          print(json.dumps(report, indent=2))
+          PY
+
+      - name: Build the app, DMG and matching sources
+        run: bash packaging/macos/build.sh 2>&1 | tee "$VALIDATION_DIR/build.log"
+
+      - name: Validate the actual packaged WebKit window
+        run: |
+          "$AUDIOLAB_BUILD_PYTHON" - <<'PY'
+          import json
+          import os
+          import signal
+          import subprocess
+          from pathlib import Path
+
+          evidence = Path(os.environ['VALIDATION_DIR'])
+          executable = Path(os.environ['AUDIOLAB_PACKAGE_WORK_DIR']) / 'dist/AudioLab.app/Contents/MacOS/AudioLab'
+          isolated = Path(os.environ['RUNNER_TEMP']) / 'audiolab-native'
+          env = dict(os.environ, PATH='/usr/bin:/bin:/usr/sbin:/sbin',
+                     AUDIOLAB_DATA_DIR=str(isolated / 'data'), AUDIOLAB_OUTPUT_DIR=str(isolated / 'output'))
+          for name in ('PYTHONPATH', 'PYTHONHOME', 'AUDIOLAB_TOKEN', 'AUDIOLAB_FFMPEG'):
+              env.pop(name, None)
+          with (evidence / 'native-smoke.log').open('w') as log:
+              child = subprocess.Popen([str(executable), '--audiolab-native-smoke'], env=env,
+                                       stdout=log, stderr=subprocess.STDOUT, text=True, start_new_session=True)
+              try:
+                  code = child.wait(timeout=120)
+              except subprocess.TimeoutExpired:
+                  os.killpg(child.pid, signal.SIGTERM)
+                  try:
+                      child.wait(timeout=5)
+                  except subprocess.TimeoutExpired:
+                      os.killpg(child.pid, signal.SIGKILL)
+                      child.wait(timeout=5)
+                  raise RuntimeError('The packaged WebKit check did not finish within 120 seconds.') from None
+          text = (evidence / 'native-smoke.log').read_text()
+          print(text)
+          assert code == 0, f'Packaged WebKit smoke exited with {code}; see native-smoke.log'
+          # The command prints its final structured result after any library messages.
+          start = text.find('{\n  "ok":')
+          assert start >= 0, 'The native check did not produce structured results.'
+          result = json.JSONDecoder().raw_decode(text[start:])[0]
+          assert result['ok'] and result['backend'] == 'wkwebview'
+          assert result['window_closed'] and result['server_stopped']
+          (evidence / 'native-smoke.json').write_text(json.dumps(result, indent=2) + '\n')
+          PY
+
+      - name: Upload validated release files
+        uses: actions/upload-artifact@v7
+        with:
+          name: AudioLab-macOS-arm64-${{ github.run_id }}
+          path: |
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/release-*/*.dmg
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/release-*/*.tar.gz
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/release-*/SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload validation evidence and failure logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: AudioLab-macOS-validation-${{ github.run_id }}
+          path: |
+            ${{ env.VALIDATION_DIR }}/
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/release-*/smoke/*.log
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/release-*/smoke/*.json
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/media/evidence/ffmpeg-version.txt
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/media/evidence/ffmpeg-license.txt
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/media/evidence/dynamic-libraries.txt
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/media/evidence/compiler.txt
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/media/evidence/build-system.txt
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/pyinstaller-work/AudioLab/warn-AudioLab.txt
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/*inventory*.json
+            ${{ runner.temp }}/audiolab-native/data/logs/
+          if-no-files-found: warn

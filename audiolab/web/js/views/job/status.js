@@ -121,8 +121,8 @@ function renderJournal(list, events) {
 export function failedView(job, ctx) {
   const err = job.error || { message: job.message || 'Something went wrong.' };
   const actions = h('div', { class: 'callout-actions' });
-  if (err.fix === 'update_downloader') actions.append(updateDownloaderButton());
-  if (err.fix === 'install_ai') actions.append(installAiButton());
+  if (err.fix === 'update_downloader' && store.health?.downloader?.update_supported !== false) actions.append(updateDownloaderButton());
+  if (err.fix === 'install_ai' && store.health?.ai?.install_supported !== false) actions.append(installAiButton());
   if (err.fix === 'use_cookies') { const b = signInButton(); if (b) actions.append(b); }
   // No fix (`fix: null`): trying the same again fails the same way, so changing something comes first.
   if (!err.fix) actions.append(changeButton(job, true));

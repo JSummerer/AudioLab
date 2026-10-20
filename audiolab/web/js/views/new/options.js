@@ -34,6 +34,9 @@ definePart('options', renderOptions);
 export function taskBlock(key) {
   const src = state.source;
   if (key === 'separate' && !aiAvailable()) {
+    if (store.health?.ai?.install_supported === false) {
+      return { reason: 'Split is not included in this core app' };
+    }
     return store.health?.ai?.installing
       ? { reason: 'The AI add-on is installing…', action: 'ai' }
       : { reason: 'Needs the free AI add-on — tap to set up', action: 'ai' };
@@ -318,7 +321,7 @@ function renderEnhanceOptions(el) {
           {
             value: 'best', label: 'Best', disabled: !ai,
             desc: ai ? `Uses AI · slower${store.health?.ai?.device ? ` · ${deviceLabel(store.health.ai.device)}` : ''}` : null,
-            reason: 'Needs the AI add-on',
+            reason: store.health?.ai?.install_supported === false ? 'Not included in this core app' : 'Needs the AI add-on',
           },
         ],
         onChange: (v) => {

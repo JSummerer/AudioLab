@@ -11,7 +11,7 @@ from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, Request
 
-from .. import APP_NAME, __version__, ai, recipes, system, tasks
+from .. import APP_NAME, __version__, ai, recipes, runtime, system, tasks
 from ..ai.install import AIInstaller
 from ..errors import AudioLabError
 from ..jobs import Job, JobManager
@@ -95,6 +95,20 @@ class AppState:
             hints=['Connect the drive it is on, or choose another folder in Settings → Files.'],
         )
 
+    def reveal_app_folder(self, target: str) -> dict[str, Any]:
+        """Reveal only the two app-owned folders offered by Settings, never a supplied path."""
+        self.require_local()
+        if target == 'data':
+            folder = SETTINGS.data_dir
+        elif target == 'logs':
+            folder = system.log_dir(SETTINGS.data_dir)
+        else:
+            raise HTTPException(404, 'Unknown app folder.')
+        if not folder.is_dir():
+            raise AudioLabError('This app folder does not exist yet.', hints=['Use AudioLab, then try again.'])
+        system.reveal(folder)
+        return {'ok': True}
+
     def cached(self, key: str, fn: Callable[[], Any], ttl: float = 300.0) -> Any:
         now = time.time()
         hit = self._caches.get(key)
@@ -117,7 +131,12 @@ class AppState:
 
     def downloader_health(self) -> dict[str, Any]:
         v = self.cached('ytdlp', youtube.ytdlp_version, 60)  # short: jobs may update it (self-repair)
-        return {'ok': bool(v), 'version': v, 'age_days': youtube.ytdlp_age_days(v)}
+        return {
+            'ok': bool(v),
+            'version': v,
+            'age_days': youtube.ytdlp_age_days(v),
+            'update_supported': not runtime.is_packaged(),
+        }
 
     def health_data(self) -> dict[str, Any]:
         ff = self.cached('ffmpeg', ffmpeg.ffmpeg_info, 600)
@@ -125,6 +144,7 @@ class AppState:
             'app': APP_NAME,
             'version': __version__,
             'local': self.local,
+            'packaged': runtime.is_packaged(),
             'ffmpeg': {k: ff.get(k) for k in ('ok', 'version', 'source', 'error')},
             'downloader': self.downloader_health(),
             'ai': self.ai_health(),
@@ -132,6 +152,7 @@ class AppState:
             'output_dir_ok': system.folder_writable(SETTINGS.output_dir),  # false: a drive that isn't connected…
             'upload_extensions': sorted(export.UPLOAD_EXT),
             'data_dir': str(SETTINGS.data_dir),
+            'logs_dir': str(system.log_dir(SETTINGS.data_dir)),
             'limits': {
                 'max_upload_mb': LIMITS.max_upload_mb,
                 'max_duration_s': LIMITS.max_duration_s,

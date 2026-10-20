@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from . import APP_NAME, APP_SLUG, __version__
+from .runtime import is_packaged
 from .settings import ENV_PREFIX
 
 
@@ -91,7 +92,7 @@ def _run_task(task: str, value: str, options: dict[str, Any], args) -> int:
             try:
                 meta = youtube.probe(source['url'])
             except AudioLabError as e:
-                if e.fix != 'update_downloader' or not SETTINGS.get().auto_update_downloader:
+                if is_packaged() or e.fix != 'update_downloader' or not SETTINGS.get().auto_update_downloader:
                     raise
                 print('The site seems to have changed — updating the downloader and trying again…', file=sys.stderr)
                 if not youtube.self_repair_update():
@@ -260,7 +261,7 @@ def cmd_doctor(args) -> int:
         f'ready on {str(st.get("device")).upper()} (torch {st.get("torch_version")})'
         if st.get('available')
         else str(st.get('reason') or 'not installed'),
-        f'Run: {APP_SLUG} install-ai  (optional, ~1–2 GB)',
+        'Not included in this core app.' if is_packaged() else f'Run: {APP_SLUG} install-ai (optional)',
     )
     mem = memory_report()
     line(True, 'Memory', f'{human_bytes(int(mem["limit_bytes"]))} ({mem["source"]})')
@@ -362,6 +363,9 @@ def _app_command() -> tuple[list[str], Path | None, str]:
 
 
 def cmd_shortcut(args) -> int:
+    if is_packaged():
+        print(f'This download is already a Mac app. Drag {APP_NAME}.app into Applications.', file=sys.stderr)
+        return 1
     from . import system
     from .desktop import APP_ICON
 
@@ -372,6 +376,9 @@ def cmd_shortcut(args) -> int:
         )
     except NotImplementedError as e:
         print(f'{e} Start {APP_NAME} with "{APP_SLUG}" (or start.sh / start.bat) instead.', file=sys.stderr)
+        return 1
+    except FileExistsError as e:
+        print(str(e), file=sys.stderr)
         return 1
     print(f'Added {app.name} to {app.parent}.')
     return 0
@@ -491,7 +498,15 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if not getattr(args, 'fn', None):
         args = parser.parse_args(['app', *(argv or [])])
-    return int(args.fn(args) or 0)
+    from .errors import AudioLabError
+
+    try:
+        return int(args.fn(args) or 0)
+    except AudioLabError as error:
+        print(str(error), file=sys.stderr)
+        for hint in error.hints:
+            print(f'  {hint}', file=sys.stderr)
+        return 1
 
 
 if __name__ == '__main__':

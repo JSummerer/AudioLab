@@ -461,8 +461,8 @@ def test_owned_group_stops_descendant_after_leader_exit(tmp_path, monkeypatch, l
         if leader_mode == 'exited':
             assert proc.wait(timeout=3) == 0
         before = heartbeat.read_text()
-        time.sleep(0.05)
-        assert heartbeat.read_text() != before  # evidence of active work, not PID/zombie existence
+        # Observe real work without assuming the runner schedules the child within 50 ms.
+        wait_for(lambda: (current := heartbeat.read_text()) and current != before)
         start = time.monotonic()
         system.terminate_process(proc)
         assert time.monotonic() - start < 2 and proc.poll() is not None

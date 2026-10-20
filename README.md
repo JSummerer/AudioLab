@@ -41,8 +41,11 @@ is needed to use it. Intel binaries are not yet a supported release target.
    its first opening. After checking the download came from this repository, follow the
    [Open Anyway steps](docs/MACOS.md#first-opening) in System Settings.
 
-The Core app supports **Save / Convert, Check, and Light/Standard Enhance**. **Split and Best Enhance
-are unavailable in this package**; there is no in-app AI installation. Processing stays on your Mac.
+The published **2.4.0b1** Core app supports **Save / Convert, Check, and Light/Standard Enhance**.
+Split and Best Enhance are unavailable in that release. **The next beta, 2.4.0b2, is being prepared with an
+optional AI download in Settings**: it includes its own runtime and both model choices, with no
+Terminal or Python setup. Availability depends on the compatible add-on included in that app’s
+release catalog. Processing stays on your Mac.
 The release notes describe the checks completed and the beta's validation limits.
 See the [Mac guide](docs/MACOS.md) for opening, updates and safe removal.
 
@@ -67,10 +70,10 @@ preserves your output files, but may remove its kept original copy when no other
 When enabled, kept original copies live separately in AudioLab's app-data folder and can also be
 cleared in **Settings → Storage**.
 
-**AI is optional in source installations.** It adds Split and Best enhancement. The downloaded Mac
-Core app leaves these out. See [AI size and hardware notes](docs/INSTALLATION.md#optional-ai-in-source-installations)
-before enabling it; model weights, installed software, processing memory and temporary audio space
-are different requirements.
+**AI is optional.** It adds Split and Best enhancement. The upcoming packaged option downloads
+software and both model choices together; source installations keep their existing installer. See
+[optional AI and resource notes](docs/INSTALLATION.md#optional-ai) before enabling it. Download size,
+installed files, processing memory and temporary audio space are different requirements.
 
 ## Help and feedback
 

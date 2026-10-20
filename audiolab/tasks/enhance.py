@@ -16,7 +16,6 @@ from ..errors import AudioLabError
 from ..media import export
 from ..previews import make_previews
 from ..recipes.chain import render
-from ..runtime import is_packaged
 from ..settings import SETTINGS
 from ..util import sanitize_filename
 from . import common
@@ -48,11 +47,6 @@ def validate(options: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
     if quality not in QUALITIES:
         quality = 'standard'
     if quality == 'best' and not common.ai_device():
-        if is_packaged():
-            raise AudioLabError(
-                'Best enhancement is not included in this core app.',
-                hints=['Choose Standard or Light quality.'],
-            )
         raise AudioLabError(
             '"Best" quality uses AI, which is not installed yet.',
             hints=['Enable AI features in Settings (one-time download), or use Standard quality.'],

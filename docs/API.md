@@ -257,8 +257,10 @@ automatically replacing the saved file.
 | `POST /api/reveal-data` | – | `{"ok": true}` opens AudioLab's app data folder (Library, settings, kept originals and caches). Local mode only; `403` remotely. The target is fixed: no client-supplied path is used |
 | `POST /api/reveal-logs` | – | `{"ok": true}` opens AudioLab's logs folder. Local mode only; `403` remotely, `400` if the logs folder does not exist. The target is fixed: no client-supplied path is used. No files are deleted |
 | `POST /api/system/update-downloader` | – | `{"ok", "before", "after", "message"}` (takes ~10–60 s). When `health.downloader.update_supported` is false, returns `400` with instructions to replace the app, before any package installer is started |
-| `POST /api/system/install-ai` | – | `{"ok": true}` starts the AI pack install; watch `system` events / health. When `health.ai.install_supported` is false, returns `400` explaining that AI cannot be added to this core app, before any installer is started |
-| `GET /api/storage` | – | `{"jobs_bytes", "job_count", "finished_bytes", "finished_count", "models_bytes", "library_count", "originals_bytes", "originals_count"}` — app data usage (not your output files). `models_bytes` is zero in Core, without scanning shared AI caches; source installs count the Torch model cache, which other tools may share. `originals_*`: the kept originals (clear them with `DELETE /api/library/originals`). Disk space is counted once: an upload's kept original is a hard link to its job's input file, so it counts in `originals_bytes` only, and `freed_bytes` (here and in the Library deletes) counts only files whose last link went — deleting a kept original frees nothing while its job still holds the upload |
+| `POST /api/system/install-ai` | Optional JSON `{"repair": true}` | `{"ok": true}` starts or resumes installation of the compatible AI add-on; managed installs with `repair: true` re-download/reverify even an installed version. Watch `system` events / health. Source mode keeps its package installer. When `health.ai.install_supported` is false, returns `400` with the reason before any installer starts |
+| `POST /api/system/cancel-ai` | – | Requests cancellation of a managed install; downloaded partial data stays resumable. Watch health until `installing` is false. Source installations do not use the managed lifecycle |
+| `DELETE /api/system/ai` | – | Returns the updated managed AI status after removing only owned runtime, models, caches and partial downloads. Rejects while AI installation or an AI job holds the operation lock. Does not remove output, Library, settings, source packages or shared caches |
+| `GET /api/storage` | – | `{"jobs_bytes", "job_count", "finished_bytes", "finished_count", "models_bytes", "library_count", "originals_bytes", "originals_count"}` — app data usage (not your output files). `models_bytes` counts all owned managed AI files (runtime, models, caches and partial downloads) in packaged mode; source installs count the Torch model cache, which other tools may share. `originals_*`: the kept originals (clear them with `DELETE /api/library/originals`). Disk space is counted once: an upload's kept original is a hard link to its job's input file, so it counts in `originals_bytes` only, and `freed_bytes` (here and in the Library deletes) counts only files whose last link went — deleting a kept original frees nothing while its job still holds the upload |
 | `GET /api/diagnostics` | `?job=<id>` optional | `text/plain` report for bug reports: versions, platform, tools, limits, settings (except the output path, shown separately), recent log lines (+ that job's journal). No tokens or file contents |
 | `GET /api/events` | – | Server-Sent Events (below) |
 
@@ -279,7 +281,7 @@ detail.
 ### Health
 ```jsonc
 {
-  "app": "AudioLab", "version": "2.4.0b1", "local": true, "packaged": false,
+  "app": "AudioLab", "version": "2.4.0b2", "local": true, "packaged": false,
   "ffmpeg": {"ok": true, "version": "7.1", "source": "system" | "bundled", "error": null},
   "downloader": {"ok": true, "version": "2026.08.19", "age_days": 47, "update_supported": true},
   "ai": {"available": false, "device": null, "reason": "AI pack not installed", "install_supported": true, "installing": false,
@@ -311,10 +313,36 @@ the UI's file picker and drop check use this one list.
 connected): show a notice pointing to Settings → Files. Settings still load and save; jobs that write files fail
 before they start ("The output folder isn't available: …"); Check still works.
 `packaged`: the self-contained core app, with its own Python runtime, FFmpeg, Deno and downloader.
-It reports `ai.available: false`, `ai.install_supported: false`, and `downloader.update_supported: false`.
-Split and Best enhancement are unavailable; Save, Convert, Check, and Standard/Light enhancement remain available.
-The UI must suppress install/update actions and explain that replacing the app updates the downloader. Source
-installs keep the existing pip/uv maintenance behavior (`install_supported` and `update_supported` are true).
+`downloader.update_supported` remains false: replacing the app updates its downloader. AI has its own
+capability: `ai.install_supported`, independent of `packaged`. It is true only when the packaged build
+has a compatible pinned add-on catalog; never offer installation based on the platform flag alone.
+An installed healthy managed add-on sets `ai.available: true`, enabling Split and Best enhancement.
+Source installs keep their existing pip/uv maintenance behavior. The published 2.4.0b1 binary predates
+the managed lifecycle and reports AI installation unsupported.
+
+Managed AI adds these health fields; source installations can omit them:
+
+| Field | Meaning |
+|---|---|
+| `managed` | `true` for the app-owned optional runtime; never use managed removal for source packages |
+| `install_supported` | A compatible release catalog is available; false includes a plain-language `reason` |
+| `available` | The installed runtime passed its health check; no assumption from files existing alone |
+| `installing` | Installation is active; use this boolean for polling and action availability |
+| `install_ok` | Result of the most recent install, or null before one finishes |
+| `state` | Lifecycle detail: `unsupported`, `missing`, `partial`, `incompatible`, `busy`, `ready`, `broken`, plus active `downloading`, `installing`, `checking` phases; booleans remain authoritative for capabilities |
+| `version`, `target_version` | Installed version, if any, and compatible version from the bundled catalog |
+| `download_bytes` | Exact archive size from the catalog, or zero when unknown |
+| `target_installed_bytes` | Unpacked asset size from the catalog, separate from current disk use |
+| `downloaded_bytes` | Bytes retained in the resumable download; not total installation progress |
+| `installed_bytes` | Current owned AI disk use including runtime, models, caches and partial data |
+| `removable` | Owned files exist that the managed removal action can clean up |
+| `reason`, `install_log` | Plain-language status/error and recent install output |
+
+Known byte counts describe the asset/current owned files, not peak free-space requirements or RAM.
+Cancel retains the partial archive; remove clears it. A new app can select a different compatible
+version. Install, repair and removal share an operation lock with AI jobs; readiness is published only
+after archive validation, extraction and worker probing succeed. No arbitrary URL/version is accepted
+from the UI. The managed runtime includes both supported model choices and uses them offline.
 `downloader.age_days` is calculated from its version date. In the packaged app, the version is read through
 the actual downloader worker. yt-dlp's cache is always under `<data>/cache/yt-dlp`; packaged Deno and temporary
 files also use `<data>/cache`, and direct HTTPS uses bundled certificate data.

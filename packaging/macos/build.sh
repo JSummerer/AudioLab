@@ -1,5 +1,5 @@
 #!/bin/bash
-# Maintainer build: produce a self-contained core app and a drag-to-Applications disk image.
+# Maintainer build: produce the self-contained app, optional AI archive and disk image.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 WORK="${AUDIOLAB_PACKAGE_WORK_DIR:-$ROOT/.work/macos-package}"
@@ -24,6 +24,10 @@ PY
 uv pip sync --python "$BUILD_PYTHON" "$ROOT/packaging/macos/requirements.lock"
 uv pip install --python "$BUILD_PYTHON" --no-deps -e "$ROOT"
 export AUDIOLAB_BUILD_PYTHON="$BUILD_PYTHON"
+export AUDIOLAB_AI_WORK_DIR="$WORK/ai"
+export AUDIOLAB_AI_RELEASE_TAG="v$("$BUILD_PYTHON" -c 'from audiolab import __version__; print(__version__)')"
+bash "$ROOT/packaging/ai/build.sh"
+export AUDIOLAB_AI_CATALOG="$AUDIOLAB_AI_WORK_DIR/release/catalog.json"
 export AUDIOLAB_MEDIA_BUILD_DIR="$WORK/media"
 # Obtain all pinned inputs before spending time compiling the media engine.
 "$BUILD_PYTHON" "$ROOT/packaging/macos/third_party.py" fetch --directory "$WORK/media/downloads"
@@ -56,6 +60,9 @@ ARCH="$(uname -m)"
 RELEASE="$WORK/release-$VERSION-$ARCH"
 mkdir "$RELEASE"  # fail rather than silently replace a prepared release
 "$BUILD_PYTHON" "$ROOT/packaging/macos/smoke.py" "$APP" "$RELEASE/smoke"
+"$BUILD_PYTHON" "$ROOT/packaging/macos/ai_smoke.py" "$APP" "$AUDIOLAB_AI_WORK_DIR/release" "$RELEASE/ai-smoke"
+cp "$AUDIOLAB_AI_WORK_DIR/release/"*.tar.gz "$RELEASE/"
+cp "$AUDIOLAB_AI_CATALOG" "$RELEASE/ai-catalog.json"
 STAGE="$WORK/dmg-stage"
 mkdir -p "$STAGE"
 ditto "$APP" "$STAGE/AudioLab.app"
@@ -68,6 +75,6 @@ hdiutil create -ov -format UDZO -volname AudioLab -srcfolder "$STAGE" \
   --output "$RELEASE/AudioLab-$VERSION-third-party-sources-$ARCH.tar.gz"
 (
   cd "$RELEASE"
-  shasum -a 256 ./*.dmg ./*.tar.gz > SHA256SUMS.txt
+  shasum -a 256 ./*.dmg ./*.tar.gz ./ai-catalog.json > SHA256SUMS.txt
 )
 echo "Built $RELEASE"

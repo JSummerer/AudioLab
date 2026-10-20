@@ -15,7 +15,7 @@ from ..ai.install import require_install_supported
 from ..errors import AudioLabError
 from ..media import youtube
 from ..runtime import is_packaged
-from ..settings import SETTINGS
+from ..settings import SETTINGS, validate_output_location
 from .state import AppState, State
 
 router = APIRouter()
@@ -47,6 +47,7 @@ def put_settings(patch: dict[str, Any] = Body(...)):
         target = Path(str(patch['output_dir']).strip()).expanduser()
         if not target.is_absolute():  # it would depend on the folder AudioLab was started from
             raise AudioLabError('Enter a full folder path, for example ~/Music/AudioLab.')
+        validate_output_location(target)
         try:
             target.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(dir=target, prefix='.audiolab-', delete=True):
@@ -125,7 +126,7 @@ def _storage_data(state: AppState) -> dict[str, Any]:
         'job_count': count,
         'finished_bytes': finished_bytes,
         'finished_count': len(finished),
-        'models_bytes': 0 if is_packaged() else _dir_bytes(ai.model_cache_dir()),
+        'models_bytes': state.installer.storage_bytes() if is_packaged() else _dir_bytes(ai.model_cache_dir()),
         'library_count': library.count(),
         'originals_bytes': originals['bytes'],
         'originals_count': originals['count'],
@@ -162,15 +163,42 @@ async def update_downloader(state: State):
 
 
 @router.post('/api/system/install-ai')
-def install_ai(state: State):
-    require_install_supported()
-    if ai.ai_status().get('available'):
+def install_ai(state: State, options: dict[str, Any] | None = Body(None)):
+    repair = (options or {}).get('repair') is True
+    if is_packaged():
+        state.require_local()
+    else:
+        require_install_supported()
+    if ai.ai_status().get('available') and not repair:
         return {'ok': True, 'message': 'AI features are already installed.'}
 
     def done(ok: bool):
         ai.ai_status(refresh=True)
+        state.forget('storage')
         state.system_event()
 
-    started = state.installer.start(done)
+    started = state.installer.start(done, repair=repair) if is_packaged() else state.installer.start(done)
     state.system_event()
     return {'ok': True, 'message': 'Installing…' if started else 'Already installing…'}
+
+
+@router.post('/api/system/cancel-ai')
+def cancel_ai(state: State):
+    state.require_local()
+    if not is_packaged():
+        raise AudioLabError('This source installation uses its own package manager.')
+    state.installer.cancel()
+    return {'ok': True}
+
+
+@router.delete('/api/system/ai')
+def remove_ai(state: State):
+    state.require_local()
+    if not is_packaged():
+        raise AudioLabError(
+            'AudioLab only removes its managed Mac add-on, not source Python packages or shared caches.'
+        )
+    result = state.installer.remove()
+    state.forget('storage')
+    state.system_event()
+    return result

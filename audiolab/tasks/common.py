@@ -16,7 +16,7 @@ from ..errors import AudioLabError, storage_error
 from ..media import export, ffmpeg, youtube
 from ..resources import preflight
 from ..runtime import is_packaged
-from ..settings import SETTINGS
+from ..settings import SETTINGS, validate_output_location
 from ..util import PLAYABLE_EXT, human_bytes, human_duration, sanitize_filename, unique_path
 
 
@@ -389,6 +389,7 @@ def tags_for(acq: Acquired, suffix: str = '') -> dict[str, str]:
 def output_folder(name: str, parent: Path | None = None) -> Path:
     """A new, uniquely named folder inside the output folder."""
     root = Path(parent or SETTINGS.output_dir)
+    validate_output_location(root)
     try:
         root.mkdir(parents=True, exist_ok=True)
         folder = unique_path(root / sanitize_filename(name, room=40), folder=True)
@@ -406,6 +407,7 @@ def output_folder(name: str, parent: Path | None = None) -> Path:
 
 def output_root(acq: Acquired) -> Path:
     root = SETTINGS.output_dir
+    validate_output_location(root)
     if acq.playlist_title:
         root = root / sanitize_filename(acq.playlist_title)
     try:

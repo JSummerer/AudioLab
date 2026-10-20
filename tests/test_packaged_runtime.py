@@ -193,7 +193,7 @@ def test_packaged_ai_detection_does_not_import_optional_packages(monkeypatch):
     monkeypatch.setattr(ai.importlib.util, 'find_spec', _no_process)
     status = ai.ai_status(refresh=True)
     assert not status['available'] and not status['install_supported']
-    assert status['device'] is None and 'core app' in status['reason']
+    assert status['device'] is None and 'compatible AI download' in status['reason']
 
 
 def test_core_storage_does_not_inspect_shared_ai_caches(monkeypatch, app_factory):
@@ -252,20 +252,82 @@ def test_packaged_maintenance_api_rejects_before_any_subprocess(monkeypatch, app
     with TestClient(app_factory(), base_url='http://127.0.0.1') as client:
         for path, message in (
             ('/api/system/update-downloader', 'built into this AudioLab app'),
-            ('/api/system/install-ai', 'cannot be added'),
+            ('/api/system/install-ai', 'compatible AI download'),
         ):
             response = client.post(path)
             assert response.status_code == 400 and message in response.json()['detail']
         assert client.get('/api/settings').json()['auto_update_downloader'] is True
 
 
-def test_packaged_install_api_rejects_even_if_cached_ai_status_says_ready(monkeypatch, app_factory):
+def test_packaged_install_api_is_idempotent_when_ai_is_ready(monkeypatch, app_factory):
     _packaged(monkeypatch)
     monkeypatch.setattr(ai, 'ai_status', lambda: {'available': True})
     monkeypatch.setattr(install.subprocess, 'Popen', _no_process)
     with TestClient(app_factory(), base_url='http://127.0.0.1') as client:
         response = client.post('/api/system/install-ai')
-        assert response.status_code == 400 and 'cannot be added' in response.json()['detail']
+        assert response.status_code == 200 and 'already installed' in response.json()['message']
+
+
+def test_managed_api_repairs_cancels_and_removes_only_via_manager(monkeypatch, app_factory):
+    from audiolab.ai import managed
+
+    _packaged(monkeypatch)
+    calls = []
+
+    class Manager:
+        def status(self):
+            return {'available': True, 'managed': True, 'device': 'cpu', 'install_supported': True}
+
+        def start(self, done, repair=False):
+            calls.append(('install', repair))
+            return True
+
+        def cancel(self):
+            calls.append(('cancel',))
+
+        def remove(self):
+            calls.append(('remove',))
+            return {'available': False, 'managed': True}
+
+        def shutdown(self):
+            pass
+
+    manager = Manager()
+    monkeypatch.setattr(managed, 'managed_ai', lambda: manager)
+    with TestClient(app_factory(), base_url='http://127.0.0.1') as client:
+        assert client.post('/api/system/install-ai', json={'repair': True}).status_code == 200
+        assert client.post('/api/system/cancel-ai').status_code == 200
+        assert client.delete('/api/system/ai').status_code == 200
+    assert calls == [('install', True), ('cancel',), ('remove',)]
+
+
+def test_source_api_never_removes_unmanaged_ai(monkeypatch, app_factory):
+    monkeypatch.setattr(runtime, 'is_packaged', lambda: False)
+    with TestClient(app_factory(), base_url='http://127.0.0.1') as client:
+        response = client.delete('/api/system/ai')
+        assert response.status_code == 400 and 'shared caches' in response.json()['detail']
+
+
+@pytest.mark.parametrize('part', ['', 'ai', 'ai/finished'])
+def test_settings_rejects_output_overlapping_managed_storage(part, app_factory, monkeypatch):
+    monkeypatch.delenv('AUDIOLAB_OUTPUT_DIR')
+    target = SETTINGS.data_dir / part
+    with TestClient(app_factory(), base_url='http://127.0.0.1') as client:
+        response = client.put('/api/settings', json={'output_dir': str(target)})
+        assert response.status_code == 400 and 'AI storage' in response.json()['detail']
+        assert not (SETTINGS.data_dir / 'ai').exists()
+
+
+def test_source_environment_cannot_publish_audio_into_managed_storage(tmp_path, monkeypatch):
+    from audiolab.tasks import common
+
+    monkeypatch.setattr(runtime, 'is_packaged', lambda: False)
+    monkeypatch.setenv('AUDIOLAB_OUTPUT_DIR', str(SETTINGS.data_dir / 'ai' / 'finished'))
+    with pytest.raises(AudioLabError, match='AI storage'):
+        common.output_folder('Saved audio')
+    with pytest.raises(AudioLabError, match='AI storage'):
+        common.output_root(common.Acquired(path=tmp_path / 'tone.wav', title='Tone'))
+    assert not (SETTINGS.data_dir / 'ai').exists()
 
 
 def test_packaged_download_errors_recommend_app_replacement(monkeypatch):

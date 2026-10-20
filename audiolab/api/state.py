@@ -30,7 +30,12 @@ class AppState:
         self.token = token
         self.manager = manager or JobManager(runner=tasks.run_job, stages_for=tasks.stages_for)
         self.hub = Hub()
-        self.installer = AIInstaller()
+        if runtime.is_packaged():
+            from ..ai.managed import managed_ai
+
+            self.installer = managed_ai()
+        else:
+            self.installer = AIInstaller()
         self.keep_awake = system.KeepAwake()
         self._caches: dict[str, tuple[float, Any]] = {}
         self._probes: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -42,10 +47,12 @@ class AppState:
     def shutdown(self) -> None:
         """Stop all jobs (bounded, see JobManager.shutdown), let the computer sleep again and
         end the live-update streams and the compare players' decodes. Safe to call twice — the desktop
-        window may call it on quit before the server stops. A running AI-pack install is left alone (see
-        AIInstaller)."""
+        window may call it on quit before the server stops. A source-mode package install is left alone
+        (see AIInstaller); the managed download stops with its resumable partial file retained."""
         self.pcm_stop.set()
         self.manager.shutdown(SHUTDOWN_TIMEOUT_S)
+        if runtime.is_packaged():
+            self.installer.shutdown()
         self.keep_awake.set(False)
         self.hub.close()
 

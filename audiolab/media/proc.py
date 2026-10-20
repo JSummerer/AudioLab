@@ -54,6 +54,7 @@ def run(
     cwd=None,
     env=None,
     timeout_hint: str = 'Try again — the computer may have been very busy.',
+    inherited_fds: tuple[int, ...] = (),
 ) -> ProcResult:
     """Run `cmd`, streaming every stdout/stderr line to `on_line`.
 
@@ -65,6 +66,8 @@ def run(
     progress.check_cancel()
 
     try:
+        from ..system import inherited_descriptors
+
         proc = subprocess.Popen(
             [str(c) for c in cmd],
             stdin=subprocess.DEVNULL,
@@ -77,6 +80,7 @@ def run(
             cwd=str(cwd) if cwd else None,
             env=env,
             **own_process_group(),
+            **inherited_descriptors(inherited_fds),
         )
     except FileNotFoundError as e:
         raise ToolMissingError(

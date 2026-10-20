@@ -31,6 +31,7 @@ let saving = 0;       // own saves don't rebuild the controls (keeps keyboard fo
 let flashing = null;  // { key, until }: a section or spot to highlight, survives rebuilds
 let spyFrame = 0;
 let spyPausedUntil = 0;
+let aiPending = false; // keep all AI actions disabled while a request is in flight
 let defaultsWaiting = false; // Defaults were drawn before /api/health brought the formats
 let folderDraft = null; // the output folder field's text while it is open (null = closed)
 const storage = { data: null, finished: null, key: null, timer: 0 };
@@ -476,41 +477,96 @@ function bookmarklet() {
 function renderSystem() {
   const ff = store.health?.ffmpeg || {};
   const ai = store.health?.ai || {};
-  const canInstall = ai.install_supported !== false && !store.health?.packaged;
-  let aiAction = null;
+  const canInstall = ai.install_supported === true;
+  const managed = ai.managed === true;
+  const outdated = managed && (ai.state === 'incompatible' || ai.state === 'outdated'
+    || (ai.version && ai.target_version && ai.version !== ai.target_version));
+  const broken = managed && ai.state === 'broken';
+  const actions = h('div', { class: 'block-actions' });
   let aiDetail;
-  if (ai.available) {
-    aiDetail = `Ready${ai.device ? ` · runs on ${deviceLabel(ai.device)}` : ''}${ai.device === 'cpu' ? ' (works, but slowly)' : ''}`;
-  } else if (ai.installing) {
-    aiDetail = 'Installing… this can take a few minutes.';
+  if (ai.installing) {
+    const stages = { downloading: 'Downloading', extracting: 'Unpacking', verifying: 'Checking', checking: 'Checking' };
+    aiDetail = `${stages[ai.state] || 'Installing'} the AI add-on…`;
+    if (ai.state === 'downloading' && ai.downloaded_bytes > 0) {
+      aiDetail += ` ${fmtBytes(ai.downloaded_bytes)}${ai.download_bytes > 0 ? ` of ${fmtBytes(ai.download_bytes)}` : ''}`;
+    }
+  } else if (ai.available) {
+    aiDetail = `Ready${ai.version ? ` · ${ai.version}` : ''}${ai.device ? ` · runs on ${deviceLabel(ai.device)}` : ''}${ai.device === 'cpu' ? ' (works, but slowly)' : ''}`;
+    if (outdated) aiDetail += ' · update available';
   } else {
     aiDetail = ai.reason || 'Not installed. Needed for Split and for Enhance → Best.';
   }
-  if (!ai.available && !ai.installing && canInstall) {
-    // The one main action on this page when it's there (the AI status in the sidebar links here).
-    aiAction = h('button', { type: 'button', class: 'btn btn-primary btn-sm', id: 'enableAi' }, icon('download', 14), 'Enable AI features');
-    aiAction.addEventListener('click', async () => {
-      aiAction.disabled = true;
-      try {
-        await api('/api/system/install-ai', { method: 'POST' });
-        toast('Installing the AI add-on…', { kind: 'ok' });
-        await loadHealth();
-      } catch (e) {
-        aiAction.disabled = false;
-        toastError(e);
-      }
-    });
+  if (!ai.installing && ai.install_ok === false) aiDetail += ' · last install did not finish';
+  if (!ai.installing && canInstall && (!ai.available || outdated)) {
+    const label = outdated ? 'Update AI add-on' : broken ? 'Repair AI add-on'
+      : managed && (ai.downloaded_bytes > 0 || ai.state === 'partial') ? 'Resume AI download'
+        : managed && ai.removable ? 'Retry AI install' : 'Enable AI features';
+    actions.append(aiButton('enableAi', label, 'btn-primary', () => installAi(broken ? { repair: true } : {})));
   }
+  if (managed && !ai.installing && canInstall && !broken && (ai.available || ai.version)) {
+    actions.append(aiButton('repairAi', 'Repair', 'btn-key', () => installAi({ repair: true })));
+  }
+  if (managed && ai.installing) {
+    actions.append(aiButton('cancelAi', 'Cancel install', 'btn-key', async () => {
+      await api('/api/system/cancel-ai', { method: 'POST' });
+      toast('Stopping the AI install. Downloaded data is kept for resuming.');
+    }));
+  }
+  if (managed && ai.removable && !ai.installing) {
+    actions.append(aiButton('removeAi', 'Remove AI add-on', 'btn-ghost btn-danger-text', async () => {
+      const ok = await confirmDialog({
+        title: 'Remove the AI add-on?',
+        message: 'Removes AudioLab’s optional AI software, models, caches and partial downloads. Split and Best enhancement will need it again. Your recordings, Library and settings stay.',
+        confirm: 'Remove AI add-on',
+      });
+      if (!ok) return;
+      await api('/api/system/ai', { method: 'DELETE' });
+      toast('AI add-on removed.', { kind: 'ok' });
+      clearTimeout(storage.timer);
+      storage.timer = setTimeout(loadStorage, STORAGE_CACHE_MS);
+    }));
+  }
+  const sizes = [];
+  if (managed && ai.download_bytes > 0) sizes.push(`Download: ${fmtBytes(ai.download_bytes)}.`);
+  if (managed && ai.target_installed_bytes > 0) sizes.push(`Unpacked download: ${fmtBytes(ai.target_installed_bytes)}.`);
+  if (managed && ai.installed_bytes > 0) sizes.push(`AI storage used: ${fmtBytes(ai.installed_bytes)}.`);
+  const help = managed
+    ? 'Adds Split and Best enhancement. One download includes the AI software and both model choices; processing then works offline on this computer.'
+    : canInstall ? 'Adds Split and Best enhancement. Installs AI software in this source environment; models download on first use.'
+      : 'Save, Convert, Check, and Standard or Light enhancement work without the AI add-on.';
   fill('system',
     !ff.ok && ff.error ? callout('danger', 'Audio engine missing', ff.error) : null,
     h('div', { dataset: { spot: 'ai' } },
       // Not installed is a choice, not a fault: a dim light, not a red one.
-      statusRow(ai.available ? 'ok' : ai.installing ? 'on' : 'dim', 'AI add-on', aiDetail, aiAction,
-        !ai.available && !ai.installing ? h('div', { class: 'adv-help' }, canInstall
-          ? 'Adds stem splitting and the “Best” quality for Enhance. It is a one-time download of about 1–2 GB and runs entirely on this computer.'
-          : 'Save, Convert, Check, and Standard or Light enhancement work in this core app.') : null),
-      ai.installing || (ai.install_log && !ai.available) ? h('pre', { class: 'install-log' }, ai.install_log || 'Starting…') : null),
+      statusRow(ai.installing ? 'on' : ai.available ? 'ok' : 'dim', 'AI add-on', aiDetail,
+        actions.childElementCount ? actions : null,
+        h('div', { class: 'adv-help' }, help),
+        sizes.length ? h('div', { class: 'adv-help' }, `${sizes.join(' ')} Allow extra space for installation and audio work.`) : null),
+      ai.installing || (ai.install_log && (!ai.available || ai.install_ok === false)) ? h('pre', { class: 'install-log', 'aria-label': 'AI installation log' }, ai.install_log || 'Starting…') : null),
     statusRow(ff.ok ? 'ok' : 'bad', 'Audio engine (ffmpeg)', ff.ok ? `Version ${ff.version || '?'} · ${ff.source === 'bundled' ? 'built in' : 'installed on this computer'}` : (ff.error || 'Not found')));
+}
+
+/** One request at a time, including across health refreshes and confirmation dialogs. */
+function aiButton(id, label, style, action) {
+  return h('button', {
+    type: 'button', class: `btn ${style} btn-sm`, id, disabled: aiPending,
+    onclick: async () => {
+      if (aiPending) return;
+      aiPending = true;
+      renderSystem();
+      try { await action(); } catch (e) { toastError(e); }
+      finally {
+        await loadHealth().catch(() => {});
+        aiPending = false;
+        if (visible) renderSystem();
+      }
+    },
+  }, label);
+}
+
+async function installAi(options = {}) {
+  await api('/api/system/install-ai', { method: 'POST', json: options });
+  toast('Installing the AI add-on…', { kind: 'ok' });
 }
 
 // ---------------------------------------------------------------------------
@@ -566,7 +622,7 @@ function renderStorageInfo() {
   });
   const extra = [];
   if (finished && d.finished_bytes) extra.push(`Clearing frees about ${fmtBytes(d.finished_bytes)}.`);
-  if (d.models_bytes) extra.push(`AI models: ${fmtBytes(d.models_bytes)}.`);
+  if (d.models_bytes) extra.push(`AI add-on / models: ${fmtBytes(d.models_bytes)}.`);
   el.hidden = false;
   clear(el).append(row(
     `${appName()}’s working data: ${fmtBytes(d.jobs_bytes)} · ${finished} finished job${finished === 1 ? '' : 's'}`,

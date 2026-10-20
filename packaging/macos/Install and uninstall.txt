@@ -11,11 +11,25 @@ blocked AudioLab entry, click Open Anyway, and follow macOS's confirmation.
 Do not disable Gatekeeper or run commands that remove security protections.
 
 The core app includes Save/Convert, Check and Light/Standard Enhance.
-Split and Best enhancement are not included. The app downloads no AI models.
+
+OPTIONAL AI
+In a build with a compatible AI release catalog, open Settings > AI & system
+and choose Enable AI features for Split and Best enhancement. This optional
+download includes its own runtime and both model choices. Once installed,
+local audio works offline. No Terminal, Python, Homebrew or uv setup is needed.
+Settings shows known sizes, progress and errors. Allow extra disk space for
+unpacking and audio work. Hardware and performance are not yet qualified.
+Cancel install keeps a partial download; Resume continues it. Repair reinstalls
+the compatible version. Update AI add-on follows the app's release catalog.
+Remove AI add-on clears its owned runtime, models, cache and partial downloads
+after confirmation; your recordings, Library and settings stay. Finish or
+cancel AI jobs before updating or removing it. Shared/source packages stay.
+Published 2.4.0b1 has no AI installer; this option is for the upcoming 2.4.0b2 beta.
 
 UPDATE
 Quit AudioLab and replace AudioLab.app with the newer copy from GitHub Releases.
-Your recordings and Library remain separate from the application.
+Your recordings and Library remain separate from the application. Check
+Settings for a compatible AI add-on update after replacing the main app.
 
 UNINSTALL
 Quit AudioLab and move AudioLab.app to the Trash.

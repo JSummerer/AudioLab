@@ -4,9 +4,11 @@ The first packaged beta is **AudioLab Core 2.4.0b1**, targeting **Apple silicon 
 later**. It brings its own Python runtime and audio tools. Using it needs no Terminal commands,
 Python installation, Apple developer membership or AudioLab account. Intel builds are not yet qualified.
 
-Core includes Save / Convert, Check, Light/Standard Enhance, comparison and the Library. Split and
-Best Enhance are unavailable in this package. Optional AI remains available through the separate
-[source installation](INSTALLATION.md#install-from-source).
+Published **2.4.0b1** includes Save / Convert, Check, Light/Standard Enhance, comparison and the
+Library. Split and Best Enhance are unavailable in that release. **The next beta, 2.4.0b2, is being prepared
+with an optional managed AI download in Settings**. It includes its own runtime and both model
+choices; it needs no Terminal, Python setup or changes to shared Homebrew/uv tools. Source users
+keep their [existing AI installer](INSTALLATION.md#optional-ai-in-source-installations).
 
 ## Download and install
 
@@ -41,14 +43,16 @@ download/report the exact message. These differ from the expected unidentified-d
 ## Files and privacy
 
 Your files are processed locally. Supported web links require network access to their source. The
-packaged app does not install AI or download model weights. It runs a server on a loopback address
-for its own window, so the chosen local port can vary.
+published 2.4.0b1 app downloads no AI models. In the next beta, enabling AI explicitly downloads
+the optional software and both model choices; after installation these work offline with local
+files. The app runs a server on a loopback address for its own window, so the chosen port can vary.
 
 | Data | Default location |
 |---|---|
 | Finished audio and saved cover pictures | `~/Music/AudioLab`, or your choice in Settings → Files |
 | Settings, job history, Library records and kept original copies | `~/Library/Application Support/AudioLab` |
 | Downloader/Deno caches and runtime temporary files | The app-data folder's `cache/` subfolder |
+| Managed AI software, models, cache and partial downloads (next beta) | The app-data folder’s `ai/` subfolder |
 | App logs | `~/Library/Logs/AudioLab` |
 
 In **Settings → About**, use **Open app data** and **Open logs** to find the actual
@@ -65,6 +69,24 @@ macOS/WebKit also manages native window website storage, preferences and caches 
 identifier. Those are separate from AudioLab's app-data folder; this release does not claim all
 operating-system traces are contained in one place.
 
+## Optional AI — 2.4.0b2 (unreleased)
+
+This feature is being prepared and is **not in the published 2.4.0b1 DMG**. In a compatible build,
+choose **Settings → AI & system → Enable AI features** to add Split and Best Enhance. Settings shows
+the release's known download and installed sizes, progress and errors. Download size, installed
+size, available RAM and temporary audio space are different requirements. No minimum hardware or
+performance level has been qualified; begin with short audio.
+
+Use **Cancel install** to stop and **Resume AI download** to continue a partial download. **Repair**
+reinstalls the version selected by this app. **Update AI add-on** appears when the app's bundled
+catalog specifies a different compatible version; it is not an independent automatic updater.
+If no compatible add-on is available for the build, Settings explains why.
+
+Use **Remove AI add-on** to clear its owned software, models, cache and partial downloads while
+keeping your recordings, Library and settings. The confirmation describes what is removed. It
+never removes source-installed packages or shared model caches. Finish or cancel an AI job first.
+See [optional AI](INSTALLATION.md#optional-ai) for source setup and resource notes.
+
 ## Updates
 
 1. Quit AudioLab. Keep the old app until you have obtained the new release.
@@ -75,13 +97,16 @@ operating-system traces are contained in one place.
 
 Settings, Library and output normally remain outside the app and are reused. Read release notes for
 any compatibility instructions. The app and its downloader update together; there is no automatic
-pip installer or package self-update in Core. A new download can require the first-opening exception
+pip installer or package self-update in Core. For the next beta’s optional AI, check Settings after
+updating the app: its bundled catalog controls the compatible AI version. A new app download can
+require the first-opening exception
 again. Avoid running source and packaged copies against the same data folder at the same time.
 The source installer preserves a packaged or unrecognized app already at its shortcut destination.
 
 ## Uninstall
 
-1. Before quitting, check **Settings → Files** for your output folder. Use the About folder buttons
+1. To remove only optional managed AI, use **Settings → AI & system → Remove AI add-on** first.
+   Before quitting, check **Settings → Files** for your output folder. Use the About folder buttons
    if you want to inspect or preserve app data.
 2. Quit AudioLab, then move **AudioLab.app** from Applications to Trash.
 
@@ -124,8 +149,9 @@ exclusively by this app.
   **Settings → About → Copy system report**. Review paths, names and links before sharing.
 - **A link stops working:** check for a newer app release or use an audio file you already have.
   Core's bundled downloader is updated by replacing the app.
-- **Split or Best is unavailable:** expected in this Core beta. They require the optional AI source
-  setup; there is no hidden first-run AI download.
+- **Split or Best is unavailable:** published 2.4.0b1 has no AI installer. In the next beta, use
+  **Settings → AI & system** to install, resume or repair the managed add-on. Read the reason and
+  error log if installation is unavailable or fails. It never starts a hidden first-run download.
 - **Long audio needs too much memory or disk:** shorten it or use Light enhancement. There is no
   qualified minimum-RAM promise yet; resource use depends on task, duration and other running apps.
 

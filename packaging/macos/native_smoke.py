@@ -73,7 +73,7 @@ def main() -> int:
             assert health['ffmpeg']['source'] == 'bundled'
             assert health['downloader']['ok'] and not health['downloader']['update_supported']
             assert health['ai']['available'] is False
-            assert health['ai']['install_supported'] is False
+            assert health['ai']['install_supported'] is True and health['ai']['managed']
             viewport = window.evaluate_js(
                 '({width: innerWidth, height: innerHeight, dpr: devicePixelRatio, '
                 'visualViewport: window.visualViewport ? {width: visualViewport.width, '
@@ -87,10 +87,10 @@ def main() -> int:
             window.evaluate_js("location.hash = '#/settings/system'; true")
             _wait_for(
                 window,
-                "!!document.querySelector('#settings-system')?.textContent.includes('core app')",
-                'The native window did not render the packaged capability explanation.',
+                "!!document.querySelector('#enableAi')",
+                'The native window did not render the optional AI download action.',
             )
-            assert window.evaluate_js("!document.querySelector('#enableAi, #updateDownloader')")
+            assert window.evaluate_js("!document.querySelector('#updateDownloader')")
             result.update(
                 rendered=True,
                 backend=window.gui.renderer,

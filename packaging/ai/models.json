@@ -1,0 +1,68 @@
+{
+  "files": [
+    {
+      "model": "htdemucs",
+      "repo_id": "adefossez/HTDemucs",
+      "revision": "cbc8a9b1a87023b7fd74e7b3412e6321c0eab003",
+      "path": "955717e8.safetensors",
+      "url": "https://huggingface.co/adefossez/HTDemucs/resolve/cbc8a9b1a87023b7fd74e7b3412e6321c0eab003/955717e8.safetensors",
+      "size": 84025440,
+      "sha256": "d9fa14133cfcc034a6758923bb3a8ca9f8dfd0b582134643bbf83f72c17576dd"
+    },
+    {
+      "model": "htdemucs",
+      "repo_id": "adefossez/HTDemucs",
+      "revision": "cbc8a9b1a87023b7fd74e7b3412e6321c0eab003",
+      "path": "htdemucs.yaml",
+      "url": "https://huggingface.co/adefossez/HTDemucs/resolve/cbc8a9b1a87023b7fd74e7b3412e6321c0eab003/htdemucs.yaml",
+      "size": 21,
+      "sha256": "239c445d0b14454d541ad8bd9bb271c9e536d267e8a4625208744cbb2e7bb66c"
+    },
+    {
+      "model": "htdemucs_ft",
+      "repo_id": "adefossez/HTDemucs-ft",
+      "revision": "d74ac89c3a1e874fc78f152555cf4d8533f06cd4",
+      "path": "04573f0d.safetensors",
+      "url": "https://huggingface.co/adefossez/HTDemucs-ft/resolve/d74ac89c3a1e874fc78f152555cf4d8533f06cd4/04573f0d.safetensors",
+      "size": 84025440,
+      "sha256": "68854b0d7c2b3274723b5761f6fd9f5aec5f1bcd3f0de7c1669546fdb7871b7c"
+    },
+    {
+      "model": "htdemucs_ft",
+      "repo_id": "adefossez/HTDemucs-ft",
+      "revision": "d74ac89c3a1e874fc78f152555cf4d8533f06cd4",
+      "path": "92cfc3b6.safetensors",
+      "url": "https://huggingface.co/adefossez/HTDemucs-ft/resolve/d74ac89c3a1e874fc78f152555cf4d8533f06cd4/92cfc3b6.safetensors",
+      "size": 84025440,
+      "sha256": "a241863551f30d01c42bd7b97da40839922ead3acb0f1fcab25682f55b4eeb59"
+    },
+    {
+      "model": "htdemucs_ft",
+      "repo_id": "adefossez/HTDemucs-ft",
+      "revision": "d74ac89c3a1e874fc78f152555cf4d8533f06cd4",
+      "path": "d12395a8.safetensors",
+      "url": "https://huggingface.co/adefossez/HTDemucs-ft/resolve/d74ac89c3a1e874fc78f152555cf4d8533f06cd4/d12395a8.safetensors",
+      "size": 84025440,
+      "sha256": "5b01a97567ae9a3178a6236fb520251045c03eb8834bc8c24a4eec11d6c8fb56"
+    },
+    {
+      "model": "htdemucs_ft",
+      "repo_id": "adefossez/HTDemucs-ft",
+      "revision": "d74ac89c3a1e874fc78f152555cf4d8533f06cd4",
+      "path": "f7e0c4bc.safetensors",
+      "url": "https://huggingface.co/adefossez/HTDemucs-ft/resolve/d74ac89c3a1e874fc78f152555cf4d8533f06cd4/f7e0c4bc.safetensors",
+      "size": 84025440,
+      "sha256": "2c85ab3c62dd6edd8e0b965e38b16fd1cdde357cc25de6b6bc9ce7c83f60925f"
+    },
+    {
+      "model": "htdemucs_ft",
+      "repo_id": "adefossez/HTDemucs-ft",
+      "revision": "d74ac89c3a1e874fc78f152555cf4d8533f06cd4",
+      "path": "htdemucs_ft.yaml",
+      "url": "https://huggingface.co/adefossez/HTDemucs-ft/resolve/d74ac89c3a1e874fc78f152555cf4d8533f06cd4/htdemucs_ft.yaml",
+      "size": 149,
+      "sha256": "69470b8c1bbd674437b51bc9fb491327a10ab0396b702c93389b9cf750016346"
+    }
+  ],
+  "schema": 1
+}

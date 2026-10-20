@@ -138,6 +138,7 @@ jobs:
           path: |
             ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/release-*/*.dmg
             ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/release-*/*.tar.gz
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/release-*/ai-catalog.json
             ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/release-*/SHA256SUMS.txt
           if-no-files-found: error
           compression-level: 0
@@ -152,6 +153,13 @@ jobs:
             ${{ env.VALIDATION_DIR }}/
             ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/release-*/smoke/*.log
             ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/release-*/smoke/*.json
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/release-*/ai-smoke/*.json
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/release-*/ai-smoke/*.log
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/ai/release/inventory.json
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/ai/evidence/
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/ai/smoke/*.json
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/ai/smoke/*.stdout
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/ai/smoke/*.stderr
             ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/media/evidence/ffmpeg-version.txt
             ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/media/evidence/ffmpeg-license.txt
             ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/media/evidence/dynamic-libraries.txt

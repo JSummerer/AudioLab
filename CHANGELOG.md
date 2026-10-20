@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.4.0b2 (unreleased)
+
+- Optional managed AI for the self-contained macOS arm64 app: one explicit download includes the
+  isolated runtime and both Standard/Fine-tuned model choices for offline Split and Best Enhance.
+  A bundled catalog pins the compatible release; the main app's Python packages stay immutable.
+- Settings shows known sizes and installation progress, with resume, cancel, update, repair and
+  confirmed removal of AI-owned files. Recordings, Library, settings and shared/source caches stay.
+  No tester-side Terminal, Python, Homebrew or uv setup is needed. Hardware/performance qualification
+  and publication of the next beta remain separate from source implementation.
+
 ## 2.4.0b1 (2026-10-20, public beta)
 
 ### Changed

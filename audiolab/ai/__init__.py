@@ -38,14 +38,6 @@ def model_choices() -> list[dict[str, str]]:
 
 
 def _detect() -> dict[str, Any]:
-    if runtime.is_packaged():
-        return {
-            'available': False,
-            'device': None,
-            'torch_version': None,
-            'demucs_version': None,
-            'reason': 'This core app does not include AI. Split and Best enhancement are unavailable.',
-        }
     missing = [m for m in ('torch', 'demucs') if importlib.util.find_spec(m) is None]
     if missing:
         return {
@@ -83,6 +75,10 @@ def _detect() -> dict[str, Any]:
 
 def ai_status(refresh: bool = False) -> dict[str, Any]:
     """{'available', 'device', 'torch_version', 'demucs_version', 'reason'}"""
+    if runtime.is_packaged() and not runtime.is_ai_worker():
+        from .managed import managed_ai
+
+        return managed_ai().status()
     with _LOCK:
         if refresh or 'status' not in _CACHE:
             if refresh:

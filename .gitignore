@@ -39,6 +39,40 @@ runs/
 deliverables/
 archive/
 
+# Recordings and rendered media, including loose files outside the data folders
+*.wav
+*.wave
+*.mp3
+*.m4a
+*.m4b
+*.flac
+*.opus
+*.ogg
+*.aac
+*.aif
+*.aiff
+*.alac
+*.wma
+*.caf
+*.webm
+*.mp4
+*.m4v
+*.mov
+*.mkv
+*.avi
+
+# Generated application bundles and release archives
+*.app/
+*.dmg
+*.pkg
+*.zip
+*.tar
+*.tar.gz
+*.tar.xz
+*.tar.bz2
+*.tgz
+*.7z
+
 # Temporary files
 .playwright-mcp/
 .temp_*

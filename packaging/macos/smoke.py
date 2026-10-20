@@ -104,7 +104,8 @@ def main() -> None:
             assert health['packaged'] and health['ffmpeg']['ok']
             assert health['ffmpeg']['source'] == 'bundled'
             assert health['downloader']['ok'] and not health['downloader']['update_supported']
-            assert not health['ai']['available'] and not health['ai']['install_supported']
+            assert not health['ai']['available'] and health['ai']['install_supported']
+            assert health['ai']['managed'] and health['ai']['download_bytes'] > 0
             for route in ('/', '/js/main.js', '/css/tokens.css'):
                 with urllib.request.urlopen(f'http://127.0.0.1:{port}{route}', timeout=5) as response:
                     assert response.status == 200 and response.read()

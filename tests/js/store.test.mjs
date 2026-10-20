@@ -43,7 +43,7 @@ async function setup(t, { events = false, actions = false } = {}) {
   const state = actions ? await import('../../audiolab/web/js/store.js')
     : await import(`../../audiolab/web/js/store.js?test=${++imports}`);
   return {
-    ...state, requests,
+    ...state, requests, timers,
     actions: actions ? await import('../../audiolab/web/js/actions.js') : null,
     poll: () => { for (const fn of intervals.values()) fn(); },
     event: (kind, data) => source.send(kind, data),
@@ -56,6 +56,37 @@ function answer(request, data, status = 200) {
 }
 
 const job = (id, status = 'queued', updated_at = 10) => ({ id, status, updated_at });
+
+test('cold managed AI check is polled until ready without needing a system event', async (t) => {
+  const s = await setup(t);
+  const first = s.loadHealth();
+  answer(s.requests[0], { ai: { managed: true, installing: false, available: false, state: 'busy' } });
+  await first;
+  assert.equal(s.timers.size, 1);
+  const timer = [...s.timers.values()][0];
+  timer();
+  answer(s.requests[1], { ai: { managed: true, installing: false, available: true, state: 'ready' } });
+  await nextTurn();
+  assert.equal(s.store.health.ai.available, true);
+  assert.equal(s.timers.size, 0);
+});
+
+test('a transient health failure does not abandon an unfinished managed AI check', async (t) => {
+  const s = await setup(t);
+  const first = s.loadHealth();
+  answer(s.requests[0], { ai: { managed: true, available: false, state: 'busy' } });
+  await first;
+  [...s.timers.values()][0]();
+  s.requests[1].reject(new Error('temporary connection failure'));
+  await nextTurn();
+  assert.equal(s.store.health.ai.state, 'busy');
+  assert.equal(s.timers.size, 1);
+  [...s.timers.values()][0]();
+  answer(s.requests[2], { ai: { managed: true, available: true, state: 'ready' } });
+  await nextTurn();
+  assert.equal(s.store.health.ai.available, true);
+  assert.equal(s.timers.size, 0);
+});
 
 test('overlapping fallback polls ignore an older snapshot that finishes last', async (t) => {
   const s = await setup(t);

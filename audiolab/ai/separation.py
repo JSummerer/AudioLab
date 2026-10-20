@@ -23,6 +23,7 @@ import numpy as np
 import soundfile as sf
 from scipy.signal import resample_poly
 
+from .. import runtime
 from ..context import Progress
 from ..errors import AudioLabError, ToolMissingError
 from . import DEFAULT_MODEL, MODELS, ai_status
@@ -34,6 +35,11 @@ GATE_DB = -28.0  # reconstruction residual must be at or below this
 
 
 def _load_model(name: str, progress: Progress):
+    if runtime.is_ai_worker():
+        from .worker import load_local_model
+
+        progress(1, f'Loading the installed AI model ({MODELS[name]["label"]})…')
+        return load_local_model(name)
     os.environ.setdefault('HF_HUB_DISABLE_PROGRESS_BARS', '1')
     try:
         from huggingface_hub.utils import logging as hf_logging
@@ -88,6 +94,10 @@ def separate(
     Returns {'stems': {name: path}, 'residual_db', 'gate_passed', 'device', 'model',
              'sources', 'wall_time_s'}."""
     progress = progress or Progress.null()
+    if runtime.is_packaged() and not runtime.is_ai_worker():
+        from .client import separate_managed
+
+        return separate_managed(ref, out_dir, model, shifts, progress)
     status = ai_status()
     if not status.get('available'):
         raise ToolMissingError(

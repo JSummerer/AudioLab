@@ -45,7 +45,7 @@ line and the Docker image.
 | `media/` | `proc.py` (cancellable subprocesses), `ffmpeg.py` (system or bundled ffmpeg, probing incl. embedded tags, `decode_pcm`: 48 kHz chunks on a 1/25 s grid that join like one decode; WebM/Matroska's millisecond timestamps get a seek offset measured once per file), `youtube.py` (yt-dlp + deno, the artist/title rule for links, tracks from chapters/tracklists, self-repair update, browser sign-in), `export.py` (format matrix, the file types that can be added, tags, cover art, sample-accurate track cutting) |
 | `analysis/` | `profile.py` (loudness, true peak, LRA, bandwidth, bands, alerts), `classify.py` (content type + reasons), `key.py` (musical key estimate) |
 | `recipes/` | `Recipe` + `ChainParams`, `resolve()` turns recipe + measurements + user overrides into parameters *with reasons*; `chain.render()` is the single mastering chain |
-| `ai/` | Lazy torch/demucs detection, windowed separation, `install.py` (the optional AI pack installer) |
+| `ai/` | Lazy source torch/demucs detection and windowed separation; `install.py` installs source packages, `managed.py` owns the catalog-pinned packaged runtime lifecycle selected by `api/state.py`, `client.py` invokes the isolated helper, `worker.py` runs/probes it and loads local offline weights |
 | `dsp/` | Signal-processing building blocks (float32, block-streamed so 2 h sets fit in RAM) |
 | `previews.py` | The Enhance before/after excerpt (a loud 45 s passage, or the whole recording when shorter) at the true relative level, one shared headroom gain; compared when the original isn't kept |
 | `settings.py` | Data/output folders (the output folder is only resolved here, never created: whatever writes creates it), env-var limits (`AUDIOLAB_*`), persisted user preferences (checked on load/update; a new snapshot becomes active only after saving succeeds) |
@@ -65,16 +65,39 @@ the platform in `doctor`. Porting a feature to another OS means filling in its b
 
 ### Self-contained macOS Core build
 
-The source launchers remain for development and optional AI. The downloadable Core app has a separate
+The source launchers remain for development and the source-mode AI installer. The downloadable Core app has a separate
 entry, `packaging/macos/entry.py`, frozen with the spec and pinned build inputs in `packaging/macos/`.
 It starts the same native window/server/task pipeline without `start.sh`, uv, pip or a user's Python.
 Its private downloader mode dispatches yt-dlp inside the frozen executable; that executable is not a
 general-purpose Python interpreter. `runtime.py` chooses this mode and the bundled FFmpeg/Deno.
 
-Core exposes Save/Convert, Check and Light/Standard Enhance. AI dependencies/weights are excluded;
-Split, Best, package installation and downloader self-updates are refused in packaged mode. Health
-capabilities let the UI explain this boundary; server validation also enforces it. Source/CLI/Docker
-keep their existing optional-AI and update paths. Replace the whole app to update the binary delivery.
+Core exposes Save/Convert, Check and Light/Standard Enhance without AI. The published 2.4.0b1
+binary excludes AI. The next beta's managed optional add-on includes a frozen AI helper and both
+supported model choices; the main app's bundled Python packages remain immutable. `ai.install_supported`
+is driven by a build-generated, bundled catalog, not simply `packaged`. Split/Best use the healthy
+managed helper when present. Source/CLI/Docker keep their existing optional-AI and update paths.
+Downloader self-updates remain disabled in packaged mode; replace the app to update the main delivery.
+
+`ai/catalog.json` pins one compatible HTTPS release asset, archive checksum, exact byte counts,
+protocol, executable and model choices. No mutable latest-version lookup or user-supplied download URL
+is used. `ai/managed.py` downloads resumably into `<data>/ai/download.part`, verifies size/hash, extracts
+into owned staging, rejects unsafe archive entries, probes the helper and atomically publishes an
+active receipt. It preserves the prior installation until the replacement passes. Repair rebuilds
+the selected version; cancel leaves a resumable partial; remove clears owned AI files only. Runtime,
+weights, cache and temporary files stay under `<data>/ai/`; shared/source caches are neither adopted
+nor deleted. Source `install.py` keeps the existing pip/uv route.
+
+An ownership marker distinguishes a managed root from unrelated existing files. Output folders must
+not overlap AI storage; settings and task output creation both enforce this. Archive extraction accepts
+regular files, directories and deferred hardlinks to direct regular archive members, never symlinks or
+link chains. This stores shared native libraries once; storage reporting also counts their inodes once.
+
+AI jobs and lifecycle operations share `<data>/.ai-operation.lock`, outside the removable root. A job
+lease is inherited by the helper process so a parent crash cannot allow removal while it still uses
+the runtime. `ai/client.py` runs the frozen `AudioLabAI` helper through `media.proc.run` with progress,
+cancellation and output-path checks. `ai/worker.py` speaks a versioned JSON-lines protocol and loads
+pinned local safetensors models with no remote fallback. Health and storage report the owned files
+separately from the catalog's unpacked target size. See the [HTTP contract](API.md#health).
 
 The initial release target is macOS 14+ arm64 with identifier `io.github.jsummerer.audiolab`. The build
 produces an ad-hoc-signed `.app`/DMG, checksums and a corresponding third-party source companion.
@@ -192,7 +215,7 @@ audio array to the chain rather than retaining a second obsolete buffer through 
   add its tile and options in `web/js/views/new/` and its result block in `web/js/views/job/results.js`.
 - **New view**: a module in `web/js/views/` that exports `{ el, heading, show, hide }`, a `<section>` in
   `index.html`, `register()` it in `main.js`, and a sidebar link.
-- **New AI model**: add it to `ai.MODELS`; anything with a `demucs`-compatible API works directly.
+- **New AI model**: add it to `ai.MODELS` and the source loader. For the packaged helper, also bundle and verify its offline weights, update the compatible catalog and rebuild the optional asset; it cannot download an unlisted model at runtime.
 - **Another OS**: fill in the function's branch in `system.py`.
 
 ## Data locations
@@ -204,6 +227,7 @@ audio array to the chain rather than retaining a second obsolete buffer through 
 | Library records and kept originals | `<data>/library/` (`originals/` = the downloaded stream or uploaded file, as it came; cleared in Settings → Storage) |
 | Log file | macOS `~/Library/Logs/AudioLab`, elsewhere (and with a custom data folder) `<data>/logs` |
 | Packaged Core caches/temp | `<data>/cache/yt-dlp`, `<data>/cache/deno`, `<data>/cache/tmp`; configured by `runtime.py` before use |
+| Managed packaged AI | `<data>/ai/`: versioned runtime and models, active receipt, cache, temporary files and resumable download; `<data>/.ai-operation.lock` coordinates lifecycle/jobs |
 | Native WebKit website data | macOS-managed default Cocoa website store under the app identity; separate from app data (see [Mac cleanup](MACOS.md#uninstall)) |
 | Source-mode AI models | Hugging Face cache (`HF_HOME` / `HF_HUB_CACHE`) and/or Torch hub (`~/.cache/torch`, `TORCH_HOME`); can be shared with other software |
 

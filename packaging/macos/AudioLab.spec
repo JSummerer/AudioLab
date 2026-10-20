@@ -10,6 +10,8 @@ ROOT = Path(SPECPATH).parents[1]
 FFMPEG = Path(os.environ['AUDIOLAB_PACKAGE_FFMPEG']).resolve()
 assert FFMPEG.is_file(), 'Build the pinned media tool before packaging'
 NOTICES = Path(os.environ['AUDIOLAB_PACKAGE_NOTICES']).resolve()
+AI_CATALOG = Path(os.environ['AUDIOLAB_AI_CATALOG']).resolve()
+assert AI_CATALOG.is_file(), 'Build and validate the optional AI add-on before freezing its catalog into the app'
 assert NOTICES.is_dir() and (NOTICES / 'packages.json').is_file(), 'Prepare the exact shipped third-party notices'
 assert (NOTICES / 'build-info.json').is_file(), 'Prepare the build inventory before packaging'
 DENO = Path(deno.find_deno_bin()).resolve()
@@ -24,6 +26,7 @@ datas = [
     (str(ROOT / 'LICENSE'), '.'),
     (str(NOTICES), 'ThirdParty'),
     (str(NOTICES / 'build-info.json'), '.'),
+    (str(AI_CATALOG), 'audiolab/ai'),
 ]
 for package in ('yt_dlp', 'yt_dlp_ejs', 'certifi', 'webview'):
     datas += collect_data_files(package)

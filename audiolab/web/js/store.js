@@ -97,11 +97,18 @@ export const activeCount = () => [...store.jobs.values()].filter(isActive).lengt
 let healthTimer = 0;
 
 export async function loadHealth() {
-  store.health = await api('/api/health');
-  emit('health');
-  clearTimeout(healthTimer);
-  // While the AI pack installs, keep health fresh even if SSE is down.
-  if (store.health?.ai?.installing) healthTimer = setTimeout(() => loadHealth().catch(() => {}), 3000);
+  try {
+    store.health = await api('/api/health');
+    emit('health');
+  } finally {
+    clearTimeout(healthTimer);
+    // Cold-start checks and another process's AI lease can finish without an SSE
+    // event. Keep polling transient states, even after a temporary HTTP failure.
+    const ai = store.health?.ai;
+    if (ai?.installing || (ai?.managed && ['busy', 'checking', 'downloading', 'installing'].includes(ai.state))) {
+      healthTimer = setTimeout(() => loadHealth().catch(() => {}), 3000);
+    }
+  }
 }
 
 // Replay only mutations accepted after each snapshot was requested. A fresh

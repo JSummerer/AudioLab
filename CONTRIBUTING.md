@@ -3,7 +3,7 @@
 Thanks for helping! A few ground rules keep AudioLab friendly for people who are not audio engineers.
 
 For everyday use rather than development, follow the [installation guide](docs/INSTALLATION.md).
-Mac testers can use the [Core DMG](docs/MACOS.md); development still runs from source.
+Mac testers can use the [DMG](docs/MACOS.md); development still runs from source.
 
 ## Setup
 ```bash
@@ -24,7 +24,7 @@ version cannot hide differences in the fallback used by a fresh installation.
 
 ```bash
 .venv/bin/ruff check . && .venv/bin/ruff format --check .   # lint + formatting (config in pyproject.toml)
-.venv/bin/python -m pytest                                    # no network, no AI models needed
+.venv/bin/python -m pytest                               # local HTTP fixtures, no downloads or AI models
 find audiolab/web -name '*.js' -exec node --check {} \;      # JS syntax (Node 22+)
 bash -n start.sh && bash -n AudioLab.command                 # after touching the launchers
 ```
@@ -39,7 +39,7 @@ a browser, profile or network. Browser smoke tests still need a separate headles
 Open an [issue](https://github.com/JSummerer/AudioLab/issues) with the expected behavior, what happened,
 steps to reproduce, OS and AudioLab version. For a Git checkout, include `git rev-parse --short HEAD`.
 For a downloaded app, include the release tag, exact asset name, Mac chip and macOS version. The
-2.4.0b1 candidate remains a prerelease; build checks and publication status belong in its release
+Mac beta remains a prerelease; build checks and publication status belong in its release
 notes. Use generated examples or recordings you may share, and remove personal
 paths, links and credentials from logs. Report security issues [privately](SECURITY.md).
 
@@ -54,9 +54,10 @@ recipe, format, task, view or support for another OS. The HTTP contract between 
 
 ## macOS binary delivery
 
-The initial binary is a **Core** build for macOS 14+ arm64. It excludes optional AI, supports
-Save/Convert, Check and Light/Standard Enhance, and refuses pip/package maintenance in the app.
-Source installation, optional AI and the Windows/Linux browser paths remain separate.
+The binary targets macOS 14+ arm64. Its main download includes Save/Convert, Check and
+Light/Standard Enhance. Settings manages a separate immutable AI helper archive for Split and
+Best Enhance, with both offline models. The app never runs pip or changes shared environments.
+Source installation and the Windows/Linux browser paths remain separate.
 See [packaging/macos/README.md](packaging/macos/README.md) for the pinned build environment, selected
 FFmpeg sources/licenses, app entry, smoke checks and release artifacts.
 
@@ -67,7 +68,9 @@ disposable runner/test user, with no personal browser profiles or recordings. St
 artifact identity and residual limits. Intel output from an experimental workflow is not qualified
 support until it passes its own native checks.
 
-Distribute the DMG, checksums and matching third-party source companion through a GitHub prerelease.
+Distribute the DMG, exact AI archive/catalog, checksums and both matching third-party source
+companions through a GitHub prerelease. The app embeds the AI archive hash and versioned URL;
+upload these assets together and check the public installation path after publication.
 Do not include `.work/`, local audit evidence, private recordings, build environments or old private
 Git history. Keep the bundle identifier `io.github.jsummerer.audiolab` stable. This beta uses ad-hoc
 signing without Apple Developer ID/notarization; document [Apple's graphical opening

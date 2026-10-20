@@ -49,6 +49,19 @@ def default_output_dir() -> Path:
     return Path.home() / 'Music' / APP_NAME
 
 
+def validate_output_location(target: Path) -> None:
+    """Generated audio must never enter the removable managed-runtime tree."""
+    from .errors import AudioLabError
+
+    ai_root = (SETTINGS.data_dir / 'ai').resolve()
+    resolved = target.resolve()
+    if resolved.is_relative_to(ai_root) or ai_root.is_relative_to(resolved):
+        raise AudioLabError(
+            'Choose an output folder separate from AudioLab’s AI storage.',
+            hints=['Use a folder such as Music/AudioLab, outside the app data folder.'],
+        )
+
+
 # ---------------------------------------------------------------------------
 # Operational limits (env only — these protect the machine, not preferences)
 # ---------------------------------------------------------------------------

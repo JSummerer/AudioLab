@@ -14,6 +14,15 @@ def is_packaged() -> bool:
     return bool(getattr(sys, 'frozen', False))
 
 
+def is_ai_worker() -> bool:
+    """The optional frozen helper uses local Torch, never another helper."""
+    return bool(getattr(sys, '_audiolab_ai_worker', False))
+
+
+def ai_worker_root() -> Path:
+    return Path(sys.executable).resolve().parent
+
+
 def downloader_command() -> list[str]:
     if is_packaged():
         return [sys.executable, '--audiolab-downloader']

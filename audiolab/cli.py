@@ -291,9 +291,15 @@ def cmd_install_ai(args) -> int:
     import subprocess
 
     from .ai.install import install_command
+    from .runtime import is_packaged
+
+    if is_packaged():
+        from .errors import AudioLabError
+
+        raise AudioLabError('Open AudioLab Settings → AI & system to install or remove the optional AI add-on.')
 
     cmd = install_command()
-    print('Installing AI features (torch + demucs). This downloads about 1–2 GB…')
+    print('Installing AI software (torch + demucs). Model files download on first use…')
     return subprocess.call(cmd)
 
 

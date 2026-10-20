@@ -1,7 +1,7 @@
 # Install AudioLab
 
 Choose the self-contained **Mac Core app** for everyday testing on Apple silicon, or install from
-source for development, optional AI, Windows or Linux. They use the same processing code and normally
+source for development, Windows or Linux. They use the same processing code and normally
 share app data for the same computer user; quit one before opening the other.
 
 ## Mac Core app
@@ -19,10 +19,10 @@ first-opening warning, use the [Mac guide's graphical Open Anyway steps](MACOS.m
 That guide also covers updates, storage and uninstall. The release notes state which native checks
 were completed; documentation of this path is not evidence that a candidate has passed them.
 
-Core includes **Save / Convert**, **Check**, and **Light/Standard Enhance**, plus the Library.
-**Split** and **Best Enhance** require AI and are unavailable in the packaged app. Core does not
-install AI, change its bundled Python packages, or update its downloader through pip. Replace the
-app with a newer release to update it.
+The published **2.4.0b1** Core app includes **Save / Convert**, **Check**, and **Light/Standard
+Enhance**, plus the Library. Split and Best Enhance are unavailable in that release. The next beta
+is being prepared with the [optional managed AI download](#optional-ai) below. The main app and its
+downloader update by replacing the app; the packaged app does not change Python packages through pip.
 
 ## Install from source
 
@@ -89,16 +89,57 @@ It uses uv or Python 3.10–3.13, offering to install uv if needed. If Python ca
 environment, follow the message or use uv. Keep the terminal open; press **Ctrl+C** to stop AudioLab.
 Distribution-specific setup remains unqualified.
 
+## Optional AI
+
+AI adds **Split** and **Best Enhance**. It is optional; the other tools work without it.
+The managed packaged option below is being prepared for **2.4.0b2 (unreleased)** and is not included in
+published **2.4.0b1**. Its initial target is macOS 14+ on Apple silicon (arm64).
+
+### Packaged Mac app — 2.4.0b2 (unreleased)
+
+Open **Settings → AI & system → Enable AI features**. When a compatible add-on is available for
+that app build, Settings shows its download and installed-file sizes. These describe the release
+asset, not the RAM needed to process audio. Allow additional free space for downloading, unpacking
+and audio intermediates; no fixed download-size or minimum-RAM promise applies to every release.
+
+The optional download is self-contained: it includes its own AI runtime and both **Standard** and
+**Fine-tuned** model choices. AudioLab verifies the download and tests the runtime before enabling
+it. After installation, both choices work offline with local files; processing stays on your Mac.
+It needs no Terminal, separately installed Python, Homebrew, uv or pip. It does not change those
+shared tools or adopt their model caches.
+
+Settings shows progress and recent error details. **Cancel install** stops work and keeps a partial
+download for **Resume AI download**. Retry a failed installation after checking your connection and
+free space. **Repair** reinstalls and verifies the compatible add-on. **Update AI add-on** appears
+when the app's bundled release catalog specifies another version; the app never silently chooses
+an arbitrary latest add-on. A build without a compatible catalog explains why installation is
+unavailable.
+
+**Remove AI add-on** asks for confirmation, then removes AudioLab-owned AI software, models, caches
+and partial downloads from the app-data folder's `ai/` directory. Your recordings, Library,
+settings and source-installed/shared AI packages stay. Finish or cancel an AI job before changing
+its installation. You can enable AI again later.
+
+### Resource notes
+
+AI can consume several gigabytes of working memory and considerably more temporary audio space
+than the model files alone. Hardware requirements and performance are not yet qualified. Settings
+reports detected acceleration; CPU-only processing is slower and limited to recordings of 20 minutes
+by default. Try a short local recording first. Shorter recordings and Light/Standard Enhance reduce
+resource demand. Fine-tuned uses several models and is slower than Standard.
+
 ## Optional AI in source installations
 
-**Source only:** enable AI in Settings for Split and Best Enhance, or request it during setup:
+Source installations keep the existing package installer. Enable AI in Settings for Split and Best
+Enhance, or request it during setup:
 
 ```bash
 bash start.sh --with-ai
 ```
 
 On Windows: `.\start.bat --with-ai`. AI software installs first; model weights download on first use.
-Processing then stays on your computer. The Mac Core package does not offer this installer.
+Processing then stays on your computer. The packaged Mac app uses the separate managed download
+described above; it never runs this source installer.
 
 For scale, one audited Apple silicon environment with Torch 2.14.1 and Demucs 4.1.0 added about
 **585 MB of installed AI package files**, before weights and installation overhead. The author's
@@ -108,17 +149,12 @@ For scale, one audited Apple silicon environment with Torch 2.14.1 and Demucs 4.
 Versions and cache copies change the total. The [Demucs guide](https://github.com/adefossez/demucs)
 describes Fine-tuned as roughly four times slower than Standard.
 
-AI can consume several gigabytes of working memory and substantially more space for temporary audio
-than for weights. Apple silicon with 16 GB or more unified memory is a sensible future AI qualification
-target, **not an established minimum or performance guarantee**. A future packaged AI option would
-need its own hardware qualification. Available acceleration depends on the installed PyTorch build,
-OS and hardware; Settings reports detection. CPU-only AI is slower and currently limited to recordings
-of 20 minutes by default. Shorter recordings and Light/Standard Enhance reduce resource demand.
-
 ## Update AudioLab
 
 For the **Mac Core app**, follow [Replace the app](MACOS.md#updates): quit, install the newer DMG's app
-and reopen. Its downloader updates with the app; there is no background package installer.
+and reopen. Its downloader updates with the app. In the next beta, check **Settings → AI & system**
+for any compatible AI add-on update after replacing the app. Source packages and shared caches are
+not changed by the packaged AI updater.
 
 For a **source installation**:
 
@@ -144,7 +180,7 @@ Source mode's **Update downloader** updates the link-handling tool, not AudioLab
 | The source Mac shortcut cannot open | The project may have moved. Run `AudioLab.command` in its current location. |
 | The source Python environment is broken | With AudioLab stopped, run `bash start.sh --reinstall`; Windows: `.\start.bat --reinstall`. This recreates `.venv`; enable AI afterwards if needed. |
 | The browser did not open | Use the address printed in the source terminal. Keep it running; the port can vary. |
-| Split or Best is unavailable | Expected in the Mac Core app. Source users can enable the optional AI pack and inspect any install error. |
+| Split or Best is unavailable | Published 2.4.0b1 has no AI installer. In a build with managed AI, open Settings → AI & system to install, resume or repair it and inspect errors. Source users can enable the existing AI package installer. |
 | The output folder is unavailable | Reconnect its drive or choose another folder in Settings → Files. |
 | A result plays elsewhere but not here | Codec support varies. Open the result in your usual player or export MP3/WAV. |
 
@@ -166,6 +202,7 @@ any source shortcut. Keep originals and Library data if you want them after rein
 | Same — Windows | `%LOCALAPPDATA%\AudioLab` |
 | Same — Linux | `~/.local/share/audiolab`, or under `XDG_DATA_HOME` |
 | App logs — macOS | `~/Library/Logs/AudioLab` |
+| Managed packaged AI software, models and partial downloads | The app-data folder’s `ai/` subfolder; use Settings → AI & system → Remove AI add-on |
 | Source-mode AI weights | Hugging Face and/or Torch caches, usually under `~/.cache`; may be shared |
 
 Removing app data loses history and kept original copies. Output files are never removed automatically.

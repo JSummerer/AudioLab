@@ -149,6 +149,28 @@ class InstanceLock:
             self._fh.close()
             self._fh = None
 
+    @property
+    def fileno(self) -> int:
+        """Keep the same lock alive in an owned helper if its parent exits."""
+        if self._fh is None:
+            raise RuntimeError('The lock is not held.')
+        return self._fh.fileno()
+
+
+def inherited_descriptors(fds: tuple[int, ...]) -> dict[str, Any]:
+    if not fds:
+        return {}
+    if os.name != 'posix':
+        raise RuntimeError('Inherited helper locks are only supported on POSIX.')
+    return {'pass_fds': fds}
+
+
+def managed_ai_supported() -> bool:
+    """Initial qualified add-on target; source installs keep their own device support."""
+    import platform
+
+    return sys.platform == 'darwin' and platform.machine() == 'arm64' and int(platform.mac_ver()[0].split('.')[0]) >= 14
+
 
 # ---------------------------------------------------------------------------
 # Child processes

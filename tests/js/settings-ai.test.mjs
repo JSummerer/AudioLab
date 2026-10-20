@@ -28,7 +28,7 @@ function find(root, id) {
 function text(root) {
   return root instanceof Element ? root.children.map(text).join(' ') : String(root);
 }
-function setup(ai) {
+function setup(ai, { crlf = false } = {}) {
   const body = new Element('section');
   const requests = [];
   const errors = [];
@@ -48,7 +48,9 @@ function setup(ai) {
     body,
   };
   const path = new URL('../../audiolab/web/js/views/settings.js', import.meta.url);
-  const source = readFileSync(path, 'utf8').replace(/^import .*;\n/gm, '').replace(/^export /gm, '');
+  const original = readFileSync(path, 'utf8');
+  const checkout = crlf ? original.replace(/\r?\n/g, '\r\n') : original;
+  const source = checkout.replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '');
   vm.runInNewContext(`${source}\nrefs = { sections: { system: { body } } };\nvisible = true;\nrenderSystem();`, context, { filename: path.pathname });
   return {
     body, requests, errors, messages, context,
@@ -59,6 +61,11 @@ function setup(ai) {
 const managed = (patch = {}) => ({
   managed: true, install_supported: true, available: false, installing: false,
   state: 'missing', target_version: 'ai-2', ...patch,
+});
+
+test('Settings harness accepts Windows checkout line endings', () => {
+  const s = setup(managed(), { crlf: true });
+  assert.equal(text(s.button('enableAi')), 'Enable AI features');
 });
 
 test('managed install is offered in the packaged app and uses the existing endpoint', async () => {

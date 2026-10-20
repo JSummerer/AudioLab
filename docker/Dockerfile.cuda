@@ -1,0 +1,25 @@
+# AudioLab — NVIDIA GPU image (Linux host with the NVIDIA Container Toolkit).
+# Build from the repository root: docker build -f docker/Dockerfile.cuda .
+FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    AUDIOLAB_DATA_DIR=/data \
+    AUDIOLAB_OUTPUT_DIR=/output \
+    TORCH_HOME=/data/torch
+
+WORKDIR /app
+COPY pyproject.toml README.md LICENSE ./
+# torch is already in the base image; this adds demucs and the other dependencies (cached layer,
+# installed via a stub package so code changes don't re-run it), then the app itself.
+RUN mkdir audiolab && echo "__version__ = '0.0.0'" > audiolab/__init__.py \
+ && pip install ".[ai]" && pip uninstall -y audiolab-app && rm -rf audiolab
+COPY audiolab ./audiolab
+RUN pip install --no-deps .
+
+EXPOSE 8765
+VOLUME ["/data", "/output"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/ping', timeout=3)"
+CMD ["audiolab", "serve", "--host", "0.0.0.0", "--port", "8765"]

@@ -1,0 +1,87 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+# Local source distribution; no package-index release is advertised.
+# Review the working name before publishing to a package index.
+name = "audiolab-app"
+dynamic = ["version"]
+description = "Convert, enhance, separate and analyze audio files and supported web links on your own computer."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10,<3.14"
+authors = [{ name = "AudioLab contributors" }]
+keywords = ["audio", "mastering", "conversion", "analysis", "stem-separation", "loudness"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Sound/Audio :: Conversion",
+    "Topic :: Multimedia :: Sound/Audio :: Analysis",
+]
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "soundfile>=0.12.1",
+    "fastapi>=0.110",
+    "starlette>=0.49.1",             # FileResponse with (fixed) HTTP Range: seeking in long files
+    "uvicorn>=0.28",
+    "python-multipart>=0.0.9",
+    "yt-dlp[default]>=2025.11.12",   # [default] pulls yt-dlp-ejs, needed for YouTube
+    "deno>=2.0",                     # JavaScript runtime yt-dlp needs for YouTube
+    "imageio-ffmpeg>=0.5",           # bundled ffmpeg fallback when none is installed
+    "pywebview>=5; sys_platform == 'darwin'",  # the app window (Windows/Linux: the [desktop] extra)
+]
+
+[project.optional-dependencies]
+ai = ["torch>=2.1", "demucs>=4.1"]
+desktop = ["pywebview>=5"]                 # app window on Windows/Linux (built in on macOS)
+dev = ["httpx>=0.27", "pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+audiolab = "audiolab.cli:main"
+
+[project.urls]
+Repository = "https://github.com/JSummerer/AudioLab"
+Issues = "https://github.com/JSummerer/AudioLab/issues"
+
+[tool.hatch.version]
+path = "audiolab/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["audiolab"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "audiolab", "tests", "docs", "README.md", "CHANGELOG.md", "CONTRIBUTING.md",
+    "SECURITY.md", "LICENSE", "pyproject.toml", "start.sh", "start.bat", "AudioLab.command",
+]
+exclude = ["docs/PLAN.md"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = [
+    "E501",    # long lines are left to the formatter
+    "E731",    # small lambdas are fine
+    "B008",    # FastAPI's Body()/Form()/File() defaults
+    "B905",    # zip() without strict= (py3.10 baseline)
+]
+
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

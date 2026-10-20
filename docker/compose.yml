@@ -1,0 +1,35 @@
+# docker compose -f docker/compose.yml up -d   →   http://localhost:8088
+# (access token: docker compose -f docker/compose.yml logs audiolab)
+services:
+  audiolab:
+    build:
+      context: ..                 # the repository root
+      dockerfile: docker/Dockerfile
+      args:
+        WITH_AI: "1"          # "0" = smaller image without AI features
+    container_name: audiolab
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8088}:8765"
+    volumes:
+      - audiolab-data:/data                        # jobs, settings, AI model cache
+      - ${AUDIOLAB_OUTPUT:-../output}:/output       # finished files land here (default: <repo>/output)
+    environment:
+      - AUDIOLAB_TOKEN=${AUDIOLAB_TOKEN:-}         # empty = auto-generated, printed in the logs
+      # - AUDIOLAB_AI_CPU_MAX_DURATION_S=1200      # refuse long AI jobs on CPU
+      # - AUDIOLAB_MAX_CONCURRENT_JOBS=1
+      # - AUDIOLAB_RETENTION_DAYS=30
+    # Hard caps so this container can never starve other containers on the host.
+    mem_limit: 4g
+    memswap_limit: 4g
+    cpus: 2.5
+    pids_limit: 256
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  audiolab-data:

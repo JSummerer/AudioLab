@@ -1,0 +1,320 @@
+/* New (#/new): the link field, the source card, the four tasks and the picked task's options
+   on the sheet; beside them the sleeve — what is being made, and the start button. Narrower,
+   the sleeve becomes a bar along the bottom (always in reach), and on phones it closes the
+   page. Options read like a sleeve's credits: the label left, its choice right. Sizes respond
+   to the content area (@container content), not to the window. Tokens only. */
+
+.page-new { max-width: var(--page-w-wide); }
+.create { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-6); min-width: 0; }
+.create-main { min-width: 0; }
+.step + .step { margin-top: var(--s-6); }
+
+/* --------------------------------------------------------------------------
+   Source: the link field (the one big input), "Choose files", the card under them
+   -------------------------------------------------------------------------- */
+.source-field {
+  display: flex; align-items: center; gap: var(--s-3);
+  height: 50px; padding: 0 7px 0 var(--s-4);
+  border-radius: var(--r-sm); border: 1.5px solid var(--ink);
+  background: var(--bg);
+  transition: border-color .15s, box-shadow .15s;
+}
+.source-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.source-field-ico { color: var(--ink-3); }
+.source-input {
+  flex: 1; min-width: 0; height: 100%;
+  border: 0; outline: none; background: transparent;
+  font-size: var(--fs-h3);
+}
+.source-input::placeholder { color: var(--ink-3); }
+.source-alt { display: flex; align-items: center; gap: 0 var(--s-1); flex-wrap: wrap; margin: var(--s-2) 0 0 -8px; }
+.source-alt-note { color: var(--ink-2); font-size: var(--fs-small); }
+.source-slot:not(:empty) { margin-top: var(--s-4); }
+
+/* The card: a quiet object — picture, title, one line of facts, then its tools. */
+.source-card {
+  display: grid; grid-template-columns: 128px minmax(0, 1fr) auto;
+  grid-template-areas: "thumb text remove" "thumb tools tools" "edit edit edit";
+  column-gap: var(--s-4); align-items: start;
+  padding: var(--s-3); border-radius: var(--r-md);
+  background: var(--panel-2);
+}
+.source-thumb {
+  grid-area: thumb;
+  width: 128px; aspect-ratio: 16 / 9; border-radius: var(--r-sm); overflow: hidden;
+  background: var(--sunken); display: grid; place-items: center; color: var(--ink-3);
+}
+.source-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.source-text { grid-area: text; min-width: 0; padding-top: 2px; }
+.source-title {
+  font: 600 var(--fs-h3)/1.3 var(--font-body);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere;
+}
+.source-meta { margin-top: 2px; color: var(--ink-2); font-size: var(--fs-small); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.source-text .meter { margin-top: var(--s-3); max-width: 280px; }
+.source-card > .source-remove { grid-area: remove; margin: -4px -4px 0 0; }
+.guess { margin-top: var(--s-2); font-size: var(--fs-small); }
+.guess-conf { color: var(--ink-2); }
+.guess-reasons { color: var(--ink-3); }
+
+/* Name and cover tools: one wrapping row of small actions. */
+.source-tools { grid-area: tools; display: flex; align-items: center; flex-wrap: wrap; gap: 0 var(--s-3); margin: var(--s-2) 0 0 -8px; min-width: 0; }
+.name-tools, .cover-tools { display: contents; }
+.name-tools .muted { padding-left: 8px; }
+.cover-save { min-height: 30px; padding-left: 8px; }
+
+/* Name overrides */
+.name-edit { grid-area: edit; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-3); margin-top: var(--s-3); padding-top: var(--s-3); border-top: 1px solid var(--line); }
+.name-fields { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: var(--s-3); }
+.name-field { display: grid; gap: var(--s-1); min-width: 0; }
+.name-field-label { font-size: var(--fs-small); font-weight: 600; color: var(--ink-2); }
+.name-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s-2); }
+
+/* An own cover picture: preview, name, Remove */
+.cover-own { flex-basis: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--s-3); align-items: center; margin: var(--s-2) 0 0 8px; }
+.cover-preview { width: 44px; height: 44px; border-radius: var(--r-sm); object-fit: cover; background: var(--sunken); }
+.cover-own-text { display: grid; min-width: 0; }
+.cover-own-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cover-own-note { flex-basis: 100%; margin: var(--s-1) 0 0 8px; }
+
+/* Playlist: the card, a count with Select all / none, the items as rows */
+.playlist { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-3); }
+.pl-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); flex-wrap: wrap; }
+.pl-count { font-size: var(--fs-small); font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.pl-bar-actions { display: flex; gap: var(--s-1); margin-right: -8px; }
+.pl-list {
+  list-style: none; margin: 0; padding: 0;
+  max-height: 300px; overflow: auto;
+  border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+}
+.pl-list li + li { border-top: 1px solid var(--line); }
+.pl-list label { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--s-3); align-items: center; padding: var(--s-2) var(--s-1); cursor: pointer; }
+.pl-list label:hover { background: var(--panel-2); }
+.pl-list input { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
+.pl-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-dur { font-size: var(--fs-small); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+/* Several files: the same quiet card, the files as rows inside it */
+.mf { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-3); padding: var(--s-3); border-radius: var(--r-md); background: var(--panel-2); }
+.mf-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: var(--s-3); align-items: center; }
+.mf-list { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow: auto; border-top: 1px solid var(--line); }
+.mf-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: var(--s-3); align-items: center; min-height: 40px; padding: 6px 0; }
+.mf-item + .mf-item { border-top: 1px solid var(--line); }
+.mf-main { display: grid; gap: var(--s-1); min-width: 0; }
+.mf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mf-error { font-size: var(--fs-small); color: var(--danger); overflow-wrap: anywhere; }
+.mf-error:empty { display: none; }
+.mf-main .meter { max-width: 260px; }
+.mf-status { font-size: var(--fs-small); font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; }
+.mf-item[data-status="done"] .mf-status { color: var(--ok); }
+.mf-item[data-status="error"] .mf-status { color: var(--danger); }
+.mf-item[data-status="uploading"] .mf-status { color: var(--ink); }
+
+/* --------------------------------------------------------------------------
+   Tasks: four entries under a 2 px rule; the picked one in the accent
+   -------------------------------------------------------------------------- */
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s-4); }
+.tile {
+  display: flex; flex-direction: column; align-items: flex-start; gap: var(--s-1);
+  padding: 10px var(--s-3) var(--s-3);
+  border: 0; border-top: 2px solid var(--line-strong); border-radius: 0 0 var(--r-sm) var(--r-sm);
+  background: transparent; color: var(--ink); text-align: left;
+  transition: background-color .15s, border-color .15s;
+}
+.tile:hover { background: var(--panel-2); border-top-color: var(--field-line); }
+.tile-title { display: inline-flex; align-items: center; gap: var(--s-2); font: 600 var(--fs-h2)/1.2 var(--font-serif); letter-spacing: -.005em; }
+.tile-ico { color: var(--ink-3); }
+.tile[aria-pressed="true"] .tile-ico { color: var(--accent); }
+.tile-desc { font-size: var(--fs-small); line-height: 1.35; color: var(--ink-2); }
+.tile[aria-pressed="true"] { background: var(--accent-soft); border-top-color: var(--accent); }
+.tile[aria-pressed="true"] .tile-title { color: var(--accent); }
+/* Can't be picked now (Split without the AI add-on): the reason, in words, stays readable. */
+.tile.is-blocked { border-top-style: dashed; }
+.tile.is-blocked .tile-title { color: var(--ink-2); }
+.tile .is-reason { color: var(--warn); }
+
+/* --------------------------------------------------------------------------
+   Options of the picked task
+   -------------------------------------------------------------------------- */
+.options { margin-top: var(--s-5); display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-5); }
+/* Credits: wide enough, each option's label sits left of its choice (fine-tuning keeps its own
+   label-left rows, full width). */
+@container content (min-width: 720px) {
+  .options .opt:not(.fine-tuning) { display: grid; grid-template-columns: var(--label-w) minmax(0, 1fr); column-gap: var(--s-4); align-items: start; }
+  .options .opt:not(.fine-tuning) > .opt-label { grid-column: 1; grid-row: 1 / span 6; margin: 0; padding-top: 6px; }
+  .options .opt:not(.fine-tuning) > :not(.opt-label) { grid-column: 2; }
+  .options .more-body > .switch-row, .options > .opt-note { margin-left: calc(var(--label-w) + var(--s-4)); }
+}
+.opt { min-width: 0; }
+.opt-note { color: var(--ink-2); max-width: 62ch; }
+.format-note { margin-top: var(--s-1); max-width: 72ch; }
+
+/* "More options": a plain disclosure; folded, the head counts changes (· Reset). */
+.more-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s-1) var(--s-3); min-height: 32px; }
+.more-toggle {
+  display: inline-flex; align-items: baseline; gap: 6px;
+  border: 0; background: none; padding: 4px 0; border-radius: var(--r-sm);
+  font: 600 var(--fs-h3)/1.3 var(--font-body); color: var(--ink);
+}
+.more-toggle:hover { color: var(--accent); }
+.more-mark::before { content: "▸"; display: inline-block; width: .8em; color: var(--ink-3); }
+.more-toggle[aria-expanded="true"] .more-mark::before { content: "▾"; }
+.more-status { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: var(--fs-small); }
+.more-status .btn { padding: 0 6px; }
+.more-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-5); margin-top: var(--s-3); }
+
+/* Fine-tuning and the AI model: label and help left, the control at the start of the right column. */
+.options .adv-control, .options .adv-control .seg { justify-content: flex-start; }
+.options .adv-control .seg-wrap { justify-items: start; }
+.adv-note { margin: 0 0 var(--s-1); }
+
+/* Tracks: the split switch with its list of tracks, then "Paste a tracklist" */
+.tracks-opt { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-2); }
+.tracks-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-2); }
+.tracks-opt .more-toggle { font-size: var(--fs-body); }
+.tracks-list { margin-left: calc(36px + var(--s-3)); } /* under the switch's words */
+.tracks-list > summary { width: max-content; max-width: 100%; padding: 2px 0; color: var(--ink-2); font-size: var(--fs-small); font-weight: 600; }
+.tracks-list ol, .tl-preview {
+  list-style: none; margin: var(--s-2) 0 0; padding: var(--s-1) var(--s-3);
+  max-height: 260px; overflow: auto;
+  border-radius: var(--r-md); background: var(--panel-2);
+}
+.tl-preview { margin: 0; }
+.tracks-list li, .tl-preview li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--s-3); align-items: baseline; padding: 5px 0; }
+.tl-preview li { grid-template-columns: auto auto minmax(0, 1fr); }
+.tracks-n, .tracks-time { font-size: var(--fs-small); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.tracks-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Pasted tracklist: the text, then the problems per line, then the recognised tracks */
+.tl-panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-2); }
+.tl-text { height: auto; min-height: 124px; padding: 10px var(--s-3); font-size: var(--fs-small); line-height: 1.5; resize: vertical; }
+.tl-status.is-stale { opacity: .55; }
+.tl-out { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-2); }
+.tl-out:empty { display: none; }
+.tl-errors {
+  margin: 0; padding: var(--s-2) var(--s-3) var(--s-2) 28px; display: grid; gap: 3px;
+  border-radius: var(--r-md); background: var(--danger-soft); box-shadow: inset 3px 0 0 var(--danger);
+  font-size: var(--fs-small); overflow-wrap: anywhere;
+}
+.tl-errors strong { color: var(--danger); }
+
+/* --------------------------------------------------------------------------
+   The sleeve: the picture (a record slides out once something is loaded), the title, one
+   line about it, what you get; then the start row (the one primary button and where it goes,
+   or why not yet). Beside the form when there is room.
+   -------------------------------------------------------------------------- */
+.sleeve-panel { min-width: 0; }
+.sleeve { display: grid; gap: var(--s-4); min-width: 0; }
+.sleeve-art { position: relative; width: 188px; aspect-ratio: 1; }
+.sleeve-record {
+  position: absolute; top: 5%; right: -18%; height: 90%; aspect-ratio: 1; border-radius: 50%;
+  background:
+    radial-gradient(circle closest-side, var(--bg) 0 5%, var(--accent) 6% 33%, transparent 34%),
+    repeating-radial-gradient(circle closest-side, transparent 0 3px, var(--groove) 3px 4px),
+    conic-gradient(from 40deg, transparent 0 8%, var(--groove) 12% 16%, transparent 20% 50%, var(--groove) 62% 66%, transparent 70%),
+    var(--vinyl);
+  box-shadow: inset 0 0 0 1px var(--groove), 0 0 0 1px var(--line-strong);  /* its edge also on the dark sheet */
+  transform: translateX(-13%);  /* tucked in; out once something is loaded */
+  transition: transform .6s cubic-bezier(.2, .8, .2, 1);
+}
+.sleeve:not(.is-empty) .sleeve-record { transform: none; }
+.sleeve.is-busy .sleeve-record {
+  background:
+    radial-gradient(circle closest-side, var(--bg) 0 5%, var(--live) 6% 33%, transparent 34%),
+    repeating-radial-gradient(circle closest-side, transparent 0 3px, var(--groove) 3px 4px),
+    conic-gradient(from 40deg, transparent 0 8%, var(--groove) 12% 16%, transparent 20% 50%, var(--groove) 62% 66%, transparent 70%),
+    var(--vinyl);
+  animation: record-spin 1.8s linear infinite;
+}
+@keyframes record-spin { to { rotate: 360deg; } }
+.sleeve-cover {
+  position: relative; z-index: 1;
+  display: grid; place-items: center; width: 100%; height: 100%; overflow: hidden;
+  border-radius: 3px; background: var(--sunken); color: var(--ink-3);
+  box-shadow: var(--shadow-cover);
+}
+.sleeve-cover img { width: 100%; height: 100%; object-fit: cover; }
+/* No picture: a paper sleeve with a die-cut hole that shows the record's label. */
+.sleeve-cover.is-empty { background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--line), var(--shadow-cover); }
+.sleeve-cover.is-empty::before {
+  content: ""; width: 42%; aspect-ratio: 1; border-radius: 50%;
+  background: radial-gradient(circle closest-side, var(--bg) 0 7%, var(--accent) 8% 72%, var(--vinyl) 74% 100%);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.sleeve.is-busy .sleeve-cover.is-empty::before {
+  background: radial-gradient(circle closest-side, var(--bg) 0 7%, var(--live) 8% 72%, var(--vinyl) 74% 100%);
+}
+.sleeve-cover.is-empty .ico { display: none; }
+.sleeve-text { display: grid; gap: 2px; min-width: 0; }
+.sleeve-eyebrow { font: 600 var(--fs-small)/1.3 var(--font-body); color: var(--accent); }
+.sleeve-title {
+  font: 600 var(--fs-h2)/1.25 var(--font-serif); letter-spacing: -.005em; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.sleeve.is-empty .sleeve-title { color: var(--ink-2); }
+.sleeve-meta { color: var(--ink-2); font-size: var(--fs-small); overflow-wrap: anywhere; }
+.sleeve-meta:empty { display: none; }
+.sleeve-plan {
+  list-style: none; margin: var(--s-3) 0 0; padding: var(--s-3) 0 0; border-top: 1px solid var(--line);
+  display: grid; gap: var(--s-1); font-size: var(--fs-small); color: var(--ink);
+}
+.sleeve-plan:empty { display: none; }
+
+.action-row { display: grid; gap: var(--s-2); margin-top: var(--s-5); }
+.action-row:focus { outline: none; }
+.action-row .btn-primary { width: 100%; }
+.action-hint { min-width: 0; color: var(--ink-2); font-size: var(--fs-small); overflow-wrap: anywhere; }
+.action-hint.is-where { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* "Saved to …": one line */
+.action-upload { max-width: 420px; }
+
+/* Room for the sleeve beside the form: it stays in view while the options scroll. */
+@container content (min-width: 1000px) {
+  .create { grid-template-columns: minmax(0, 1fr) 236px; gap: var(--s-7); align-items: start; }
+  .sleeve-panel { position: sticky; top: var(--s-5); }
+  /* The card's picture is in the sleeve now. */
+  .create-main .source-card { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "text remove" "tools tools" "edit edit"; }
+  .create-main .source-card > .source-thumb { display: none; }
+}
+
+/* Narrower: the sleeve is a bar along the bottom of the window — a small picture, the title
+   and what you get, the button. Its background and top line reach the window's edges. */
+@container content (min-width: 481px) and (max-width: 999px) {
+  .sleeve-panel {
+    position: sticky; bottom: 0; z-index: 5;
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto); align-items: center; gap: var(--s-4);
+    padding: var(--s-3) 0;
+    background: var(--bg);
+    box-shadow: 0 0 0 100vmax var(--bg), 0 -1px 0 100vmax var(--line);
+    clip-path: inset(-1px -100vmax 0);
+  }
+  .sleeve { grid-template-columns: 48px minmax(0, 1fr); align-items: center; gap: var(--s-3); }
+  .sleeve-art { width: 48px; }
+  .sleeve-record, .sleeve-eyebrow, .sleeve-meta { display: none; }
+  .sleeve-cover .ico svg { width: 20px; height: 20px; }
+  .sleeve-title { font: 600 var(--fs-body)/1.3 var(--font-body); -webkit-line-clamp: 1; }
+  .sleeve-plan { margin: 0; padding: 0; border: 0; gap: 0; color: var(--ink-2); }
+  .sleeve-plan li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sleeve-plan li + li { display: none; }
+  .action-row { margin: 0; justify-items: end; max-width: 300px; }
+  .action-row .btn-primary { width: auto; min-width: 180px; }
+  .action-hint { text-align: right; max-width: 300px; }
+}
+
+/* Phones: the sleeve closes the page — picture and title, then the button. */
+@container content (max-width: 480px) {
+  .sleeve-panel { padding-top: var(--s-5); border-top: 1px solid var(--line); }
+  .sleeve { grid-template-columns: 72px minmax(0, 1fr); align-items: start; }
+  .sleeve-art { width: 72px; }
+  .sleeve-record { display: none; }
+  .sleeve-title { font-size: var(--fs-h3); -webkit-line-clamp: 2; }
+  .sleeve-plan { grid-column: 1 / -1; margin-top: 0; }
+}
+
+@container content (max-width: 640px) {
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-3); }
+  .source-alt-note { display: none; }
+  .source-card { grid-template-columns: 76px minmax(0, 1fr) auto; grid-template-areas: "thumb text remove" "tools tools tools" "edit edit edit"; column-gap: var(--s-3); }
+  .source-thumb { width: 76px; }
+  .name-fields { grid-template-columns: minmax(0, 1fr); }
+  .mf-head { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .mf-head .btn-ghost { grid-column: 2 / -1; grid-row: 2; justify-self: start; margin-left: -8px; }
+}

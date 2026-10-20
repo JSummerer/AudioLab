@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>AudioLab</title>
+  <link rel="icon" href="logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/new.css">
+  <link rel="stylesheet" href="css/activity.css">
+  <link rel="stylesheet" href="css/job.css">
+  <link rel="stylesheet" href="css/library.css">
+  <link rel="stylesheet" href="css/settings.css">
+  <!-- A collapsed sidebar is applied before first paint; js/main.js does the rest. -->
+  <script>try { if (localStorage.getItem('audiolab.sidebar') === 'collapsed') document.documentElement.dataset.sidebar = 'collapsed'; } catch { /* expanded */ }</script>
+  <script type="module" src="js/main.js"></script>
+</head>
+<body>
+  <a class="skip-link" id="skipLink" href="#main">Skip to the main area</a>
+
+  <div class="app">
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-head">
+        <a class="brand" href="#/new" aria-label="AudioLab — new job">
+          <img src="logo.svg" alt="" width="28" height="28">
+          <span class="brand-name">AudioLab</span>
+        </a>
+        <button type="button" class="icon-btn icon-btn-sm sidebar-toggle" id="sidebarToggle"
+                aria-controls="sidebar" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+          <span class="ico-slot" data-icon="sidebar"></span>
+        </button>
+      </div>
+
+      <nav class="nav" aria-label="Main">
+        <a class="nav-item" href="#/new" data-route="new">
+          <span class="nav-ico ico-slot" data-icon="plus"></span><span class="nav-label">New</span>
+        </a>
+        <a class="nav-item" href="#/activity" data-route="activity">
+          <span class="nav-ico ico-slot" data-icon="activity"></span><span class="nav-label">Activity</span>
+          <span class="badge" id="activityBadge" hidden>0</span>
+        </a>
+        <a class="nav-item" href="#/library" data-route="library">
+          <span class="nav-ico ico-slot" data-icon="library"></span><span class="nav-label">Library</span>
+        </a>
+        <a class="nav-item" href="#/settings" data-route="settings">
+          <span class="nav-ico ico-slot" data-icon="settings"></span><span class="nav-label">Settings</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-foot">
+        <button type="button" class="status-chip" id="aiChip" title="AI features">
+          <span class="led" aria-hidden="true"></span>
+          <span class="status-chip-text">Checking…</span>
+        </button>
+      </div>
+    </div>
+
+    <main class="content" id="main" tabindex="-1">
+      <div id="banner" class="banner" hidden></div>
+      <section class="view" id="viewNew" aria-labelledby="newTitle" hidden></section>
+      <section class="view" id="viewActivity" aria-labelledby="activityTitle" hidden></section>
+      <section class="view" id="viewJob" aria-labelledby="jobTitle" hidden></section>
+      <section class="view" id="viewLibrary" aria-labelledby="libraryTitle" hidden></section>
+      <section class="view" id="viewSettings" aria-labelledby="settingsTitle" hidden></section>
+    </main>
+  </div>
+
+  <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+
+  <div id="dropOverlay" class="drop-overlay" hidden>
+    <div class="drop-target">
+      <span class="ico-slot" data-icon="upload"></span>
+      <strong>Drop to load</strong>
+      <span>Audio or video — MP3, WAV, FLAC, M4A, MP4 and more. Several files make one job each.</span>
+    </div>
+  </div>
+
+  <input type="file" id="fileInput" multiple hidden>
+</body>
+</html>

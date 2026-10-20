@@ -1,0 +1,175 @@
+/* Base: reset, type, utilities and the app shell — the sidebar (the desk: brand · New ·
+   Activity · Library · Settings · AI status; collapsible to an icon rail) next to one
+   scrolling content area (the sheet). Under 760 px the same nodes reflow into a top bar and
+   a bottom tab bar. Views size their insides with @container content queries, so they
+   don't care whether the sidebar is there. */
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  height: 100vh; height: 100dvh;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 var(--fs-body)/1.5 var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+img { max-width: 100%; display: block; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+a { color: var(--accent); text-underline-offset: 2px; }
+h1, h2, h3 { margin: 0; }
+p { margin: 0; }
+[hidden] { display: none !important; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
+/* Headings receive focus on navigation (for screen readers), not a ring. */
+[tabindex="-1"]:focus { outline: none; }
+.muted { color: var(--ink-2); }
+.small { font-size: var(--fs-small); }
+.num { font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.serif { font-family: var(--font-serif); }
+.ico { display: inline-flex; flex: none; line-height: 0; }
+.ico-flip { transform: scaleX(-1); }
+.plain-list { margin: var(--s-2) 0 0; padding-left: 18px; }
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+.skip-link { position: absolute; left: 12px; top: -48px; background: var(--ink); color: var(--bg); padding: 8px 12px; border-radius: var(--r-sm); z-index: 100; text-decoration: none; }
+.skip-link:focus { top: 12px; }
+
+/* --------------------------------------------------------------------------
+   Shell
+   -------------------------------------------------------------------------- */
+.app {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  height: 100%;
+}
+
+.sidebar {
+  display: flex; flex-direction: column; gap: var(--s-1);
+  min-height: 0; overflow-x: hidden; overflow-y: auto;
+  padding: var(--s-3) var(--s-2) var(--s-3);
+  background: var(--sidebar);
+}
+/* Brand · collapse toggle; the toggle wraps under the logo when the rail is too narrow. */
+.sidebar-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 4px; padding: 2px 0 var(--s-3); }
+.brand { flex: 1 1 auto; display: flex; align-items: center; gap: 9px; padding: 4px 6px; color: var(--ink); text-decoration: none; border-radius: var(--r-sm); }
+.brand img { flex: none; width: 26px; height: 26px; }
+.brand-name { font: 600 19px/1 var(--font-serif); letter-spacing: -.01em; white-space: nowrap; }
+.sidebar-toggle { flex: none; }
+
+.nav { display: grid; gap: 2px; }
+.nav-item {
+  position: relative;
+  display: flex; align-items: center; gap: 10px;
+  height: 32px; padding: 0 10px;
+  border-radius: var(--r-sm);
+  color: var(--ink-2); font-weight: 500; font-size: 13.5px; text-decoration: none;
+  transition: background-color .12s, color .12s;
+}
+.nav-item:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); color: var(--ink); }
+.nav-item[aria-current="page"] { background: var(--nav-active); color: var(--ink); font-weight: 600; }
+.nav-item[aria-current="page"] .nav-ico { color: var(--accent); }
+.nav-label { flex: 1; min-width: 0; white-space: nowrap; }
+.nav-item .badge { position: static; }
+
+/* AI status: a quiet line at the foot of the desk, a link to Settings → AI. */
+.sidebar-foot { margin-top: auto; display: grid; padding-top: var(--s-3); }
+.sidebar-foot .status-chip { width: 100%; justify-content: flex-start; }
+
+/* Collapsed (the toggle or ⌘\ / Ctrl+\, remembered): an icon rail. Logo mark only, the
+   nav labels stay the links' names (visually hidden, tooltips from main.js) and the AI
+   status is just its light. Narrow windows keep the tab bar, so this is wide-only. */
+@media (min-width: 760px) {
+  .app { transition: grid-template-columns .2s ease; }
+  :root[data-sidebar="collapsed"] .app { --sidebar-w: 60px; }
+  :root[data-sidebar="collapsed"] .brand-name { display: none; }
+  :root[data-sidebar="collapsed"] .nav-item { justify-content: center; gap: 0; padding: 0; }
+  :root[data-sidebar="collapsed"] .nav-label { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); border: 0; }
+  :root[data-sidebar="collapsed"] .nav-item .badge { position: absolute; top: 0; left: calc(50% + 4px); width: max-content; }
+  :root[data-sidebar="collapsed"] .sidebar-foot .status-chip { justify-self: center; width: 32px; padding: 0; justify-content: center; }
+  :root[data-sidebar="collapsed"] .status-chip-text { display: none; }
+}
+
+.content {
+  position: relative; /* keeps absolutely placed bits (.sr-only) inside the scroller */
+  min-width: 0; min-height: 0;
+  overflow-y: auto; overscroll-behavior: contain;
+  background: var(--bg);
+  container: content / inline-size;
+  outline: none;
+}
+
+.banner {
+  max-width: var(--page-w); margin: var(--s-4) auto 0; padding: 10px 14px;
+  display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap;
+  border-radius: var(--r-md);
+  background: var(--danger-soft); color: var(--ink);
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+.banner .ico { color: var(--danger); }
+.banner span:not(.ico) { flex: 1; min-width: 12ch; }
+
+/* --------------------------------------------------------------------------
+   Pages
+   -------------------------------------------------------------------------- */
+.view { padding: var(--s-6) 40px 64px; }
+.page { max-width: var(--page-w); margin: 0 auto; }
+.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--s-3) var(--s-5); flex-wrap: wrap; margin-bottom: 28px; }
+.page-head-text { min-width: 0; flex: 1 1 320px; }
+.page-title { font: 600 clamp(28px, 4.2cqi, var(--fs-title))/1.08 var(--font-serif); letter-spacing: -.015em; text-wrap: balance; overflow-wrap: anywhere; }
+.page-sub { margin-top: var(--s-2); color: var(--ink-2); font-size: 15px; max-width: 66ch; text-wrap: pretty; }
+.page-actions { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+/* A page-wide group (New's form): no box of its own — the sheet is the surface. */
+.panel { background: transparent; }
+
+@container content (max-width: 640px) {
+  .view { padding: var(--s-5) var(--s-4) 40px; }
+  .page-head { margin-bottom: var(--s-5); }
+  .page-sub { font-size: 14.5px; }
+  .banner { margin: var(--s-3) var(--s-4) 0; }
+}
+
+/* --------------------------------------------------------------------------
+   Narrow windows: top bar (brand · AI status) + bottom tab bar
+   -------------------------------------------------------------------------- */
+@media (max-width: 759px) {
+  .app { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto minmax(0, 1fr) auto; }
+  .sidebar, .sidebar-head { display: contents; }
+  .sidebar-head .sidebar-toggle { display: none; } /* beats .icon-btn's display */
+  .brand, .sidebar-foot {
+    grid-row: 1;
+    background: var(--sidebar); border-bottom: 1px solid var(--line);
+  }
+  .brand { grid-column: 1; padding: 10px var(--s-4); border-radius: 0; }
+  .brand-name { font-size: 18px; }
+  .sidebar-foot { grid-column: 2; display: flex; align-items: center; margin: 0; padding: 0 var(--s-3) 0 0; }
+  .sidebar-foot .status-chip { width: auto; }
+  .status-chip-device { display: none; }
+  .content { grid-row: 2; grid-column: 1 / -1; }
+  .nav {
+    grid-row: 3; grid-column: 1 / -1;
+    grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0;
+    padding: 2px var(--s-2) env(safe-area-inset-bottom, 0);
+    background: var(--sidebar); border-top: 1px solid var(--line);
+  }
+  .nav-item {
+    flex-direction: column; justify-content: center; gap: 2px;
+    height: var(--tabbar-h); padding: 0;
+    font-size: 11.5px; font-weight: 500;
+  }
+  .nav-label { flex: none; }
+  .nav-item[aria-current="page"] { background: transparent; color: var(--accent); }
+  .nav-item .badge { position: absolute; top: 5px; left: calc(50% + 6px); }
+}
+/* Very narrow: the logo alone, the AI status keeps its word ("AI ready"). */
+@media (max-width: 359px) {
+  .brand-name { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+  .led.blink { animation: none; }
+}

@@ -1,0 +1,238 @@
+/* Job (#/job/<id>): the sleeve (cover, what the job made, the title, one credits line), the
+   player right under it, the files as a tracklist, then what was done and found, more to do,
+   the footer and the log. Live progress and failures use the same header. Tokens only. */
+
+.job-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); min-height: 34px; margin: calc(-1 * var(--s-3)) 0 var(--s-4) -8px; }
+.job-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-6); align-content: start; }
+.job-loading { display: grid; gap: 14px; padding: 6px 0; }
+.job-loading .meter { max-width: 320px; }
+
+/* --------------------------------------------------------------------------
+   The sleeve
+   -------------------------------------------------------------------------- */
+.job-head { margin-bottom: var(--s-6); }
+.job-head.has-cover { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: var(--s-5); align-items: end; }
+.job-cover {
+  display: grid; place-items: center;
+  width: 160px; aspect-ratio: 1; overflow: hidden;
+  border-radius: 3px; background: var(--sunken); color: var(--ink-3);
+  box-shadow: var(--shadow-cover);
+}
+.job-cover img { width: 100%; height: 100%; object-fit: cover; }
+/* No cover: a small mark of the task beside the title, not an empty sleeve. */
+.job-cover.is-empty { width: 64px; border-radius: var(--r-md); box-shadow: none; }
+.job-head.has-cover:has(.job-cover.is-empty) { grid-template-columns: 64px minmax(0, 1fr); gap: var(--s-4); }
+.job-cover.is-empty .ico svg { width: 26px; height: 26px; }
+.job-head-text { display: grid; gap: var(--s-2); min-width: 0; }
+.job-eyebrow { font: 600 var(--fs-small)/1.3 var(--font-body); color: var(--accent); }
+.job-sub-line { display: flex; flex-wrap: wrap; align-items: center; gap: 2px var(--s-2); margin-top: 2px; font-size: var(--fs-small); color: var(--ink-2); }
+.job-dot { color: var(--ink-3); }
+.job-status { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--ink); }
+.job-link { display: inline-flex; align-items: center; gap: 4px; text-decoration: none; }
+.job-link:hover { text-decoration: underline; }
+.job-file-name { min-width: 0; overflow-wrap: anywhere; }
+
+@container content (max-width: 480px) {
+  /* Small cover beside the eyebrow and title; the credits run under both. */
+  .job-head.has-cover {
+    grid-template-columns: 96px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto auto;
+    grid-template-areas: "cover eyebrow" "cover title" "sub sub";
+    gap: var(--s-1) var(--s-4);
+  }
+  .job-head.has-cover .job-head-text { display: contents; }
+  .job-head.has-cover .job-cover { grid-area: cover; width: 96px; align-self: end; }
+  .job-head.has-cover:has(.job-cover.is-empty) { grid-template-columns: 56px minmax(0, 1fr); }
+  .job-head.has-cover .job-cover.is-empty { width: 56px; }
+  .job-head.has-cover .job-eyebrow { grid-area: eyebrow; align-self: end; }
+  .job-head.has-cover .page-title { grid-area: title; }
+  .job-head.has-cover .job-sub-line { grid-area: sub; margin-top: var(--s-2); }
+  .job-cover .ico svg { width: 24px; height: 24px; }
+}
+
+/* A section head with the "Show details" switch on its right (readings.js detailsBlock). */
+.block-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--s-2) var(--s-4); margin-bottom: var(--s-3); }
+.block-head .block-title { margin: 0; }
+.details-slot:empty { display: none; }
+
+/* --------------------------------------------------------------------------
+   Your files: a tracklist (opens with an ink rule, hairlines between rows)
+   -------------------------------------------------------------------------- */
+.job-files .files { border-top: 1px solid var(--ink); }
+.job-files .file-row:last-child { border-bottom: 1px solid var(--line); }
+.job-files .file-row > .btn-ghost, .stem-row > .btn-ghost, .track-row > .btn-ghost { margin-right: -8px; }
+.files-foot { display: grid; gap: var(--s-1); margin-top: var(--s-3); }
+.files-where { font-size: var(--fs-small); color: var(--ink-2); overflow-wrap: anywhere; }
+.files-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px var(--s-1); margin-left: -8px; }
+.files-actions:empty { display: none; }
+
+/* Tracks of a result (split by a tracklist) */
+.tracks-block > summary { display: inline-flex; cursor: pointer; list-style: none; }
+.tracks-block > summary::-webkit-details-marker { display: none; }
+.tracks-block > summary .block-title { margin: 0; }
+.tracks-block > summary .block-title::before { content: "▸ "; color: var(--ink-3); }
+.tracks-block[open] > summary .block-title::before { content: "▾ "; }
+.tracks-block[open] > summary { margin-bottom: var(--s-3); }
+.tracks-where { margin: calc(-1 * var(--s-1)) 0 var(--s-3); font-size: var(--fs-small); color: var(--ink-2); overflow-wrap: anywhere; }
+.tracks-block .tracks + .files { margin-top: 0; }
+
+/* --------------------------------------------------------------------------
+   What we did, what it is, before → after, decisions
+   -------------------------------------------------------------------------- */
+.summary { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.summary li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; overflow-wrap: anywhere; }
+.summary .ico { color: var(--ok); margin-top: 3px; }
+@container content (min-width: 760px) {
+  /* Two columns when there is room and enough lines to fill them. */
+  .summary:has(> li:nth-child(4)) { display: block; columns: 2; column-gap: var(--s-6); }
+  .summary:has(> li:nth-child(4)) li { break-inside: avoid; padding-bottom: 6px; } /* padding: a margin would push the second column down */
+}
+
+.class-head { font-size: var(--fs-h3); }
+.reasons { margin-top: var(--s-1); font-size: var(--fs-small); color: var(--ink-2); }
+.music-facts { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s-1) var(--s-4); margin-top: var(--s-2); }
+.music-facts + .muted, .class-head + .muted, .reasons + .muted { margin-top: var(--s-1); }
+.redo { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); margin-top: var(--s-4); }
+@container content (max-width: 480px) {
+  .redo > span { flex-basis: 100%; }  /* the words on their own line, the three choices on one */
+}
+
+/* One small table: the rows share their columns, so the arrows and results line up. */
+.ba-rows { display: grid; grid-template-columns: 7.5rem max-content auto minmax(0, 1fr); column-gap: 10px; }
+.ba-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; padding: var(--s-2) 0; border-bottom: 1px solid var(--line); }
+.ba-row:last-child { border-bottom: 0; }
+.ba-label { font-size: var(--fs-small); font-weight: 600; color: var(--ink-2); }
+.ba-before { color: var(--ink-2); }
+.ba-arrow { color: var(--ink-3); }
+.ba-after { font-weight: 600; }
+.metrics-note { margin-top: 10px; }
+.decisions td.muted { font-size: var(--fs-small); }
+@container content (min-width: 640px) {
+  .decisions tbody th, .decisions td.num { white-space: nowrap; }
+}
+.src-tag { margin-left: 6px; font-size: var(--fs-tiny); font-weight: 600; color: var(--ink-2); }
+.src-user { color: var(--accent); }
+
+/* --------------------------------------------------------------------------
+   Check: verdicts as a list (label · word · what it means), findings as rows
+   -------------------------------------------------------------------------- */
+.verdicts { display: grid; margin: 0; }
+.verdict {
+  display: grid; grid-template-columns: 9rem 11rem minmax(0, 1fr); gap: 2px var(--s-4); align-items: baseline;
+  padding: 10px 0; border-top: 1px solid var(--line);
+}
+.verdict:first-child { border-top: 0; padding-top: var(--s-1); }
+.verdict dd { margin: 0; }
+.verdict-label { font-size: var(--fs-small); font-weight: 600; color: var(--ink-2); }
+.verdict-word { font: 600 var(--fs-h2)/1.2 var(--font-serif); letter-spacing: -.005em; }
+.verdict-ok .verdict-word { color: var(--ok); }
+.verdict-warning .verdict-word { color: var(--warn); }
+.verdict-danger .verdict-word { color: var(--danger); }
+.verdict-sub { font-size: var(--fs-small); line-height: 1.4; color: var(--ink-2); }
+.verdict-value { display: block; margin-top: 2px; font-weight: 600; color: var(--ink); }
+@container content (max-width: 560px) {
+  .verdict { grid-template-columns: 7rem minmax(0, 1fr); }
+  .verdict-sub { grid-column: 2; }
+}
+
+.findings { list-style: none; margin: 0; padding: 0; }
+.finding { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s-3); padding: 10px 0; border-top: 1px solid var(--line); }
+.finding:first-child { border-top: 0; padding-top: 0; }
+.finding-ico { margin-top: 3px; color: var(--ink-3); }
+.finding-warning .finding-ico { color: var(--warn); }
+.finding-danger .finding-ico { color: var(--danger); }
+.finding-text { display: grid; gap: 2px; min-width: 0; }
+
+.spectrogram { width: 100%; margin-bottom: var(--s-2); border-radius: var(--r-md); background: var(--sunken); }
+.silent-state { display: grid; justify-items: center; gap: 6px; padding: var(--s-5) var(--s-3) var(--s-3); text-align: center; }
+.silent-state strong { font: 600 var(--fs-h2)/1.25 var(--font-serif); }
+.silent-state p { max-width: 46ch; }
+.silent-state .empty-meter { height: 20px; margin-bottom: 4px; }
+.silent-state .empty-meter i, .silent-state .empty-meter i:nth-child(n+8) { height: 4px; background: var(--line-strong); }
+
+/* --------------------------------------------------------------------------
+   Do more, footer, log
+   -------------------------------------------------------------------------- */
+.next-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.job-footer { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s-2) var(--s-3); margin-top: calc(-1 * var(--s-3)); }
+.job-footer .details-slot { margin-left: auto; }
+@container content (max-width: 480px) {
+  .job-footer .details-slot { flex-basis: 100%; margin-left: 0; }  /* its own line, over the log */
+  /* A failure's ways out, one under the other, all the same width. */
+  .job-body .callout-actions { display: grid; }
+}
+
+.journal-block > summary { display: inline-flex; align-items: center; gap: 2px; min-height: 30px; font-size: var(--fs-small); font-weight: 600; color: var(--ink-2); }
+.journal-block > summary:hover { color: var(--ink); }
+.journal { list-style: none; margin: var(--s-2) 0 0; padding: 0; max-height: 340px; overflow: auto; display: grid; gap: 6px; font-size: var(--fs-small); }
+.journal li { display: grid; grid-template-columns: auto 4.5rem minmax(0, 1fr); gap: 10px; align-items: baseline; }
+.j-time { font: 500 var(--fs-tiny) var(--font-mono); color: var(--ink-3); }
+.j-kind { font-size: var(--fs-tiny); font-weight: 600; color: var(--ink-3); }
+.j-decision .j-kind { color: var(--ok); }
+.j-verdict .j-kind { color: var(--accent); }
+.j-warning .j-kind { color: var(--warn); }
+.j-error .j-kind, .j-interrupted .j-kind { color: var(--danger); }
+.j-detail { grid-column: 3; margin: 2px 0 4px; padding: var(--s-2) 10px; border-radius: var(--r-sm); background: var(--panel-2); font: var(--fs-tiny)/1.45 var(--font-mono); overflow: auto; max-height: 200px; }
+@container content (max-width: 480px) {
+  .journal li { grid-template-columns: auto minmax(0, 1fr); gap: 0 10px; }
+  .j-msg, .j-detail { grid-column: 1 / -1; }  /* the message under its time, full width */
+}
+
+/* --------------------------------------------------------------------------
+   Live progress
+   -------------------------------------------------------------------------- */
+.stepper { list-style: none; margin: 0 0 var(--s-5); padding: 0; display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-5); }
+.stepper li { display: inline-flex; align-items: center; gap: var(--s-2); font-size: var(--fs-small); color: var(--ink-3); }
+.stepper li[data-state="done"] { color: var(--ink-2); }
+.stepper li[data-state="current"] { color: var(--ink); font-weight: 600; }
+.live-row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--s-4); }
+/* Sans with tabular figures: the number changes all the time and must not jitter. */
+.live-pct { min-width: 3em; font: 600 var(--fs-title)/1 var(--font-body); font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.live-msg { margin-top: var(--s-3); font-weight: 550; }
+.live-meta { margin-top: var(--s-1); font-size: var(--fs-small); color: var(--ink-2); }
+.live-meta:empty { display: none; }
+.live-actions .details-slot { margin-left: auto; }
+@container content (max-width: 480px) {
+  .stepper { display: grid; grid-template-columns: repeat(2, max-content); }
+}
+
+/* --------------------------------------------------------------------------
+   Stems and tracks (js/player.js): rows like the files, a round play button
+   -------------------------------------------------------------------------- */
+.stems, .tracks { list-style: none; margin: 0; padding: 0; display: grid; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--line); }
+.stem-row, .track-row { display: grid; gap: var(--s-3); align-items: center; padding: 10px 0; }
+.stem-row { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+.stem-row + .stem-row, .track-row + .track-row { border-top: 1px solid var(--line); }
+.stem-play {
+  display: grid; place-items: center; width: 36px; height: 36px; padding: 0;
+  border-radius: 50%; border: 1px solid var(--line-strong); background: var(--bg); color: var(--ink);
+}
+.stem-play:hover { background: var(--panel-2); border-color: var(--field-line); }
+.is-playing > .stem-play { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.stem-name { display: grid; min-width: 0; }
+.stem-name strong { font-weight: 600; }
+.stem-row .stem-name strong { text-transform: capitalize; }
+.stem-name .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stem-bars { display: flex; align-items: flex-end; gap: 3px; height: 20px; }
+.stem-bars i { width: 4px; height: 4px; border-radius: 1px; background: var(--line-strong); }
+.stem-row.is-playing .stem-bars i { background: var(--accent); animation: stem-bounce .9s ease-in-out infinite; }
+.stem-row.is-playing .stem-bars i:nth-child(2) { animation-delay: -.3s; }
+.stem-row.is-playing .stem-bars i:nth-child(3) { animation-delay: -.6s; }
+.stem-row.is-playing .stem-bars i:nth-child(4) { animation-delay: -.15s; }
+.stem-row.is-playing .stem-bars i:nth-child(5) { animation-delay: -.45s; }
+@keyframes stem-bounce { 50% { height: 18px; } }
+
+.tracks { max-height: 460px; overflow: auto; }
+.track-row { grid-template-columns: auto 1.5rem minmax(0, 1fr) auto auto; padding: var(--s-2) 0; }
+.track-play { width: 30px; height: 30px; }
+.track-n { font-size: var(--fs-small); color: var(--ink-3); text-align: right; }
+.track-row .stem-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.track-row.is-playing .stem-name strong { color: var(--accent); }
+.track-len { font-size: var(--fs-small); color: var(--ink-2); }
+
+@container content (max-width: 640px) {
+  .stem-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .stem-bars { display: none; }
+  .track-row { grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; }
+  .track-n, .track-len { display: none; }
+  .track-dl-text { display: none; }
+}

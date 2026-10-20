@@ -1,0 +1,177 @@
+/* Library (#/library) and the full-length compare player (js/compare.js). Each recording is a
+   sleeve row (cover, serif title, credits) with its kept original as one quiet line, then its
+   versions as a list under a rule: a head line with the actions, the files as rows. The open
+   player sits under its version, on the sheet. Reuses .block, .files/.file-row, .job-thumb,
+   .filter, .details-toggle and .is-flash; tokens only. */
+
+/* ==========================================================================
+   Library
+   ========================================================================== */
+.lib-reassure { margin-top: var(--s-1); color: var(--ink-3); font-size: var(--fs-small); }
+
+.lib-groups { display: grid; grid-template-columns: minmax(0, 1fr); }
+.lib-group + .lib-group { margin-top: var(--s-5); padding-top: var(--s-6); border-top: 1px solid var(--line); }
+
+/* The sleeve: cover (or a quiet square), title, credits. */
+.lib-head { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: var(--s-4); align-items: center; }
+.lib-cover { width: 72px; height: 72px; }
+.lib-cover:has(img) { box-shadow: var(--shadow-cover); }
+.lib-head-text { min-width: 0; }
+.lib-title { font: 600 var(--fs-h2)/1.25 var(--font-serif); letter-spacing: -.005em; overflow-wrap: anywhere; }
+.lib-meta { margin-top: 2px; color: var(--ink-2); font-size: var(--fs-small); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+/* The kept original: one line under the title, its actions at the right (under it on phones). */
+.lib-original {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--s-1) var(--s-4);
+  margin: var(--s-3) 0 0 calc(72px + var(--s-4));
+  color: var(--ink-2); font-size: var(--fs-small); line-height: 1.45;
+}
+.lib-original-text strong { font-weight: 600; }
+.lib-original-actions { display: flex; align-items: center; gap: 2px; }
+
+/* Versions: a list that opens with a rule. */
+.lib-entries { list-style: none; margin: var(--s-4) 0 0; padding: 0; border-top: 1px solid var(--ink); }
+.lib-entry { margin: 0 -10px; padding: 0 10px var(--s-2); border-radius: var(--r-md); scroll-margin-top: var(--s-4); }
+/* The divider sits inside the padding, so it lines up with the content (and the flash has room). */
+.lib-entry + .lib-entry {
+  background-image: linear-gradient(var(--line), var(--line));
+  background-size: calc(100% - 20px) 1px; background-position: 10px 0; background-repeat: no-repeat;
+}
+.lib-entry-head {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-1) var(--s-4);
+  padding: var(--s-3) 0 var(--s-1);
+}
+.lib-entry-line { flex: 1 1 240px; min-width: 0; }
+.lib-entry-title { display: inline; font: 500 var(--fs-h3)/1.4 var(--font-body); overflow-wrap: anywhere; }
+/* What was done, in ink and weight: blue is for things to click. */
+.lib-task { font-weight: 650; }
+.lib-when { color: var(--ink-2); font-size: var(--fs-small); white-space: nowrap; }
+.lib-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px var(--s-1); }
+@container content (max-width: 960px) {
+  /* Not enough room beside the title for every version: the actions go under it, for all of them alike. */
+  .lib-actions { flex-basis: 100%; }
+  .lib-actions > .btn-ghost:first-child { margin-left: -8px; }
+}
+
+/* A version's files: rows whose hairlines start at the text, under the version's own divider. */
+.lib-entry .files { border-top: 0; }
+.lib-entry .file-row {
+  border-top: 0;
+  background-image: linear-gradient(var(--line), var(--line));
+  background-size: calc(100% - 30px) 1px; background-position: 30px 0; background-repeat: no-repeat;
+}
+.lib-entry .files > .file-row:first-child { background-image: none; }
+.lib-file-actions { display: flex; align-items: center; gap: 2px; }
+.lib-play { min-width: 68px; justify-content: flex-start; }
+.lib-play.is-on { background: var(--accent-soft); }
+
+.lib-tracks { margin: var(--s-1) 0 0 30px; }
+.lib-tracks > summary { width: max-content; max-width: 100%; padding: var(--s-1) 0; color: var(--ink-2); font-size: var(--fs-small); font-weight: 600; }
+.lib-tracks[open] > summary { margin-bottom: var(--s-1); }
+.lib-tracks .files { max-height: 360px; overflow: auto; }
+.lib-tracks .file-row { background-size: 100% 1px; background-position: 0 0; }
+
+/* The open player: under its version, a hairline above, its name and a close button. */
+.lib-stage { margin-top: var(--s-2); padding: var(--s-3) 0 var(--s-2); border-top: 1px solid var(--line); }
+.lib-stage-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); margin-bottom: var(--s-2); color: var(--ink-2); font-size: var(--fs-small); }
+.lib-stage-head strong { min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-stage-head .icon-btn { margin-right: -6px; }
+
+@container content (max-width: 720px) {
+  .lib-original { grid-template-columns: minmax(0, 1fr); }
+  .lib-original-actions { margin-left: -8px; }
+}
+@container content (max-width: 480px) {
+  .lib-head { grid-template-columns: 56px minmax(0, 1fr); gap: var(--s-3); }
+  .lib-cover { width: 56px; height: 56px; }
+  .lib-original { margin-left: 0; }
+  /* Two actions to a row, not one left over: words only. */
+  .lib-actions .btn .ico { display: none; }
+  .lib-entry .file-row { grid-template-columns: minmax(0, 1fr) auto; background-size: 100% 1px; background-position: 0 0; }
+  .lib-entry .file-row > .file-ico, .lib-entry .file-row > .file-thumb { display: none; }
+  .lib-tracks { margin-left: 0; }
+  .lib-play { min-width: 0; }
+}
+
+/* ==========================================================================
+   Compare player (js/compare.js)
+   ========================================================================== */
+.ab { display: grid; gap: var(--s-3); outline: none; }
+
+/* The two versions as tabs: the one you hear is underlined in accent. */
+.ab-keys { display: flex; gap: var(--s-5); min-width: 0; border-bottom: 1px solid var(--line); }
+.ab-key {
+  display: inline-flex; align-items: center; gap: var(--s-2); min-width: 0;
+  min-height: 38px; padding: 0 2px; margin-bottom: -1px;
+  border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none;
+  color: var(--ink-2); font-weight: 600; font-size: var(--fs-h3);
+  transition: color .12s, border-color .12s;
+}
+.ab-key:hover { color: var(--ink); }
+.ab-key[aria-checked="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.ab-key-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ab-key kbd {
+  flex: none; min-width: 18px; padding: 1px 4px; border-radius: 4px; border: 1px solid var(--line-strong);
+  font: 550 var(--fs-tiny)/1.25 var(--font-body); font-variant-numeric: tabular-nums; text-align: center; color: var(--ink-3);
+}
+
+/* Play, the timeline, the time. */
+.ab-transport { display: flex; align-items: center; gap: var(--s-3); }
+.ab-play {
+  flex: none; width: 44px; height: 44px; border-radius: 50%; border: 0;
+  display: grid; place-items: center;
+  background: var(--ink); color: var(--bg);
+  transition: background-color .15s;
+}
+.ab-play:hover { background: color-mix(in srgb, var(--ink) 82%, var(--bg)); }
+.ab-play:focus-visible { border-radius: 50%; }
+.ab-time { color: var(--ink-2); font-size: var(--fs-small); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* The timeline: a thin track (--track, so its end shows in dark too), filled up to the
+   playhead (--p, set by renderTime and while dragging). */
+.cmp-timeline { position: relative; flex: 1; min-width: 0; display: grid; }
+.ab-seek {
+  --p: 0%;
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 24px; margin: 0; background: transparent; cursor: pointer;
+}
+.ab-seek::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 2px;
+  background: linear-gradient(var(--accent), var(--accent)) 0 0 / var(--p) 100% no-repeat, var(--track);
+}
+.ab-seek::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 14px; height: 14px; margin-top: -5px; border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--bg);
+}
+.ab-seek::-moz-range-track { height: 4px; border-radius: 2px; background: var(--track); }
+.ab-seek::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--accent); }
+.ab-seek::-moz-range-thumb { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg); }
+.ab-seek:focus-visible { outline-offset: 0; }
+/* Track and chapter starts, like a ruler under the track (inset by half a thumb). */
+.cmp-ticks { position: absolute; left: 7px; right: 7px; top: calc(50% + 7px); height: 4px; pointer-events: none; }
+.cmp-ticks i { position: absolute; top: 0; width: 2px; height: 100%; margin-left: -1px; border-radius: 1px; background: var(--ink-3); }
+
+/* Where it starts or why only an excerpt: one line under the timeline. */
+.cmp-note { margin: calc(-1 * var(--s-2)) 0 0 calc(44px + var(--s-3)); color: var(--ink-2); font-size: var(--fs-small); }
+
+/* −10 s / +10 s, then Match volume and its note (the note wraps under them on phones). */
+.cmp-tools { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s-2) var(--s-3); }
+.cmp-skip { display: flex; gap: 2px; margin: 0 var(--s-3) 0 -8px; }
+.cmp-skip .btn { font-variant-numeric: tabular-nums; }
+.ab-matched { min-width: 0; color: var(--ink-2); font-size: var(--fs-small); }
+
+.cmp-markers { display: flex; flex-wrap: wrap; gap: 6px; max-height: 120px; overflow: auto; padding: 2px; margin: -2px; }
+.cmp-marker { max-width: 100%; }
+.cmp-marker-time { color: var(--ink-3); }
+.cmp-marker[aria-current="true"] .cmp-marker-time { color: var(--ink-2); }
+.cmp-marker-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A hiccup while playing (Try again): a compact callout over the transport. */
+.cmp-problem .callout { padding: var(--s-2) var(--s-3); }
+.cmp-problem .callout-body p { font-size: var(--fs-small); }
+
+@container content (max-width: 480px) {
+  .ab-keys { gap: var(--s-4); }
+  .cmp-note { margin-left: 0; }
+}

@@ -1,0 +1,31 @@
+# NVIDIA GPU variant:  docker compose -f docker/compose.cuda.yml up -d
+services:
+  audiolab:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.cuda
+    container_name: audiolab
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8088}:8765"
+    volumes:
+      - audiolab-data:/data
+      - ${AUDIOLAB_OUTPUT:-../output}:/output
+    environment:
+      - AUDIOLAB_TOKEN=${AUDIOLAB_TOKEN:-}
+    mem_limit: 12g
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  audiolab-data:

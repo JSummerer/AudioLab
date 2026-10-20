@@ -1,0 +1,26 @@
+# Only pyproject.toml, README.md, LICENSE and audiolab/ are needed in the image
+# (build context = repository root, see docker/compose.yml).
+.git/
+.venv*/
+venv*/
+archive/
+deliverables/
+runs/
+output/
+data/
+docs/
+tests/
+.work/
+.zcode/
+*.local.md
+**/__pycache__/
+**/*.py[cod]
+**/.DS_Store
+*.command
+start.*
+.playwright-mcp/
+CHANGELOG.md
+CONTRIBUTING.md
+.github/
+docker/
+.editorconfig

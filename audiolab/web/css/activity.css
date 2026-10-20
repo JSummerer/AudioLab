@@ -1,0 +1,50 @@
+/* Activity (#/activity): every job in one list — rows with hairlines under day headings,
+   no cards. A row: cover, title, a meta line with the status light (task · how it went ·
+   when), quiet actions and a chevron; running rows add a meter, failed ones the error. */
+
+/* "Clear finished" on the title's line, not the subtitle's. */
+#viewActivity .page-head { flex-wrap: nowrap; align-items: flex-start; }
+#viewActivity .page-actions { margin-top: 3px; margin-right: -8px; }
+.filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: var(--s-5); }
+
+.job-group + .job-group { margin-top: var(--s-5); }
+.job-list { list-style: none; margin: 0; padding: 0; }
+.job-card {
+  position: relative;
+  display: grid; grid-template-columns: 44px minmax(0, 1fr) auto auto; gap: 14px; align-items: center;
+  margin: 0 -8px; padding: 10px 8px; border-radius: var(--r-sm);
+  transition: background-color .12s;
+}
+/* Hairlines between rows, at the column's edges (the row reaches 8px past them for its hover fill). */
+.job-card + .job-card::before { content: ""; position: absolute; top: 0; left: 8px; right: 8px; height: 1px; background: var(--line); }
+.job-card:hover { background: var(--panel-2); }
+.job-card:hover::before, .job-card:hover + .job-card::before { opacity: 0; }
+.job-open { color: inherit; text-decoration: none; }
+.job-open::after { content: ""; position: absolute; inset: 0; z-index: 1; border-radius: inherit; }
+.job-open:focus-visible { outline: none; }
+.job-card:has(.job-open:focus-visible) { outline: 2px solid var(--accent); outline-offset: 0; }
+.job-main { min-width: 0; display: grid; gap: 2px; align-content: center; }
+.job-title { min-width: 0; font-weight: 600; font-size: var(--fs-body); line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-meta { display: flex; align-items: center; gap: var(--s-2); min-width: 0; }
+.job-sub { min-width: 0; font-size: var(--fs-small); color: var(--ink-2); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-main .meter { max-width: 420px; margin: 6px 0 2px; }
+.job-line { font-size: var(--fs-small); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-line:empty, .job-stale:empty { display: none; }
+.job-card[data-status="failed"] .job-line { color: var(--danger); white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.job-stale { font-size: var(--fs-small); color: var(--warn); }
+.job-actions { position: relative; z-index: 2; display: flex; align-items: center; gap: 2px; }
+.job-go { color: var(--ink-3); }
+
+.activity-empty { display: grid; justify-items: center; gap: 6px; padding: var(--s-7) var(--s-4); text-align: center; }
+.activity-empty strong { font: 600 var(--fs-h2)/1.25 var(--font-serif); }
+.activity-empty p { max-width: 40ch; }
+.activity-empty .btn { margin-top: var(--s-3); }
+
+@container content (max-width: 640px) {
+  .job-card { grid-template-columns: 44px minmax(0, 1fr) auto; gap: var(--s-3); }
+  .job-go { display: none; }
+}
+@container content (max-width: 480px) {
+  /* Try again keeps its words: the row's actions go under the error instead. */
+  .job-card:has(.job-retry) .job-actions { grid-column: 2 / -1; justify-self: start; margin-left: -8px; }
+}

@@ -1,0 +1,46 @@
+# Python environments & bytecode
+.venv*/
+venv*/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Local agent instructions, notes and handoffs (not part of the public source snapshot)
+AGENTS.md
+CLAUDE.md
+CLAUDE.local.md
+.agents/
+.codex/
+.work/
+docs/PLAN.md
+
+# Local credentials and browser cookies
+.env
+.env.*
+!.env.example
+cookies.txt
+cookies.*.txt
+
+# System & editors
+.DS_Store
+.zcode/
+.cache/
+*.swp
+*.swo
+
+# Local data (Docker output, prototype-era folders with user audio)
+output/
+data/
+runs/
+deliverables/
+archive/
+
+# Temporary files
+.playwright-mcp/
+.temp_*
+*.part
+*.log

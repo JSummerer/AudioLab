@@ -1,0 +1,101 @@
+/* Settings (#/settings): a sticky strip of section tabs over one column of sections, at most
+   720 px wide so a label and its control stay close. No boxes: a serif head per section, then
+   rows with hairlines — label and help on the left, the control on the right; the format
+   lists stacked under their words. */
+
+.settings-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-5); }
+
+/* Section tabs: words, the current one underlined in accent. The strip sticks to the top of
+   the content area and bleeds to its edges (50cqi = half the content area, 50% = half the
+   page column); it is the sheet itself, so nothing shows through it. */
+.settings-nav {
+  position: sticky; top: 0; z-index: 2;
+  display: flex; gap: var(--s-5); overflow-x: auto; scrollbar-width: none;
+  margin: 0 calc(50% - 50cqi); padding: 0 calc(50cqi - 50%);
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.settings-nav::-webkit-scrollbar { display: none; }
+.settings-nav a {
+  flex: none; white-space: nowrap;
+  padding: 11px 0 10px;
+  color: var(--ink-2); font-weight: 550; font-size: 13.5px; text-decoration: none;
+  box-shadow: inset 0 -2px 0 transparent;
+  transition: color .12s, box-shadow .12s;
+}
+.settings-nav a:hover { color: var(--ink); box-shadow: inset 0 -2px 0 var(--line-strong); }
+.settings-nav a[aria-current="true"] { color: var(--ink); box-shadow: inset 0 -2px 0 var(--accent); }
+.settings-nav a:focus-visible { outline-offset: -2px; }
+
+.settings-sections { display: grid; gap: var(--s-6); max-width: 720px; min-width: 0; }
+.settings-sections > .block { padding: 0; scroll-margin-top: 64px; }
+.settings-sections .block-title { margin-bottom: var(--s-1); }
+/* Where a link lands: the highlight reaches a little past the text. */
+.settings-sections .is-flash { border-radius: var(--r-md); animation: settings-flash 1.8s ease-out; }
+@keyframes settings-flash {
+  0%, 45% { background-color: var(--accent-soft); box-shadow: 0 0 0 var(--s-3) var(--accent-soft); }
+  100% { background-color: transparent; box-shadow: 0 0 0 var(--s-3) transparent; }
+}
+
+/* Rows: one hairline between neighbours (a spot's wrapper counts as one row). */
+.set-rows > * + *, .storage-info > * + * { border-top: 1px solid var(--line); }
+.set-rows > .storage-info[hidden] + * { border-top: 0; }
+.set-rows .adv-row { grid-template-columns: minmax(0, 1fr) auto; gap: var(--s-2) var(--s-6); padding: var(--s-3) 0; border-bottom: 0; }
+.set-rows .adv-row-stack { grid-template-columns: minmax(0, 1fr); gap: var(--s-3); }
+.set-rows .adv-help { max-width: 62ch; }
+.set-rows > .callout { margin: var(--s-3) 0; }
+/* Words-only buttons line up with the column's edges, like the switches. */
+.set-rows .adv-control > .btn-ghost { margin-right: -8px; }
+@container content (max-width: 560px) {
+  .set-rows .adv-row:not(.adv-row-switch) { grid-template-columns: minmax(0, 1fr); gap: var(--s-2); }
+  .set-rows .adv-control > .btn-ghost { margin: 0 0 0 -8px; }
+}
+
+/* A part the app relies on: its state after a light. */
+.sys-state { display: flex; align-items: flex-start; gap: var(--s-2); }
+.sys-state .led { margin-top: calc(.7em - 4px); }
+.nudge { color: var(--warn); }
+.install-log { margin-bottom: var(--s-3); }
+
+/* Files: the output folder as a short path; "Change" swaps in a field with the full one. */
+.folder { display: grid; gap: 6px; padding: var(--s-3) 0; }
+.folder .adv-label { display: block; }
+.folder-line { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s-1) var(--s-2); min-height: 34px; }
+.folder-ico { color: var(--ink-3); }
+.folder-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.folder-actions { display: flex; align-items: center; gap: var(--s-1); margin-left: auto; margin-right: -8px; }
+.folder-edit { align-items: center; }
+.folder-edit .btn { min-height: 36px; }
+.folder-edit .field[aria-invalid="true"] { border-color: var(--danger); }
+.folder .callout { margin-top: 2px; }
+
+/* The bookmarklet: a link to drag to the bookmarks bar (dashed: it's picked up, not pressed). */
+.bm-row { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s-2) var(--s-3); }
+.bm-row .btn-ghost:last-child { margin-right: -8px; }
+.bookmarklet {
+  display: inline-flex; align-items: center; gap: var(--s-2);
+  min-height: 34px; padding: 0 14px; border-radius: var(--r-sm);
+  border: 1px dashed var(--field-line); background: var(--bg); color: var(--ink);
+  font-weight: 600; font-size: 13.5px; text-decoration: none; cursor: grab;
+}
+.bookmarklet .ico { color: var(--accent); }
+.bookmarklet:hover { background: var(--panel-2); }
+.bookmarklet:active { cursor: grabbing; }
+
+/* Storage: the app's own data, then its switches. */
+.storage-info:focus { outline: none; }
+
+/* About: facts, paths short with the full one on hover and a copy button. */
+.set-rows > .facts { padding: var(--s-3) 0; }
+.path-value { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; vertical-align: top; }
+.path-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.path-value .icon-btn { margin: -4px 0; }
+.set-rows > .block-actions { margin-top: 0; padding-top: var(--s-3); }
+.set-rows > .block-actions > .btn-ghost:first-child { margin-left: -8px; }
+
+.saved-mark {
+  display: inline-flex; align-items: center; gap: 3px; margin-left: var(--s-2); vertical-align: 1px;
+  font-size: var(--fs-tiny); font-weight: 600; color: var(--ok);
+  transition: opacity .3s;
+}
+.saved-mark.is-out { opacity: 0; }

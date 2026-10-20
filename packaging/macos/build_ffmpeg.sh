@@ -5,7 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BUILD_DIR="${AUDIOLAB_MEDIA_BUILD_DIR:-$REPO_DIR/.work/macos-app-2026-10-20/media-build}"
+BUILD_DIR="${AUDIOLAB_MEDIA_BUILD_DIR:-$REPO_DIR/.work/macos-package/media}"
 PYTHON="${AUDIOLAB_BUILD_PYTHON:-$REPO_DIR/.venv/bin/python}"
 JOBS="${AUDIOLAB_BUILD_JOBS:-4}"
 case "$JOBS" in 1|2|3|4) ;; *) echo 'AUDIOLAB_BUILD_JOBS must be 1–4.' >&2; exit 2 ;; esac

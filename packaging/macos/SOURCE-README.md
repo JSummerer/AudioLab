@@ -14,7 +14,7 @@ To rebuild on an Apple Silicon Mac with Xcode Command Line Tools and Python 3.12
 AUDIOLAB_BUILD_PYTHON=/absolute/path/to/python3.12 bash packaging/macos/build_ffmpeg.sh
 ```
 
-The default workspace is `.work/macos-app-2026-10-20/media-build`; override with
+The default workspace is `.work/macos-package/media`; override with
 `AUDIOLAB_MEDIA_BUILD_DIR`. It contains `downloads/`, extracted `source/`, an
 isolated `install/` prefix and `evidence/`. `AUDIOLAB_BUILD_JOBS` permits 1–4 jobs.
 The output is `install/bin/ffmpeg` and `install/bin/ffprobe`, targeting macOS 14
@@ -66,7 +66,7 @@ Create a companion asset next to the app's release download:
 
 ```sh
 python packaging/macos/third_party.py companion \
-  --directory .work/macos-app-2026-10-20/media-build/downloads \
+  --directory .work/macos-package/media/downloads \
   --output /path/to/NEW-third-party-sources.tar.gz
 ```
 

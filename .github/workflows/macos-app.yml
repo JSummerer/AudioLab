@@ -17,12 +17,17 @@ jobs:
     env:
       PYTHONUTF8: "1"
       UV_NO_PROGRESS: "1"
-      UV_PYTHON_INSTALL_DIR: ${{ runner.temp }}/audiolab-python
-      UV_CACHE_DIR: ${{ runner.temp }}/audiolab-uv-cache
-      AUDIOLAB_PACKAGE_WORK_DIR: ${{ runner.temp }}/audiolab-package
       AUDIOLAB_BUILD_JOBS: "3"
-      VALIDATION_DIR: ${{ runner.temp }}/audiolab-validation
     steps:
+      - name: Initialize isolated build paths
+        run: |
+          printf '%s\n' \
+            "UV_PYTHON_INSTALL_DIR=$RUNNER_TEMP/audiolab-python" \
+            "UV_CACHE_DIR=$RUNNER_TEMP/audiolab-uv-cache" \
+            "AUDIOLAB_PACKAGE_WORK_DIR=$RUNNER_TEMP/audiolab-package" \
+            "VALIDATION_DIR=$RUNNER_TEMP/audiolab-validation" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/audiolab-validation"
+
       - uses: actions/checkout@v7
         with:
           persist-credentials: false

@@ -71,8 +71,8 @@ It starts the same native window/server/task pipeline without `start.sh`, uv, pi
 Its private downloader mode dispatches yt-dlp inside the frozen executable; that executable is not a
 general-purpose Python interpreter. `runtime.py` chooses this mode and the bundled FFmpeg/Deno.
 
-Core exposes Save/Convert, Check and Light/Standard Enhance without AI. The published 2.4.0b1
-binary excludes AI. The next beta's managed optional add-on includes a frozen AI helper and both
+The main app exposes Save/Convert, Check and Light/Standard Enhance without AI. Version 2.4.0b2
+offers a managed optional add-on containing a frozen AI helper and both
 supported model choices; the main app's bundled Python packages remain immutable. `ai.install_supported`
 is driven by a build-generated, bundled catalog, not simply `packaged`. Split/Best use the healthy
 managed helper when present. Source/CLI/Docker keep their existing optional-AI and update paths.
@@ -100,7 +100,7 @@ pinned local safetensors models with no remote fallback. Health and storage repo
 separately from the catalog's unpacked target size. See the [HTTP contract](API.md#health).
 
 The initial release target is macOS 14+ arm64 with identifier `io.github.jsummerer.audiolab`. The build
-produces an ad-hoc-signed `.app`/DMG, checksums and a corresponding third-party source companion.
+produces an ad-hoc-signed `.app`/DMG, checksums, the optional AI archive/catalog and matching third-party source companions.
 It has no Developer ID or Apple notarization. The build's selected FFmpeg is compiled from its
 recorded LGPL sources rather than using the source setup's imageio fallback. See the
 [packaging guide](../packaging/macos/README.md) for build inputs, licensing and artifact checks, and

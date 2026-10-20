@@ -1,19 +1,18 @@
 # AudioLab for Mac testers
 
-The first packaged beta is **AudioLab Core 2.4.0b1**, targeting **Apple silicon (arm64), macOS 14 or
+The packaged beta is **AudioLab 2.4.0b2**, targeting **Apple silicon (arm64), macOS 14 or
 later**. It brings its own Python runtime and audio tools. Using it needs no Terminal commands,
 Python installation, Apple developer membership or AudioLab account. Intel builds are not yet qualified.
 
-Published **2.4.0b1** includes Save / Convert, Check, Light/Standard Enhance, comparison and the
-Library. Split and Best Enhance are unavailable in that release. **The next beta, 2.4.0b2, is being prepared
-with an optional managed AI download in Settings**. It includes its own runtime and both model
-choices; it needs no Terminal, Python setup or changes to shared Homebrew/uv tools. Source users
+The main app includes Save / Convert, Check, Light/Standard Enhance, comparison and the Library.
+**Settings offers an optional managed AI download for Split and Best Enhance**. It includes its own
+runtime and both model choices; it needs no Terminal, Python setup or changes to shared Homebrew/uv tools. Source users
 keep their [existing AI installer](INSTALLATION.md#optional-ai-in-source-installations).
 
 ## Download and install
 
 1. Visit [JSummerer/AudioLab Releases](https://github.com/JSummerer/AudioLab/releases).
-2. Under the **v2.4.0b1** release's **Assets**, choose **AudioLab-2.4.0b1-macOS-arm64.dmg** (105.5 MB).
+2. Under the **v2.4.0b2** release's **Assets**, choose **AudioLab-2.4.0b2-macOS-arm64.dmg**.
    Check the release notes for known issues and the validation actually performed.
    Testers only need the DMG; GitHub's source archives are for developers.
 3. Open the downloaded DMG, drag **AudioLab.app** into **Applications**, then eject the disk image.
@@ -42,8 +41,7 @@ download/report the exact message. These differ from the expected unidentified-d
 
 ## Files and privacy
 
-Your files are processed locally. Supported web links require network access to their source. The
-published 2.4.0b1 app downloads no AI models. In the next beta, enabling AI explicitly downloads
+Your files are processed locally. Supported web links require network access to their source. Enabling AI explicitly downloads
 the optional software and both model choices; after installation these work offline with local
 files. The app runs a server on a loopback address for its own window, so the chosen port can vary.
 
@@ -52,7 +50,7 @@ files. The app runs a server on a loopback address for its own window, so the ch
 | Finished audio and saved cover pictures | `~/Music/AudioLab`, or your choice in Settings → Files |
 | Settings, job history, Library records and kept original copies | `~/Library/Application Support/AudioLab` |
 | Downloader/Deno caches and runtime temporary files | The app-data folder's `cache/` subfolder |
-| Managed AI software, models, cache and partial downloads (next beta) | The app-data folder’s `ai/` subfolder |
+| Managed AI software, models, cache and partial downloads | The app-data folder’s `ai/` subfolder |
 | App logs | `~/Library/Logs/AudioLab` |
 
 In **Settings → About**, use **Open app data** and **Open logs** to find the actual
@@ -69,10 +67,9 @@ macOS/WebKit also manages native window website storage, preferences and caches 
 identifier. Those are separate from AudioLab's app-data folder; this release does not claim all
 operating-system traces are contained in one place.
 
-## Optional AI — 2.4.0b2 (unreleased)
+## Optional AI — 2.4.0b2
 
-This feature is being prepared and is **not in the published 2.4.0b1 DMG**. In a compatible build,
-choose **Settings → AI & system → Enable AI features** to add Split and Best Enhance. Settings shows
+Replace an older **2.4.0b1** app first; that release has no AI installer. In **2.4.0b2**, choose **Settings → AI & system → Enable AI features** to add Split and Best Enhance. Settings shows
 the release's known download and installed sizes, progress and errors. Download size, installed
 size, available RAM and temporary audio space are different requirements. No minimum hardware or
 performance level has been qualified; begin with short audio.
@@ -97,7 +94,7 @@ See [optional AI](INSTALLATION.md#optional-ai) for source setup and resource not
 
 Settings, Library and output normally remain outside the app and are reused. Read release notes for
 any compatibility instructions. The app and its downloader update together; there is no automatic
-pip installer or package self-update in Core. For the next beta’s optional AI, check Settings after
+pip installer or package self-update in the main app. For optional AI, check Settings after
 updating the app: its bundled catalog controls the compatible AI version. A new app download can
 require the first-opening exception
 again. Avoid running source and packaged copies against the same data folder at the same time.
@@ -148,8 +145,8 @@ exclusively by this app.
 - **A job fails:** use the job's bug-report details. For general problems, use
   **Settings → About → Copy system report**. Review paths, names and links before sharing.
 - **A link stops working:** check for a newer app release or use an audio file you already have.
-  Core's bundled downloader is updated by replacing the app.
-- **Split or Best is unavailable:** published 2.4.0b1 has no AI installer. In the next beta, use
+  The app's bundled downloader is updated by replacing the app.
+- **Split or Best is unavailable:** 2.4.0b1 has no AI installer; update the app first. In 2.4.0b2, use
   **Settings → AI & system** to install, resume or repair the managed add-on. Read the reason and
   error log if installation is unavailable or fails. It never starts a hidden first-run download.
 - **Long audio needs too much memory or disk:** shorten it or use Light enhancement. There is no

@@ -28,12 +28,12 @@ which version you prefer.
 
 ## Mac app for testers
 
-The first downloadable app is **AudioLab Core 2.4.0b1**, for **Apple silicon Macs running macOS 14 or
+The downloadable beta is **AudioLab 2.4.0b2**, for **Apple silicon Macs running macOS 14 or
 later**. It includes Python and its audio tools: no Terminal, Python setup or Apple developer account
 is needed to use it. Intel binaries are not yet a supported release target.
 
-1. Open the [v2.4.0b1 beta release](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b1) and download
-   **AudioLab-2.4.0b1-macOS-arm64.dmg** under **Assets** (105.5 MB).
+1. Open the [v2.4.0b2 beta release](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b2) and download
+   **AudioLab-2.4.0b2-macOS-arm64.dmg** under **Assets**.
    The source archives are for developers; testers only need the DMG.
 2. Open the DMG and drag **AudioLab.app** into **Applications**. Eject the disk image, then open the app
    from Applications.
@@ -41,11 +41,12 @@ is needed to use it. Intel binaries are not yet a supported release target.
    its first opening. After checking the download came from this repository, follow the
    [Open Anyway steps](docs/MACOS.md#first-opening) in System Settings.
 
-The published **2.4.0b1** Core app supports **Save / Convert, Check, and Light/Standard Enhance**.
-Split and Best Enhance are unavailable in that release. **The next beta, 2.4.0b2, is being prepared with an
-optional AI download in Settings**: it includes its own runtime and both model choices, with no
-Terminal or Python setup. Availability depends on the compatible add-on included in that app’s
-release catalog. Processing stays on your Mac.
+The main download supports **Save / Convert, Check, and Light/Standard Enhance**. For **Split** and
+**Best Enhance**, open **Settings → AI & system → Enable AI features**. The optional download includes
+its own runtime and both model choices, with no Terminal or Python setup. Settings handles download
+resuming, repair, compatible updates and removal. Processing stays on your Mac.
+For this beta, the AI add-on is about **570 MB to download** and **1.02 GB installed**; allow extra
+space for installation and audio work. These are disk sizes, not memory requirements.
 The release notes describe the checks completed and the beta's validation limits.
 See the [Mac guide](docs/MACOS.md) for opening, updates and safe removal.
 
@@ -70,7 +71,7 @@ preserves your output files, but may remove its kept original copy when no other
 When enabled, kept original copies live separately in AudioLab's app-data folder and can also be
 cleared in **Settings → Storage**.
 
-**AI is optional.** It adds Split and Best enhancement. The upcoming packaged option downloads
+**AI is optional.** It adds Split and Best enhancement. The packaged option downloads
 software and both model choices together; source installations keep their existing installer. See
 [optional AI and resource notes](docs/INSTALLATION.md#optional-ai) before enabling it. Download size,
 installed files, processing memory and temporary audio space are different requirements.
@@ -82,7 +83,7 @@ installed files, processing memory and temporary audio space are different requi
   **Settings → Copy system report**. Include your operating system and the steps that led to the problem.
   Review the report before sharing: filenames, source links or tool output may be personal.
 - **Security concern:** follow [SECURITY.md](SECURITY.md) to report it privately.
-- **A link fails:** site support varies and can change. For the Mac Core app, check for a newer app release
+- **A link fails:** site support varies and can change. For the Mac app, check for a newer app release
   or use a local file. Source installations also offer **Update downloader** in Settings. AudioLab does
   not promise support for every site or restricted link.
 - **Want more control?** See [usage, command-line and server options](docs/USAGE.md).

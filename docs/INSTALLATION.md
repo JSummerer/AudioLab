@@ -1,15 +1,15 @@
 # Install AudioLab
 
-Choose the self-contained **Mac Core app** for everyday testing on Apple silicon, or install from
+Choose the self-contained **Mac app** for everyday testing on Apple silicon, or install from
 source for development, Windows or Linux. They use the same processing code and normally
 share app data for the same computer user; quit one before opening the other.
 
-## Mac Core app
+## Mac app
 
 The initial binary target is **macOS 14 or later on Apple silicon (arm64)**. No Python installation,
 Terminal setup or Apple developer account is required. Intel support is not yet qualified.
 
-Download the **v2.4.0b1 macOS arm64 DMG** from
+Download the **v2.4.0b2 macOS arm64 DMG** from
 [GitHub Releases](https://github.com/JSummerer/AudioLab/releases), when it is attached under Assets.
 Open it, drag **AudioLab.app** into **Applications**, eject the image and open the app from Applications.
 If a release has no DMG asset, it has no published binary; **Source code (zip)** needs source setup.
@@ -19,9 +19,9 @@ first-opening warning, use the [Mac guide's graphical Open Anyway steps](MACOS.m
 That guide also covers updates, storage and uninstall. The release notes state which native checks
 were completed; documentation of this path is not evidence that a candidate has passed them.
 
-The published **2.4.0b1** Core app includes **Save / Convert**, **Check**, and **Light/Standard
-Enhance**, plus the Library. Split and Best Enhance are unavailable in that release. The next beta
-is being prepared with the [optional managed AI download](#optional-ai) below. The main app and its
+The **2.4.0b2** app includes **Save / Convert**, **Check**, and **Light/Standard Enhance**, plus the
+Library. Settings offers the [optional managed AI download](#optional-ai) for Split and Best Enhance.
+The main app and its
 downloader update by replacing the app; the packaged app does not change Python packages through pip.
 
 ## Install from source
@@ -44,7 +44,7 @@ Python, that Python and uv's cache live outside the project folder. Keep the fol
 3. Wait for setup. It creates **AudioLab.app** in **Applications inside your home folder**, then opens
    a native window. Later starts reuse the source environment.
 
-This Applications entry is a shortcut to the project, unlike the downloadable Core app. If you move
+This Applications entry is a shortcut to the project, unlike the downloadable app. If you move
 the project folder, run `AudioLab.command` there again to refresh it. Keep separate app copies clearly
 named if you use both source and packaged builds. The window integration uses macOS APIs from 11.3;
 current Python/dependency versions can impose a newer OS floor. The binary release targets macOS 14+.
@@ -92,15 +92,16 @@ Distribution-specific setup remains unqualified.
 ## Optional AI
 
 AI adds **Split** and **Best Enhance**. It is optional; the other tools work without it.
-The managed packaged option below is being prepared for **2.4.0b2 (unreleased)** and is not included in
-published **2.4.0b1**. Its initial target is macOS 14+ on Apple silicon (arm64).
+The managed packaged option is included in **2.4.0b2**, targeting macOS 14+ on Apple silicon (arm64).
+The older **2.4.0b1** app has no AI installer; replace it with the newer app first.
 
-### Packaged Mac app — 2.4.0b2 (unreleased)
+### Packaged Mac app — 2.4.0b2
 
 Open **Settings → AI & system → Enable AI features**. When a compatible add-on is available for
 that app build, Settings shows its download and installed-file sizes. These describe the release
 asset, not the RAM needed to process audio. Allow additional free space for downloading, unpacking
 and audio intermediates; no fixed download-size or minimum-RAM promise applies to every release.
+The 2.4.0b2 add-on is about **570 MB to download** and **1.02 GB installed**.
 
 The optional download is self-contained: it includes its own AI runtime and both **Standard** and
 **Fine-tuned** model choices. AudioLab verifies the download and tests the runtime before enabling
@@ -151,8 +152,8 @@ describes Fine-tuned as roughly four times slower than Standard.
 
 ## Update AudioLab
 
-For the **Mac Core app**, follow [Replace the app](MACOS.md#updates): quit, install the newer DMG's app
-and reopen. Its downloader updates with the app. In the next beta, check **Settings → AI & system**
+For the **Mac app**, follow [Replace the app](MACOS.md#updates): quit, install the newer DMG's app
+and reopen. Its downloader updates with the app. Check **Settings → AI & system**
 for any compatible AI add-on update after replacing the app. Source packages and shared caches are
 not changed by the packaged AI updater.
 
@@ -180,7 +181,7 @@ Source mode's **Update downloader** updates the link-handling tool, not AudioLab
 | The source Mac shortcut cannot open | The project may have moved. Run `AudioLab.command` in its current location. |
 | The source Python environment is broken | With AudioLab stopped, run `bash start.sh --reinstall`; Windows: `.\start.bat --reinstall`. This recreates `.venv`; enable AI afterwards if needed. |
 | The browser did not open | Use the address printed in the source terminal. Keep it running; the port can vary. |
-| Split or Best is unavailable | Published 2.4.0b1 has no AI installer. In a build with managed AI, open Settings → AI & system to install, resume or repair it and inspect errors. Source users can enable the existing AI package installer. |
+| Split or Best is unavailable | Update an older 2.4.0b1 app first. In 2.4.0b2, open Settings → AI & system to install, resume or repair the add-on and inspect errors. Source users can enable the existing AI package installer. |
 | The output folder is unavailable | Reconnect its drive or choose another folder in Settings → Files. |
 | A result plays elsewhere but not here | Codec support varies. Open the result in your usual player or export MP3/WAV. |
 

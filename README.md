@@ -63,8 +63,9 @@ Python with uv; it is separate from the self-contained Mac app.
 
 Finished audio goes to **`Music/AudioLab`** in your home folder. Change that in **Settings → Files**.
 Existing output files are kept; a new result gets a numbered name if needed. Removing a Library entry
-only removes its record, not your output files. When enabled, kept original copies live separately in
-AudioLab's app-data folder and can be cleared in **Settings → Storage**.
+preserves your output files, but may remove its kept original copy when no other entry uses it.
+When enabled, kept original copies live separately in AudioLab's app-data folder and can also be
+cleared in **Settings → Storage**.
 
 **AI is optional in source installations.** It adds Split and Best enhancement. The downloaded Mac
 Core app leaves these out. See [AI size and hardware notes](docs/INSTALLATION.md#optional-ai-in-source-installations)

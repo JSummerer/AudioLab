@@ -141,6 +141,7 @@ jobs:
             ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/release-*/SHA256SUMS.txt
           if-no-files-found: error
           compression-level: 0
+          retention-days: 1
 
       - name: Upload validation evidence and failure logs
         if: always()
@@ -160,3 +161,4 @@ jobs:
             ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/*inventory*.json
             ${{ runner.temp }}/audiolab-native/data/logs/
           if-no-files-found: warn
+          retention-days: 7

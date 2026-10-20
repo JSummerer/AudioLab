@@ -6,6 +6,8 @@ is excluded, and the app explains that Split and Best enhancement are unavailabl
 
 The **Build macOS tester app** workflow in GitHub Actions is the maintained release path. Start it
 manually from the Actions tab; it creates build artifacts without publishing a release.
+Temporary app/source artifacts expire after one day; validation logs expire after seven days.
+Download and verify them before publishing the beta's durable assets in GitHub Releases.
 
 For a local build, use an Apple silicon Mac with Xcode Command Line Tools,
 [uv](https://docs.astral.sh/uv/getting-started/installation/) and the exact Python Build Standalone

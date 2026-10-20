@@ -13837,65 +13837,75 @@
       "version": "c3027d884967773057bf74b957e3fea87e5df4d7",
       "url": "https://chromium.googlesource.com/chromium/src/third_party/jinja2.git/+archive/c3027d884967773057bf74b957e3fea87e5df4d7.tar.gz",
       "filename": "deno-native-third_party_jinja2.tar.gz",
-      "sha256": "2f5572f0fa2f4f439a66e9e10c185cb75cb96108430046f837562f86d8450689",
+      "sha256": "3ad6df9bff1bbacdc752d6029a996d242b56c0d52d2bc382bf9b94d52c226aae",
       "groups": [
         "deno-reconstruction"
       ],
       "destination": "rusty_v8/third_party/jinja2",
       "strip_components": 0,
-      "source_kind": "native-archive"
+      "source_kind": "native-archive",
+      "normalization": "gitiles-tar-v1",
+      "acquisition_sha256": "2f5572f0fa2f4f439a66e9e10c185cb75cb96108430046f837562f86d8450689"
     },
     {
       "name": "deno-native-third_party/markupsafe",
       "version": "4256084ae14175d38a3ff7d739dca83ae49ccec6",
       "url": "https://chromium.googlesource.com/chromium/src/third_party/markupsafe.git/+archive/4256084ae14175d38a3ff7d739dca83ae49ccec6.tar.gz",
       "filename": "deno-native-third_party_markupsafe.tar.gz",
-      "sha256": "c5cb8c2409210a10fe6284f8d069d763da784c08df5e3159aa84b1bf4324905e",
+      "sha256": "0b9d977fed85b7e051beb327a934901db870151025fb1590940519ae3d8eefa9",
       "groups": [
         "deno-reconstruction"
       ],
       "destination": "rusty_v8/third_party/markupsafe",
       "strip_components": 0,
-      "source_kind": "native-archive"
+      "source_kind": "native-archive",
+      "normalization": "gitiles-tar-v1",
+      "acquisition_sha256": "c5cb8c2409210a10fe6284f8d069d763da784c08df5e3159aa84b1bf4324905e"
     },
     {
       "name": "deno-native-buildtools",
       "version": "17495e454aae81b581e8b3caccbb53054509b280",
       "url": "https://chromium.googlesource.com/chromium/src/buildtools.git/+archive/17495e454aae81b581e8b3caccbb53054509b280.tar.gz",
       "filename": "deno-native-buildtools.tar.gz",
-      "sha256": "617e58cdf7743c1d0641be7785adc1f1cea01bac3730b13d0b1dbf2272e04049",
+      "sha256": "ddfddaafc6762f0e74c2103f48234928534c7bb520564db56fda3ddf24ee6b3d",
       "groups": [
         "deno-reconstruction"
       ],
       "destination": "rusty_v8/buildtools",
       "strip_components": 0,
-      "source_kind": "native-archive"
+      "source_kind": "native-archive",
+      "normalization": "gitiles-tar-v1",
+      "acquisition_sha256": "617e58cdf7743c1d0641be7785adc1f1cea01bac3730b13d0b1dbf2272e04049"
     },
     {
       "name": "deno-native-third_party/icu",
       "version": "ee5f27adc28bd3f15b2c293f726d14d2e336cbd5",
       "url": "https://chromium.googlesource.com/chromium/deps/icu.git/+archive/ee5f27adc28bd3f15b2c293f726d14d2e336cbd5.tar.gz",
       "filename": "deno-native-third_party_icu.tar.gz",
-      "sha256": "71ffe5866ae90586e385dc075ed71524b953c3f3b049158780a62d81ecf28d1a",
+      "sha256": "ecab32d4004a6196485bd62142c38b41462880ed673e0cce970120c62594c111",
       "groups": [
         "deno-reconstruction"
       ],
       "destination": "rusty_v8/third_party/icu",
       "strip_components": 0,
-      "source_kind": "native-archive"
+      "source_kind": "native-archive",
+      "normalization": "gitiles-tar-v1",
+      "acquisition_sha256": "71ffe5866ae90586e385dc075ed71524b953c3f3b049158780a62d81ecf28d1a"
     },
     {
       "name": "deno-native-third_party/abseil-cpp",
       "version": "d16e32215c3ab90ba57c2e904a5344d85c7353e4",
       "url": "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git/+archive/d16e32215c3ab90ba57c2e904a5344d85c7353e4.tar.gz",
       "filename": "deno-native-third_party_abseil-cpp.tar.gz",
-      "sha256": "e43602c589baa345e590e50b9c1db82e0a2482a10f38c32e1fbd92399b80ca2d",
+      "sha256": "719977b88776bc3c25cf2f85d308a2e224ab2e7be13a854351ae1e5b4debc8df",
       "groups": [
         "deno-reconstruction"
       ],
       "destination": "rusty_v8/third_party/abseil-cpp",
       "strip_components": 0,
-      "source_kind": "native-archive"
+      "source_kind": "native-archive",
+      "normalization": "gitiles-tar-v1",
+      "acquisition_sha256": "e43602c589baa345e590e50b9c1db82e0a2482a10f38c32e1fbd92399b80ca2d"
     },
     {
       "name": "deno-native-third_party/fp16/src",
@@ -13915,39 +13925,45 @@
       "version": "5abc7f839700f0f17338434e1c1c6a8c87c00c11",
       "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxx.git/+archive/5abc7f839700f0f17338434e1c1c6a8c87c00c11.tar.gz",
       "filename": "deno-native-third_party_libcxx_src.tar.gz",
-      "sha256": "9bb1c4b7c7b662e5084a7908fb677e322976ea35f031ec6ad7f9860cec64086d",
+      "sha256": "e8c3bdb4f572701ec19e0ff95d02aed98ae7ac6bfd60e9e4861d7394f98a057b",
       "groups": [
         "deno-reconstruction"
       ],
       "destination": "rusty_v8/third_party/libc++/src",
       "strip_components": 0,
-      "source_kind": "native-archive"
+      "source_kind": "native-archive",
+      "normalization": "gitiles-tar-v1",
+      "acquisition_sha256": "9bb1c4b7c7b662e5084a7908fb677e322976ea35f031ec6ad7f9860cec64086d"
     },
     {
       "name": "deno-native-third_party/libc++abi/src",
       "version": "8f11bb1d4438d0239d0dfc1bd9456a9f31629dda",
       "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxxabi.git/+archive/8f11bb1d4438d0239d0dfc1bd9456a9f31629dda.tar.gz",
       "filename": "deno-native-third_party_libcxxabi_src.tar.gz",
-      "sha256": "e6734777d6e5544e4b54142b0537df07106e96ec42d242ab24e2123308e37082",
+      "sha256": "609d9f37f150926cafb6e94a9e19fad9b6efde9851745b419c6c62dd108b4ddd",
       "groups": [
         "deno-reconstruction"
       ],
       "destination": "rusty_v8/third_party/libc++abi/src",
       "strip_components": 0,
-      "source_kind": "native-archive"
+      "source_kind": "native-archive",
+      "normalization": "gitiles-tar-v1",
+      "acquisition_sha256": "e6734777d6e5544e4b54142b0537df07106e96ec42d242ab24e2123308e37082"
     },
     {
       "name": "deno-native-third_party/libunwind/src",
       "version": "d6c7a21e978f0adaa43accaad53bc64f0b64f6ec",
       "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libunwind.git/+archive/d6c7a21e978f0adaa43accaad53bc64f0b64f6ec.tar.gz",
       "filename": "deno-native-third_party_libunwind_src.tar.gz",
-      "sha256": "29957c46d68d1135d06776cc9100afb907bc369567754c7fd0664388e4934b83",
+      "sha256": "0b7657e0dd887cdf46882ffd7ac7934f0997d8a2c516fa628361867229292909",
       "groups": [
         "deno-reconstruction"
       ],
       "destination": "rusty_v8/third_party/libunwind/src",
       "strip_components": 0,
-      "source_kind": "native-archive"
+      "source_kind": "native-archive",
+      "normalization": "gitiles-tar-v1",
+      "acquisition_sha256": "29957c46d68d1135d06776cc9100afb907bc369567754c7fd0664388e4934b83"
     },
     {
       "name": "deno-native-third_party/fast_float/src",
@@ -13967,26 +13983,30 @@
       "version": "9309c117ebae84dd2f9df1ef99de4782162527d5",
       "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libc.git/+archive/9309c117ebae84dd2f9df1ef99de4782162527d5.tar.gz",
       "filename": "deno-native-third_party_llvm-libc_src.tar.gz",
-      "sha256": "34cb5744059b576141c42d1c7508858bc4c24b84d8e9352438fe5479b3ce8cf5",
+      "sha256": "6d51cfdf6c5d24f5ed3b400023fbef4b6806c840a42b16aafdb0dcfb8190e632",
       "groups": [
         "deno-reconstruction"
       ],
       "destination": "rusty_v8/third_party/llvm-libc/src",
       "strip_components": 0,
-      "source_kind": "native-archive"
+      "source_kind": "native-archive",
+      "normalization": "gitiles-tar-v1",
+      "acquisition_sha256": "34cb5744059b576141c42d1c7508858bc4c24b84d8e9352438fe5479b3ce8cf5"
     },
     {
       "name": "deno-native-third_party/simdutf",
       "version": "f7356eed293f8208c40b3c1b344a50bd70971983",
       "url": "https://chromium.googlesource.com/chromium/src/third_party/simdutf/+archive/f7356eed293f8208c40b3c1b344a50bd70971983.tar.gz",
       "filename": "deno-native-third_party_simdutf.tar.gz",
-      "sha256": "cb21b05ccada9d07b08f8ccebf623c0b33dc841169440b1b329136c11247e4c6",
+      "sha256": "906029f509004471fadac8e612f79607d27868de87efacd3f669dd42c36a9253",
       "groups": [
         "deno-reconstruction"
       ],
       "destination": "rusty_v8/third_party/simdutf",
       "strip_components": 0,
-      "source_kind": "native-archive"
+      "source_kind": "native-archive",
+      "normalization": "gitiles-tar-v1",
+      "acquisition_sha256": "cb21b05ccada9d07b08f8ccebf623c0b33dc841169440b1b329136c11247e4c6"
     },
     {
       "name": "deno-native-third_party/highway/src",
@@ -14006,13 +14026,15 @@
       "version": "ff3b8b885b8374cbd3902642d94dc737bda93d5d",
       "url": "https://chromium.googlesource.com/chromium/src/base/allocator/partition_allocator.git/+archive/ff3b8b885b8374cbd3902642d94dc737bda93d5d.tar.gz",
       "filename": "deno-native-third_party_partition_alloc.tar.gz",
-      "sha256": "2d30017609f2ddd60e24b9b57f58c9dd1018b0276b56cc22dba1790fd33f0305",
+      "sha256": "40a672410e525b1f35a21342e60b98c67ec64ad0abf5e530c23318a069ad98e3",
       "groups": [
         "deno-reconstruction"
       ],
       "destination": "rusty_v8/third_party/partition_alloc",
       "strip_components": 0,
-      "source_kind": "native-archive"
+      "source_kind": "native-archive",
+      "normalization": "gitiles-tar-v1",
+      "acquisition_sha256": "2d30017609f2ddd60e24b9b57f58c9dd1018b0276b56cc22dba1790fd33f0305"
     },
     {
       "name": "deno-native-third_party/dragonbox/src",
@@ -14058,26 +14080,30 @@
       "version": "26e8ff47f18a8d28d6187a04b6a16cb7332356f8",
       "url": "https://chromium.googlesource.com/chromium/src/third_party/rust/+archive/26e8ff47f18a8d28d6187a04b6a16cb7332356f8.tar.gz",
       "filename": "deno-native-third_party_rust.tar.gz",
-      "sha256": "5d56ec2c250c8db81c195c1c4f1851c1d9db754e90cafadddb1c90ba4e5fd195",
+      "sha256": "cb057138395ceb63c8b1a2141201e4bf3b23e8c672c1f728ec9a568e3b804650",
       "groups": [
         "deno-reconstruction"
       ],
       "destination": "rusty_v8/third_party/rust",
       "strip_components": 0,
-      "source_kind": "native-archive"
+      "source_kind": "native-archive",
+      "normalization": "gitiles-tar-v1",
+      "acquisition_sha256": "5d56ec2c250c8db81c195c1c4f1851c1d9db754e90cafadddb1c90ba4e5fd195"
     },
     {
       "name": "deno-native-tools/clang",
       "version": "45f4b9e25124809497a27a8ae0e63d603b0f9f1b",
       "url": "https://chromium.googlesource.com/chromium/src/tools/clang.git/+archive/45f4b9e25124809497a27a8ae0e63d603b0f9f1b.tar.gz",
       "filename": "deno-native-tools_clang.tar.gz",
-      "sha256": "e34f83f5eded5cf45fe9dba5019dad364d23aa8354dc7cdf88e519893d144bb2",
+      "sha256": "b660a5c8e612c6d54c5d826622a6cfcb669d5927efb2a1a769e203e99b3f1c70",
       "groups": [
         "deno-reconstruction"
       ],
       "destination": "rusty_v8/tools/clang",
       "strip_components": 0,
-      "source_kind": "native-archive"
+      "source_kind": "native-archive",
+      "normalization": "gitiles-tar-v1",
+      "acquisition_sha256": "e34f83f5eded5cf45fe9dba5019dad364d23aa8354dc7cdf88e519893d144bb2"
     }
   ]
 }

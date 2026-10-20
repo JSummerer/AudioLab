@@ -15,11 +15,14 @@ import json
 import shutil
 import socket
 import tarfile
+import tempfile
 import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+
+from source_archive import normalize
 
 HERE = Path(__file__).resolve().parent
 MANIFEST = HERE / 'sources.json'
@@ -54,6 +57,9 @@ def fetch(groups: str, directory: Path) -> list[dict]:
 
     def fetch_one(row: dict) -> None:
         target = directory / row['filename']
+        normalization = row.get('normalization')
+        if normalization not in (None, 'gitiles-tar-v1'):
+            raise ValueError(f'Unknown source normalization: {normalization!r} ({row["filename"]})')
         if not target.exists():
             partial = target.with_suffix(target.suffix + '.partial')
             request = urllib.request.Request(row['url'], headers={'User-Agent': 'AudioLab-source-archive/1'})
@@ -69,6 +75,21 @@ def fetch(groups: str, directory: Path) -> list[dict]:
                     delay = 2 ** (attempt - 1)
                     print(f'Retrying source download in {delay}s: {detail}', flush=True)
                     time.sleep(delay)
+            if normalization:
+                # Keep the original partial on invalid input or a final hash mismatch.
+                with tempfile.TemporaryDirectory(prefix='audiolab-source-', dir=directory) as scratch:
+                    normalized = Path(scratch) / row['filename']
+                    try:
+                        normalize(partial, normalized)
+                    except (OSError, EOFError, ValueError, tarfile.TarError) as error:
+                        raise RuntimeError(
+                            f'Source normalization failed: {row["filename"]} ({row["url"]}); retained {partial}: {error}'
+                        ) from error
+                    if digest(normalized) != row['sha256']:
+                        raise RuntimeError(
+                            f'Source checksum failed: {row["filename"]} ({row["url"]}); retained {partial}'
+                        )
+                    normalized.replace(partial)
             if digest(partial) != row['sha256']:
                 raise RuntimeError(f'Source checksum failed: {row["filename"]} ({row["url"]}); retained {partial}')
             partial.replace(target)
@@ -103,7 +124,13 @@ def companion(groups: str, directory: Path, output: Path) -> None:
     with tarfile.open(output, 'w:gz') as archive:
         for row in rows:
             archive.add(directory / row['filename'], arcname=f'sources/{row["filename"]}', filter=neutral_owner)
-        for path in (MANIFEST, HERE / 'build_ffmpeg.sh', Path(__file__), HERE / 'SOURCE-README.md'):
+        for path in (
+            MANIFEST,
+            HERE / 'build_ffmpeg.sh',
+            Path(__file__),
+            HERE / 'source_archive.py',
+            HERE / 'SOURCE-README.md',
+        ):
             archive.add(path, arcname=f'packaging/macos/{path.name}', filter=neutral_owner)
         archive.add(HERE / 'notices', arcname='packaging/macos/notices', filter=neutral_owner)
         for name in ('restore_deno_sources.py', 'DENO-SOURCE-README.md', 'generate_deno_notices.py'):

@@ -1,8 +1,30 @@
 # Exact sources for the macOS application dependencies
 
-`sources.json` pins original HTTPS URLs, source archive names and SHA256 hashes.
-The listed hashes were computed over the downloaded upstream artifacts; they
-are integrity pins, not an independent upstream-signature attestation.
+`sources.json` pins original HTTPS URLs, revisions, source archive names and
+SHA256 hashes. These are integrity pins, not an independent upstream-signature
+attestation. Most rows retain the upstream archive bytes without modification.
+
+Thirteen Gitiles source archives explicitly use `normalization: gitiles-tar-v1`.
+Gitiles generates new tar member timestamps even for the same immutable Git
+revision. `source_archive.py` gives these archives one fixed tar/gzip container:
+sorted members, zero timestamps/owners, empty owner names and gzip filename,
+and no optional metadata beyond required long paths. It preserves each source
+path, file contents, permission bits, member type and link target. Redundant
+file-type bits in tar's mode field are represented by the separate member type;
+permissions remain unchanged. Unexpected PAX fields, mode flags, unsafe paths,
+duplicates, escaping links and special files are rejected. Generation uses the
+build's pinned Python 3.12.15/PBS 20261001 runtime and its zlib.
+
+For these marked rows, `acquisition_sha256` records the originally reviewed
+upstream response, while `sha256` pins the canonical archive shipped in this
+companion and checked by the source restorer. A newly generated upstream
+response need not have the original acquisition hash; after normalization it
+must have the exact pinned canonical hash. Changed file contents, permissions,
+paths or links still fail that check. The original source URL/revision remains
+the provenance. Each of these thirteen original and canonical source sets was
+also checked against every blob ID and file mode in its exact upstream Git
+tree. Existing component notice provenance may name the original acquisition
+hash; original notice text is unchanged by container normalization.
 
 The `media` group builds FFmpeg 7.1 with LAME 3.100 and Opus 1.5.2.
 `pkgconf` is an isolated build tool and is not shipped in the application.

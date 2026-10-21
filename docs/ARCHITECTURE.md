@@ -46,7 +46,7 @@ line and the Docker image.
 | `analysis/` | `profile.py` (loudness, true peak, LRA, bandwidth, bands, alerts), `classify.py` (content type + reasons), `key.py` (musical key estimate) |
 | `recipes/` | `Recipe` + `ChainParams`, `resolve()` turns recipe + measurements + user overrides into parameters *with reasons*; `chain.render()` is the single mastering chain |
 | `ai/` | Lazy source torch/demucs detection and windowed separation; `install.py` installs source packages, `managed.py` owns the catalog-pinned packaged runtime lifecycle selected by `api/state.py`, `client.py` invokes the isolated helper, `worker.py` runs/probes it and loads local offline weights |
-| `dsp/` | Signal-processing building blocks (float32, block-streamed so 2 h sets fit in RAM) |
+| `dsp/` | Float32 signal-processing blocks, with streamed filters; whole Enhance still holds full-length arrays, so total memory grows with duration |
 | `previews.py` | The Enhance before/after excerpt (a loud 45 s passage, or the whole recording when shorter) at the true relative level, one shared headroom gain; compared when the original isn't kept |
 | `settings.py` | Data/output folders (the output folder is only resolved here, never created: whatever writes creates it), env-var limits (`AUDIOLAB_*`), persisted user preferences (checked on load/update; a new snapshot becomes active only after saving succeeds) |
 | `resources.py` | Memory/disk/duration preflight, run before any big download; also refuses an output folder that can't be written to |
@@ -56,6 +56,13 @@ line and the Docker image.
 | `system.py` | **The OS layer** — data/log folders, whether a folder is writable, reveal in Finder/Explorer, notifications, keep-awake, single-instance lock, process groups, memory size, file-name limits, app identity and shortcut. A leaf module with no third-party dependencies |
 | `assets/` | App icon |
 | `web/` | The UI (see below) |
+
+Resource checks are estimates, not memory reservations. Native-host RAM uses 85% of installed memory,
+without subtracting other apps or explicitly budgeting model-specific GPU allocations. Container checks
+use the cgroup limit minus its reported usage before applying that fraction. See
+[hardware guidance and limits](HARDWARE.md#what-the-app-checks); AI's windowed separation does not make
+the complete Enhance chain constant-memory. Disk estimates depend on task/duration/quality, not every
+source rate, export format or output count; the added free-space allowance is not reserved capacity.
 
 ### Platform code
 Everything that differs between macOS, Windows and Linux lives in `system.py`; other modules call its

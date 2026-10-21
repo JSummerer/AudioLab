@@ -12,6 +12,13 @@ promises. Done items move to [CHANGELOG.md](../CHANGELOG.md).
 - **Better classifier evidence:** evaluate varied, permission-cleared recordings before changing
   content classification thresholds. Generated-signal tests alone cannot establish real-world accuracy.
 - **Optional AI:** qualify installation and processing on additional supported hardware and drivers.
+- **Hardware requirements:** qualify the exact packaged app plus helper on actual 8 GB and 16 GB Macs
+  before publishing a minimum RAM claim. Record model, short-audio workload, whole-app/helper memory,
+  GPU/system memory pressure and working disk. Current [hardware recommendations](HARDWARE.md) are
+  provisional; future resource checks should account for current memory pressure and model choice.
+- **Resource-check accuracy:** distinguish installed RAM from currently available memory in messages;
+  include source/output format and output count in disk estimates. Current allowances do not reserve
+  memory or disk, so passing preflight is not a guarantee that the job fits.
 
 ## Bigger features
 - **App shortcuts on Windows/Linux**: a Start-menu entry / `.desktop` file, filled in where macOS already has

@@ -2,6 +2,9 @@
 
 ## 2.4.0b2 (2026-10-21, public beta)
 
+- Hardware guide separates compatibility, provisional 8 GB core / 16 GB AI testing guidance,
+  measured download/installed sizes and duration-dependent working space. Documents existing
+  memory-check limits without claiming a tested RAM minimum or changing the packaged app.
 - Documentation follow-up: direct Mac download, a short installation path, AI progress/completion
   guidance and navigable update/removal help. The published binary is unchanged; the revised
   disk-image read-me will be included in future builds.

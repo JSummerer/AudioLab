@@ -18,6 +18,11 @@ For **Apple silicon Macs with macOS 14 or later**. Check **Apple menu → About 
 look for a **Chip** entry, such as Apple M1 or later, and your macOS version.
 There is no packaged Intel, Windows or Linux app yet.
 
+**Provisional hardware guidance:** already have 8 GB RAM? Start with short core tasks. For early AI
+testing we prefer existing Macs with **16 GB or more**; neither capacity is a tested minimum. Aim for 5 GB free
+disk space for short core jobs, or 10 GB with AI, after installation. Longer recordings need more.
+See [hardware and storage](docs/HARDWARE.md) for the limits and what has actually been tested.
+
 1. **Download** using the link above. This is the only file you need from GitHub.
 2. **Install:** open the downloaded `.dmg` file and drag **AudioLab.app** into **Applications**.
    Eject the AudioLab disk image in Finder.
@@ -110,7 +115,7 @@ These environment variables are for command-line/server setups. Most desktop use
 | `AUDIOLAB_AI_CPU_MAX_DURATION_S` | 1200 | Longest AI job without a GPU (`AUDIOLAB_ALLOW_UNSAFE_AI=1` overrides) |
 | `AUDIOLAB_MAX_UPLOAD_MB` / `AUDIOLAB_MAX_DOWNLOAD_MB` | 4096 | Size caps |
 | `AUDIOLAB_MAX_PLAYLIST_ITEMS` | 200 | Playlist cap |
-| `AUDIOLAB_MIN_FREE_DISK_GB` | 2 | Refuse a job that would leave less free disk |
+| `AUDIOLAB_MIN_FREE_DISK_GB` | 2 | Extra free-disk allowance added to the job's estimate; not a reservation |
 | `AUDIOLAB_MEMORY_SAFETY_FRACTION` | 0.85 | Share of memory a job may plan to use |
 | `AUDIOLAB_RETENTION_DAYS` | 30 | Delete old job records (never your output files) |
 

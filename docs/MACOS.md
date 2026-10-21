@@ -18,6 +18,12 @@ download is not for your Mac. See [Apple's identification guide](https://support
 There is no packaged Intel app yet. Windows/Linux users can try the experimental
 [source installation](INSTALLATION.md#install-from-source).
 
+Already have **8 GB RAM**? Start with short core tasks. For early AI testing we prefer existing Macs
+with **16 GB or more**; capacity on 8/16 GB has not yet been tested.
+Aim for **5 GB free disk space**, or **10 GB with AI**, after installation for short jobs.
+These are planning recommendations, not tested minimums. Long recordings can need substantially more.
+See [hardware and storage](HARDWARE.md) for memory, disk, model choices and the current checks' limits.
+
 ## Download and install
 
 1. **Download** using the link at the top of this page. The file is named
@@ -81,9 +87,9 @@ Library and general settings. You can enable AI again later. AudioLab manages th
 separately from any Python or other tools you may already have installed.
 
 AI needs additional **working memory (RAM)** while processing; the disk figures above are not a RAM
-requirement. Minimum hardware and long-recording performance are not yet established. Begin with a
-short recording and **Standard**; Fine-tuned is slower. Light/Standard Enhance works without AI.
-See [resource notes](INSTALLATION.md#resource-notes) for more detail.
+requirement. We provisionally prefer **16 GB or more** for early AI testing, without claiming a minimum. Begin with a
+short recording and the **Standard AI model**; Fine-tuned is slower. **Standard Enhance quality**
+is a separate choice and works without AI. See [hardware guidance](HARDWARE.md) for more detail.
 
 ## Updates
 

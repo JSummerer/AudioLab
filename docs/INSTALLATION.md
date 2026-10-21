@@ -128,8 +128,13 @@ its installation. You can enable AI again later.
 
 ### Resource notes
 
+For the packaged Mac beta, see [hardware and storage](HARDWARE.md): provisional 8 GB guidance for
+short core tasks, a provisional preference for 16 GB or more for early AI testing, and separate
+installation/working-disk allowances.
+No tested RAM minimum is claimed. Those Mac recommendations do not establish Windows/Linux requirements.
+
 AI can consume several gigabytes of working memory and considerably more temporary audio space
-than the model files alone. Hardware requirements and performance are not yet qualified. Settings
+than the model files alone. Settings
 reports detected acceleration; CPU-only processing is slower and limited to recordings of 20 minutes
 by default. Try a short local recording first. Shorter recordings and Light/Standard Enhance reduce
 resource demand. Fine-tuned uses several models and is slower than Standard.

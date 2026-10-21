@@ -6,7 +6,7 @@ Work with local files and supported web links. Keep your results together in a L
 
 ## Download for Mac
 
-**[View release and downloads](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b2)** · [Direct download (.dmg, 106 MB)](https://github.com/JSummerer/AudioLab/releases/download/v2.4.0b2/AudioLab-2.4.0b2-macOS-arm64.dmg)
+**[View release and downloads](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b3)** · [Direct download (.dmg, 106 MB)](https://github.com/JSummerer/AudioLab/releases/download/v2.4.0b3/AudioLab-2.4.0b3-macOS-arm64.dmg)
 
 Apple silicon · macOS 14+ · public beta
 
@@ -49,4 +49,4 @@ See [AI setup and removal](docs/MACOS.md#optional-ai).
 
 Use recordings and links you have permission to process.
 
-[MIT license](LICENSE) · [Credits](CONTRIBUTING.md#credits) · [Changelog](CHANGELOG.md) · [Release notes](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b2)
+[MIT license](LICENSE) · [Credits](CONTRIBUTING.md#credits) · [Changelog](CHANGELOG.md) · [Release notes](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b3)

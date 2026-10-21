@@ -1,6 +1,6 @@
 # AudioLab for Mac
 
-**[View the release on GitHub](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b2)** · [Direct download (.dmg, 106 MB)](https://github.com/JSummerer/AudioLab/releases/download/v2.4.0b2/AudioLab-2.4.0b2-macOS-arm64.dmg) · public beta
+**[View the release on GitHub](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b3)** · [Direct download (.dmg, 106 MB)](https://github.com/JSummerer/AudioLab/releases/download/v2.4.0b3/AudioLab-2.4.0b3-macOS-arm64.dmg) · public beta
 
 No Terminal, Python installation or AudioLab account is needed. The app contains its own audio tools.
 Save / Convert, Check, Light/Standard Enhance and the Library work without the optional AI download.
@@ -28,7 +28,7 @@ See [hardware and storage](HARDWARE.md) for memory, disk, model choices and the 
 
 1. **Choose your download:** open the GitHub release page above and select the `.dmg` under **Assets**,
    or use **Direct download** to start immediately. The file is named
-   **AudioLab-2.4.0b2-macOS-arm64.dmg** and normally appears in Downloads.
+   **AudioLab-2.4.0b3-macOS-arm64.dmg** and normally appears in Downloads.
 2. **Open the downloaded file.** In its window, drag **AudioLab.app** into **Applications**.
    Wait for Finder to finish copying, then eject the AudioLab disk image in Finder's sidebar.
 3. **Open AudioLab from Applications.** If macOS blocks it, follow the next section.
@@ -157,8 +157,6 @@ Older source installations have [separate cleanup notes](INSTALLATION.md#uninsta
 | The app still will not open, or says it is damaged | Check the chip/macOS requirement above. Keep the exact message and [report it](https://github.com/JSummerer/AudioLab/issues/new?template=bug_report.md); do not disable macOS protections. |
 | AI download or installation stops | Check your connection and free disk space. Read the message in **AI & system**, then Resume or Retry. If it fails again, include the error in a report. |
 | Split or Best is unavailable | Enable AI and wait for **Ready**. If already installed, read the reason and use **Repair**. Version 2.4.0b1 needs an app update first. |
-| Storage shows an old AI size after installation | In this beta, switch to another screen and back. **AI & system** shows the installed size; the separate Storage display can lag. |
-| The text file in the disk image calls AI “upcoming” | That sentence predates publication. **2.4.0b2 includes the Settings installer** described above. |
 | A link fails | Check for a newer app release, or use a local audio file. Supported sites can change. |
 | A job needs too much memory or disk | Try a shorter recording or Light/Standard Enhance. |
 
@@ -191,5 +189,5 @@ entry preserves output files; its kept original may go when no other entry uses 
 explains. Copies saved through a download dialog stay wherever you saved them.
 
 For what was tested and remaining beta limitations, see the
-[release notes](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b2).
+[release notes](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b3).
 Build contributors: see the [macOS packaging guide](../packaging/macos/README.md).

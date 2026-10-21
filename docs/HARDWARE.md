@@ -1,6 +1,6 @@
 # Hardware and storage
 
-For the **AudioLab 2.4.0b2 Mac beta**. [Download and install](MACOS.md) ·
+For the **AudioLab 2.4.0b3 Mac beta**. [Download and install](MACOS.md) ·
 [Memory](#memory-ram) · [Disk space](#disk-space) · [Speed and models](#speed-and-models) ·
 [Checks and limits](#what-the-app-checks)
 
@@ -122,11 +122,12 @@ AI request solely because a Mac has 8 GB, and it does not certify all 16 GB jobs
 
 ## What has been tested
 
-The exact packaged beta has passed short generated-audio core and AI checks, both AI model choices,
-installation/resume/removal and native-window checks. Native-window validation ran on macOS 15.7.9
-arm64; local functional checks used an Apple M4 Pro with 48 GB on macOS 26.6.2. **That is a test
-configuration, not a 48 GB requirement.** macOS 14 is the build target and has not been tested natively.
-See the [release notes](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b2) for the exact scope.
+The b3 app has passed short generated-audio core and AI checks, reuse/removal of an existing AI
+installation, and native-window checks. Both AI model choices passed helper checks. Public-download
+installation/cancel/resume was checked on b2 with this same AI pack. Native-window validation ran on
+macOS 15.7.9 arm64; local functional checks used an Apple M4 Pro with 48 GB on macOS 26.6.2.
+**That is a test configuration, not a 48 GB requirement.** macOS 14 is the build target and has not been tested natively.
+See the [release notes](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b3) for the exact scope.
 
 This evidence does not qualify minimum RAM, long-recording performance or every chip. A supported
 minimum needs checks on actual lower-memory Macs, including the app and AI helper together, GPU/system

@@ -103,7 +103,8 @@ Use the timeline or **−10 s / +10 s** to move around.
 difference. It changes playback only, not the saved files.
 
 Choose **Compare with the original** on another enhanced version of the same recording to keep
-your position, selected side and volume-matching choice. If you were playing, playback continues.
+your position, selected side and volume-matching choice. If you were playing, playback continues
+after any brief buffering needed to load that version.
 Switching to another recording or an ordinary file player starts a separate listening session.
 
 Job pages may offer a shorter preview when a full comparison is unavailable. There is no Delta mode

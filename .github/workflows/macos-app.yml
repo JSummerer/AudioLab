@@ -87,6 +87,22 @@ jobs:
           print(json.dumps(report, indent=2))
           PY
 
+      - name: Seed verified core sources from the retained companion
+        run: |
+          seed_dir="$RUNNER_TEMP/audiolab-source-seed"
+          mkdir -p "$seed_dir"
+          seed_archive="$seed_dir/AudioLab-2.4.0b2-third-party-sources-arm64.tar.gz"
+          curl --fail --show-error --location --retry 3 --retry-delay 2 \
+            --retry-max-time 660 --connect-timeout 30 --max-time 300 \
+            --output "$seed_archive" \
+            "https://github.com/JSummerer/AudioLab/releases/download/v2.4.0b2/AudioLab-2.4.0b2-third-party-sources-arm64.tar.gz"
+          printf '%s  %s\n' \
+            'e8de816a15578798197352a54b7530e8b9d227c6adeb8c98f6b06c1e453150f7' \
+            "$seed_archive" | shasum -a 256 --check
+          "$AUDIOLAB_BUILD_PYTHON" packaging/macos/seed_sources.py \
+            "$seed_archive" "$AUDIOLAB_PACKAGE_WORK_DIR/media/downloads" \
+            2>&1 | tee "$VALIDATION_DIR/source-cache-seed.log"
+
       - name: Build the app, DMG and matching sources
         run: bash packaging/macos/build.sh 2>&1 | tee "$VALIDATION_DIR/build.log"
 

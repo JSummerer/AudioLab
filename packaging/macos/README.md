@@ -24,6 +24,12 @@ cache and release products. Override `AUDIOLAB_PACKAGE_WORK_DIR` for a separate 
 Use a fresh work folder when rebuilding a prepared release. Requirements are pinned in
 `requirements.lock`; the application source comes from this checkout.
 
+CI seeds `media/downloads/` from the checksum-pinned `v2.4.0b2` core source companion to avoid
+downloading unchanged sources from every upstream host again. `seed_sources.py` copies only regular
+`sources/<filename>` members whose bytes match the **current** `sources.json`; archived build helpers
+are ignored. Missing or changed sources use normal acquisition, which still verifies every input.
+The seed download and outer checksum must succeed; an unexpected existing cache file is never overwritten.
+
 The result is a directory-style `AudioLab.app`, a compressed DMG with an Applications shortcut,
 the core source companion/build recipes, the AI catalog and checksums. An explicit helper rebuild
 also produces its new AI runtime archive and matching source companion.

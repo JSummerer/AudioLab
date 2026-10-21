@@ -117,7 +117,9 @@ The initial release target is macOS 14+ arm64 with identifier `io.github.jsummer
 produces an ad-hoc-signed `.app`/DMG, checksums, the AI catalog and a matching core source companion.
 An intentional helper rebuild also produces new AI runtime and source archives; reuse keeps their original published URLs.
 It has no Developer ID or Apple notarization. The build's selected FFmpeg is compiled from its
-recorded LGPL sources rather than using the source setup's imageio fallback. See the
+recorded LGPL sources rather than using the source setup's imageio fallback. CI seeds its source cache
+from a checksum-pinned published companion using `packaging/macos/seed_sources.py`; only source archives
+matching the current manifest are reused. Missing or changed inputs still go through the normal fetch checks. See the
 [packaging guide](../packaging/macos/README.md) for build inputs, licensing and artifact checks, and
 the [Mac guide](MACOS.md) for the tester's installation/update/uninstall path. Native artifact checks
 and fresh-download Gatekeeper checks are separate from ordinary source regressions.

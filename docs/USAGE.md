@@ -2,8 +2,25 @@
 
 For first-time setup, use the [Mac app guide](MACOS.md) or [source installation guide](INSTALLATION.md#install-from-source).
 
-[Sources and results](#sources-and-results) · [Enhancement](#automatic-enhancement) ·
-[Command line](#command-line) · [Home server](#docker--home-server)
+[First recording](#your-first-recording) · [Sources and results](#sources-and-results) ·
+[Enhancement](#automatic-enhancement) · [Command line](#command-line) ·
+[Home server](#docker--home-server) · [Server settings](#server-settings)
+
+## Your first recording
+
+1. Choose **New → Choose files** and select an audio file, or paste a supported web link and press **Load**.
+2. Pick **Convert** for a file (**Save** for a link), **Enhance** to process it, or **Check** to inspect it. Defaults are a good
+   starting point; **Light** enhancement mainly adjusts volume.
+3. Press the main action button. Follow progress in **Activity**, then play or download the result.
+
+Finished audio goes to **`Music/AudioLab`** in your home folder. Change that in **Settings → Files**.
+Existing output files are kept; a new result gets a numbered name if needed. Removing a Library entry
+preserves your output files, but may remove its kept original copy when no other entry uses it.
+When enabled, kept original copies live separately in AudioLab's app-data folder and can also be
+cleared in **Settings → Storage**.
+
+See [optional AI](MACOS.md#optional-ai) for download progress, removal and hardware notes.
+The add-on includes both model choices; local files can be processed offline once it is installed.
 
 ## Sources and results
 
@@ -98,4 +115,25 @@ docker compose -f docker/compose.yml down
 ```
 
 For the GPU example use `docker/compose.cuda.yml` instead. Do not add `--volumes` if you intend to keep
-the app data. For limits and paths, see the README's [server settings](../README.md#for-contributors).
+the app data. For limits and paths, see [server settings](#server-settings).
+
+## Server settings
+
+These environment variables are for command-line/server setups. Most desktop users can use Settings.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `AUDIOLAB_OUTPUT_DIR` | `~/Music/AudioLab` | Where finished files go (locks the setting in the UI) |
+| `AUDIOLAB_DATA_DIR` | platform app-data folder | Jobs, settings, tool shims |
+| `AUDIOLAB_TOKEN` | auto when not on localhost | Access token; `none` disables it |
+| `AUDIOLAB_MAX_CONCURRENT_JOBS` | 1 | Jobs processed at the same time |
+| `AUDIOLAB_MAX_DURATION_S` | 28800 | Longest accepted recording |
+| `AUDIOLAB_AI_CPU_MAX_DURATION_S` | 1200 | Longest AI job without a GPU (`AUDIOLAB_ALLOW_UNSAFE_AI=1` overrides) |
+| `AUDIOLAB_MAX_UPLOAD_MB` / `AUDIOLAB_MAX_DOWNLOAD_MB` | 4096 | Size caps |
+| `AUDIOLAB_MAX_PLAYLIST_ITEMS` | 200 | Playlist cap |
+| `AUDIOLAB_MIN_FREE_DISK_GB` | 2 | Extra free-disk allowance added to the job's estimate; not a reservation |
+| `AUDIOLAB_MEMORY_SAFETY_FRACTION` | 0.85 | Share of memory a job may plan to use |
+| `AUDIOLAB_RETENTION_DAYS` | 30 | Delete old job records (never your output files) |
+
+Timeouts can also be set: `AUDIOLAB_FFMPEG_TIMEOUT_S`, `AUDIOLAB_YTDLP_PROBE_TIMEOUT_S` and
+`AUDIOLAB_YTDLP_DOWNLOAD_TIMEOUT_S`.

@@ -89,3 +89,12 @@ Gatekeeper acceptance. Downloaded apps update by replacement, not in-place packa
 - **Bounded memory.** Keep audio float32 and stream long signals (see `dsp/filters.filtfilt_stream`).
 - **OS differences live in `system.py`.** Other modules call its functions instead of checking the platform.
 - **Small and dependency-light.** No UI framework or build step; a new dependency needs a good reason.
+
+## Credits
+
+AudioLab's code is available under the [MIT license](LICENSE). Dependencies retain their own licenses.
+Built with [yt-dlp](https://github.com/yt-dlp/yt-dlp), [FFmpeg](https://ffmpeg.org),
+[Demucs](https://github.com/adefossez/demucs), [Deno](https://deno.com), NumPy/SciPy, soundfile,
+FastAPI and pywebview. The bundled Source Serif font includes its [license](audiolab/web/fonts/OFL.txt).
+The Mac app includes dependency notices and a matching source companion in its release.
+Source installations use [imageio-ffmpeg](https://github.com/imageio/imageio-ffmpeg) as a fallback audio engine.

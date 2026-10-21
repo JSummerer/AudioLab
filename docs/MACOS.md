@@ -58,7 +58,7 @@ If the message says AudioLab **will damage your computer**, was moved to Trash a
 **damaged**, stop and [report the exact message](#troubleshooting). Those are different from the
 expected developer-verification warning.
 
-Once it opens, follow [Your first recording](../README.md#your-first-recording). Start with a short
+Once it opens, follow [Your first recording](USAGE.md#your-first-recording). Start with a short
 local audio file and Convert or Check; AI setup is optional.
 
 ## Optional AI

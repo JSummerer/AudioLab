@@ -68,19 +68,19 @@ def test_api_documents_all_split_formats():
         assert f'"{key}"' in text, f'Split format {key} is missing from docs/API.md'
 
 
-def test_readme_environment_variables_are_current():
-    text = (ROOT / 'README.md').read_text(encoding='utf-8')
+def test_usage_environment_variables_are_current():
+    text = (ROOT / 'docs' / 'USAGE.md').read_text(encoding='utf-8')
     documented = set(re.findall(r'AUDIOLAB_([A-Z0-9_]+)', text))
     known = {'OUTPUT_DIR', 'DATA_DIR', 'TOKEN'} | {field.name.upper() for field in fields(Limits)}
-    assert documented == known, f'README env vars differ: {sorted(documented ^ known)}'
+    assert documented == known, f'docs/USAGE.md env vars differ: {sorted(documented ^ known)}'
 
 
-def test_readme_cli_commands_exist():
-    text = (ROOT / 'README.md').read_text(encoding='utf-8')
+def test_usage_cli_commands_exist():
+    text = (ROOT / 'docs' / 'USAGE.md').read_text(encoding='utf-8')
     documented = set(re.findall(r'^audiolab (\w+)', text, re.MULTILINE))
     cli = (ROOT / 'audiolab' / 'cli.py').read_text(encoding='utf-8')
     commands = set(re.findall(r"add_parser\('([^']+)'", cli))
-    assert documented <= commands, f'Unknown README commands: {sorted(documented - commands)}'
+    assert documented <= commands, f'Unknown docs/USAGE.md commands: {sorted(documented - commands)}'
 
 
 def test_windows_launcher_uses_crlf():

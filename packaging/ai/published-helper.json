@@ -1,0 +1,72 @@
+{
+  "schema": 1,
+  "provenance": {
+    "release": "v2.4.0b2",
+    "public_source_commit": "5337351889a56bef3ec54007dd692baf9606526c",
+    "original_build_launcher_sha256": "c99f58963409075b334dfce0db686971f3a8077280136d91757477697856d3b5",
+    "helper_build": {
+      "python": {
+        "build": "20261001",
+        "version": "3.12.15"
+      },
+      "platform": "macos-arm64",
+      "minimum_macos": "14.0",
+      "protocol": 1,
+      "version": "1.0.0"
+    }
+  },
+  "catalog": {
+    "installed_bytes": 1016241731,
+    "download_bytes": 569939057,
+    "sha256": "a031683a4524937426dbd656b3b6f0748f9673a74b9dd845fd9353e8f2a8a717",
+    "schema": 1,
+    "protocol": 1,
+    "version": "1.0.0",
+    "platform": "macos-arm64",
+    "executable": "AudioLabAI",
+    "models": [
+      "htdemucs",
+      "htdemucs_ft"
+    ],
+    "url": "https://github.com/JSummerer/AudioLab/releases/download/v2.4.0b2/AudioLab-AI-1.0.0-macOS-arm64.tar.gz"
+  },
+  "source_companion": "AudioLab-AI-1.0.0-third-party-sources-arm64.tar.gz",
+  "assets": {
+    "ai-catalog.json": {
+      "size": 427,
+      "sha256": "b290e584fc9ed6f910666371e6bcfe947a8bf139b28a8ca036f04001463c39c1"
+    },
+    "AudioLab-AI-1.0.0-macOS-arm64.tar.gz": {
+      "size": 569939057,
+      "sha256": "a031683a4524937426dbd656b3b6f0748f9673a74b9dd845fd9353e8f2a8a717"
+    },
+    "AudioLab-AI-1.0.0-third-party-sources-arm64.tar.gz": {
+      "size": 252343180,
+      "sha256": "2d0b349a122ce3eb6cfcc2534c6f17cc1652eea9ed7a8d189208c7621ef2a964"
+    }
+  },
+  "inputs": {
+    "LICENSE": "1964f4ebe9c48d03eb024f1d05ce4dc8a66612a282cf38ed0b17174d15c58973",
+    "audiolab/__init__.py": "0826ecfad774f1f084885bb572d916408ba1a0aeb0374054396c6164a0c97672",
+    "audiolab/ai/__init__.py": "fe64735cefec5c732dfd40fa9a1c5ae9b77402ffcc2ea0b573abe45188972461",
+    "audiolab/ai/worker.py": "44daa1bf43215f1885ae8d28fb55dd77a6e02d7f6dc2a9264198046f27a6bf0a",
+    "audiolab/ai/separation.py": "3b7bba0028d19f78f18f0782781caafddceee5e9cb42fe91cf92b5810992ed5b",
+    "audiolab/ai/client.py": "bc468f615e28b7064704ae8603406abc944aa1834f2756538912aca85a092130",
+    "audiolab/context.py": "b1eb2a4318afe68e7f73f2c484d9419221b93be5fb6635b372a173444598a5a1",
+    "audiolab/errors.py": "9c2cfcb6b38adf8a61f3e32b74084d00e66c0104fde32f82853fe47dde82fac7",
+    "audiolab/system.py": "46b5135c730aa304d491a8b1a0bf56de1df0b0a004da55c723ce6c78c758b38c",
+    "audiolab/runtime.py": "9168f7016c3c74f229da0096fb41f7094d02f4c0039e7a2130ca1c85a90956c0",
+    "packaging/ai/entry.py": "0732113d2953e8a61d792b75da0a1a75c234b310111ab54e0b140f062d7539ad",
+    "packaging/ai/AudioLabAI.spec": "750a1c1b91bd842b3a39ba4164d2ec9f939ee5d7f66cfdf76e95e88620be9ada",
+    "packaging/ai/models.json": "9b7fc2ef810435f402cb024d3c902f67c2b70f8b8408c72243ac7d2d51564f7e",
+    "packaging/ai/requirements.lock": "fde106a6eb135758019bfec701601b646fa733503b43d9a83bad9061deaaab3b",
+    "packaging/ai/prepare.py": "dd46e1c1bd9a541831086444255e6017d0e57b02fbda760473f6e051643d76a6",
+    "packaging/ai/release.py": "0e65356f5e80e2f84d3791479f303b263d2806ed243cca2e782f5cf05798f53b",
+    "packaging/ai/sources.json": "91a5fe5f26569f411aec370e8b71818bf629b41418cf14107940e2d062d3a338",
+    "packaging/ai/safetensors-native.json": "e0095143249124a1e52caeb1eaa561b742328135380080e66631df83aaf85e19",
+    "packaging/macos/sources.json": "acea12062da20b3a4e2fc0b31b255e7d77edc095357cc20a0be46a30fbd844cc",
+    "packaging/macos/third_party.py": "a7560e593020320e91aab27bb35dbe72e513fa2904d5b6c970280fd6446b10ee",
+    "packaging/macos/source_archive.py": "2a661322257a025e1a63a06a8b88d679ce62ed74d3d6b226eb996428dda38de4",
+    "packaging/macos/notices/python-3.12.15-20261001/PYTHON.json": "b0bd1328e4fb33535351288e529051d00992d4bfdc8f344d7ee13db6f5a8dbb0"
+  }
+}

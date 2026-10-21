@@ -33,6 +33,7 @@ function setup(ai, { crlf = false } = {}) {
   const requests = [];
   const errors = [];
   const messages = [];
+  const scheduled = [];
   const context = {
     store: { health: { packaged: true, ai, ffmpeg: { ok: true } } },
     h: (tag, attrs, ...children) => new Element(tag, attrs || {}, children),
@@ -44,7 +45,8 @@ function setup(ai, { crlf = false } = {}) {
     toast: (message) => messages.push(message), toastError: (error) => errors.push(error),
     loadHealth: async () => {},
     confirmDialog: async () => true,
-    setTimeout: () => 1, clearTimeout: () => {},
+    setTimeout: (callback, delay) => { scheduled.push({ callback, delay }); return scheduled.length; },
+    clearTimeout: () => {},
     body,
   };
   const path = new URL('../../audiolab/web/js/views/settings.js', import.meta.url);
@@ -53,7 +55,7 @@ function setup(ai, { crlf = false } = {}) {
   const source = checkout.replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '');
   vm.runInNewContext(`${source}\nrefs = { sections: { system: { body } } };\nvisible = true;\nrenderSystem();`, context, { filename: path.pathname });
   return {
-    body, requests, errors, messages, context,
+    body, requests, errors, messages, context, scheduled,
     button: (id) => find(body, id),
     render: (next) => { context.store.health.ai = next; vm.runInNewContext('renderSystem()', context); },
   };
@@ -61,6 +63,74 @@ function setup(ai, { crlf = false } = {}) {
 const managed = (patch = {}) => ({
   managed: true, install_supported: true, available: false, installing: false,
   state: 'missing', target_version: 'ai-2', ...patch,
+});
+
+test('AI completion refreshes Storage once after caches expire, not on download progress', () => {
+  const s = setup(managed());
+  assert.equal(s.scheduled.length, 0);
+  s.render(managed({ installing: true, state: 'downloading', downloaded_bytes: 10 }));
+  s.render(managed({ installing: true, state: 'downloading', downloaded_bytes: 100 }));
+  s.render(managed({ installing: true, state: 'checking' }));
+  assert.equal(s.scheduled.length, 0);
+  const ready = managed({ available: true, version: 'ai-2', state: 'ready', removable: true, install_ok: true });
+  s.render(ready);
+  assert.equal(s.scheduled.length, 1);
+  assert.equal(s.scheduled[0].delay, 6000);
+  s.render(ready);
+  assert.equal(s.scheduled.length, 1);
+});
+
+test('a pending Storage refresh survives leaving and reopening Settings inside the cache lifetime', async () => {
+  const s = setup(managed({ installing: true, state: 'checking' }));
+  let serial = 0;
+  const timers = new Map();
+  s.context.setTimeout = (callback, delay) => { const id = ++serial; timers.set(id, { callback, delay }); return id; };
+  s.context.clearTimeout = (id) => timers.delete(id);
+  s.context.closeInfo = () => {};
+  let bytes = 10;
+  s.context.api = async () => ({ jobs_bytes: 0, models_bytes: bytes });
+  vm.runInNewContext(`
+    scroller = { addEventListener() {}, removeEventListener() {} };
+    spy = () => {};
+    renderAll = () => renderSystem();
+    renderStorageInfo = () => {};
+  `, s.context);
+  const terminal = managed({ state: 'partial', removable: true, install_ok: false });
+  s.render(terminal);
+  assert.equal(timers.size, 1);
+  vm.runInNewContext('settingsView.hide()', s.context);
+  assert.equal(timers.size, 0);
+  vm.runInNewContext('settingsView.show()', s.context);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(vm.runInNewContext('storage.data.models_bytes', s.context), 10);
+  assert.equal(timers.size, 1, 'cached immediate response still has a delayed refresh');
+  const [id, timer] = [...timers][0];
+  s.render(terminal);
+  assert.equal([...timers][0][0], id, 'unchanged health must not postpone the refresh');
+  assert.equal(timer.delay, 6000);
+  bytes = 100; // both server caches have now expired
+  timers.delete(id);
+  await timer.callback();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(vm.runInNewContext('storage.data.models_bytes', s.context), 100);
+  assert.equal(vm.runInNewContext('storage.refreshPending', s.context), false);
+  assert.equal(timers.size, 0);
+});
+
+test('Storage refresh covers cancellation, failed repair and completion between health polls', () => {
+  for (const terminal of [
+    managed({ state: 'partial', removable: true, install_ok: false }),
+    managed({ available: true, state: 'ready', version: 'ai-2', removable: true, install_ok: false }),
+  ]) {
+    const s = setup(managed({ installing: true, state: 'checking' }));
+    s.render(terminal);
+    assert.equal(s.scheduled.length, 1);
+    s.render(terminal);
+    assert.equal(s.scheduled.length, 1);
+  }
+  const s = setup(managed());
+  s.render(managed({ available: true, state: 'ready', version: 'ai-2', removable: true }));
+  assert.equal(s.scheduled.length, 1);
 });
 
 test('Settings harness accepts Windows checkout line endings', () => {

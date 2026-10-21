@@ -25,10 +25,24 @@ Use a fresh work folder when rebuilding a prepared release. Requirements are pin
 `requirements.lock`; the application source comes from this checkout.
 
 The result is a directory-style `AudioLab.app`, a compressed DMG with an Applications shortcut,
-the optional AI archive, checksums and matching third-party source companions and build recipes.
-The [AI builder](../ai/README.md) runs first so the app embeds its exact archive size, SHA256 and
-versioned release URL. Publish those exact assets together; replacing an AI archive without
-rebuilding the app breaks verification. Testers download only the DMG; Settings handles the AI asset.
+the core source companion/build recipes, the AI catalog and checksums. An explicit helper rebuild
+also produces its new AI runtime archive and matching source companion.
+The [AI packaging step](../ai/README.md) runs first. By default it reuses the pinned **AI 1.0.0**
+catalog, runtime archive and source companion from `v2.4.0b2`, retaining their exact original
+bytes and release URL. It verifies their hashes/sizes and the helper execution/build input
+contract against that source companion. Thus core-only releases do not make users reinstall
+an unchanged helper. CI fetches the original assets with bounded retries; locally, set
+`AUDIOLAB_AI_REUSE_DIR=/path/to/retained/release` to use existing checked assets. The directory
+must contain `ai-catalog.json` and both original AI archives. The build work folder retains them
+for smoke checks. A reuse release contains the new core DMG/source companion, the unchanged AI
+catalog and checksums; it does not duplicate the old AI archives in CI artifacts or releases.
+Keep the original public helper release and its matching source companion available.
+
+If the helper contract changes, reuse stops before downloading assets. Intentionally rebuild
+with `AUDIOLAB_AI_MODE=rebuild AUDIOLAB_AI_VERSION=<new-version>`; the already published helper
+version is refused. Validate and publish the new helper and its matching source companion,
+then review/update the pin as described in the AI guide. Do not retag the old catalog or replace
+published AI bytes. Testers download only the DMG; Settings handles the pinned AI asset.
 The app is ad-hoc signed, **not Developer ID signed or Apple-notarized**. This is deliberate for
 the small tester beta; see [Mac installation and uninstall](../../docs/MACOS.md).
 
@@ -43,13 +57,15 @@ conversion format, Standard Enhance, Check, a localhost link, and HTTP/UI assets
 external Python from PATH and uses isolated data/output folders. It does not test real websites.
 The AI check installs the real archive through the production manager with a localhost transport
 fixture, then exercises frozen Split, Best Enhance, removal and reinstallation. The independent
-helper check runs both offline models and verifies that a worker keeps the installation locked if
+helper check runs for both reused and new archives, exercises both offline models using the
+helper's selected device (MPS where available), and verifies that a worker keeps the installation locked if
 its parent dies. Check installation from the actual public HTTPS release URL after publication.
 The optional native WebKit smoke command is restricted to disposable GitHub Actions runners so
 local verification does not steal focus or write to a user's WebKit profile.
 
 Before uploading a binary, require the ordinary repository checks, build checks and actual artifact
-smoke results. Upload both matching source companions, the AI archive, catalog and checksums alongside the DMG in a GitHub
-prerelease. Do not attach build folders, logs containing personal paths, local audit reports or any
+smoke results. Upload the DMG, new core source companion, AI catalog and checksums to the GitHub
+prerelease. A helper rebuild additionally includes its new runtime and matching source companion;
+a reuse release keeps linking to the original published helper assets. Do not attach build folders, logs containing personal paths, local audit reports or any
 real recordings. Native CI is regression evidence; it does not qualify every macOS version or
 the manual Gatekeeper approval interaction.

@@ -161,8 +161,9 @@ else than such a list → `400` "urls must be a JSON list of links.".
 
 **Cover image** (download, enhance): `embed_cover` (default: the `embed_cover` setting) puts the link's thumbnail
 (cropped square, ≤ 1000 px) — or, for an uploaded file, the picture it already carries — into every file whose
-format can hold one (`formats[].cover` in Health; WAV and Opus can't). An **own cover image** (multipart field
-`cover` of `POST /api/jobs`) is always used, whatever `embed_cover` says: JPG, PNG or WebP, at most 15 MB and
+format AudioLab supports for embedding (`formats[].cover` in Health; WAV and Opus get no added artwork).
+An **own cover image** (multipart field `cover` of `POST /api/jobs`) takes priority in those formats,
+whatever `embed_cover` says: JPG, PNG or WebP, at most 15 MB and
 40 megapixels, checked from the file's header to really be such a picture before anything decodes it (else `400`:
 "This file is not a JPG, PNG or WebP picture…" / "This picture is too large (… × … pixels)."), stored as a JPEG of at most 1400 px (longer side, never enlarged) in the
 job's folder, next to the picture as uploaded (for `save_cover`) — Retry and re-runs (`source_job`) keep both; a new
@@ -170,6 +171,8 @@ job's folder, next to the picture as uploaded (for `save_cover`) — Retry and r
 `enhance` (other tasks → `400`); ignored when one request creates several jobs (playlist items). A job with an own
 cover shows `source.cover_name`. Untouched downloads (`original`, `video`) get no cover (their tracks do).
 `embed_cover: false` (and no own image) means no picture at all — a converted file's own picture isn't copied either.
+If exporting with artwork fails but an audio-only retry succeeds, a warning in the job journal names
+the saved file that has no cover. The audio result is kept.
 
 **`save_cover: true`** (download, enhance, separate; default `false`): once the outputs are written, the job also
 saves its cover as a picture file in its output folder, named like the other outputs — `"<Title> - cover.jpg"`
@@ -281,7 +284,7 @@ detail.
 ### Health
 ```jsonc
 {
-  "app": "AudioLab", "version": "2.4.0b2", "local": true, "packaged": false,
+  "app": "AudioLab", "version": "2.4.0b3", "local": true, "packaged": false,
   "ffmpeg": {"ok": true, "version": "7.1", "source": "system" | "bundled", "error": null},
   "downloader": {"ok": true, "version": "2026.08.19", "age_days": 47, "update_supported": true},
   "ai": {"available": false, "device": null, "reason": "AI pack not installed", "install_supported": true, "installing": false,
@@ -304,7 +307,7 @@ detail.
 ```
 `formats[].kind`: `lossy | lossless` (download also `original | video`). `formats[].facts`: 2–4 short plain-language
 lines for a format card — what it is, about how many MB per minute, where it plays, limits (cover support is the separate `cover` flag, so the UI words it);
-the server is the one source of this text. `formats[].cover`: the files can carry a cover image (WAV and Opus can't;
+the server is the one source of this text. `formats[].cover`: AudioLab adds cover images to this format (not WAV or Opus;
 `original`/`video` downloads get none added). `format_notes.source`: one line about what a link's audio really is,
 for under the format picker.
 `upload_extensions`: the file types `POST /api/jobs` accepts as `file` (audio and video containers ffmpeg reads) —

@@ -405,7 +405,7 @@ export function comparePlayer(opts) {
       clear(root).append(callout('warning', null, `The ${which} couldn’t be loaded. It may have been moved or deleted.`, downloads()));
       return;
     }
-    stop();
+    pause();
     const why = e.detail || (e.status ? `error ${e.status}` : 'the app can’t be reached');
     const again = h('button', { type: 'button', class: 'btn btn-key btn-sm', onclick: () => play() }, icon('retry', 14), 'Try again');
     clear(problem).append(callout('warning', null, `The ${which} couldn’t be played (${why.replace(/\.$/, '')}).`,
@@ -612,7 +612,32 @@ export function comparePlayer(opts) {
     ctx = null;
   }
 
-  return { el: root, pause, destroy };
+  /** Small transport state for another full-length comparison of the same recording. */
+  function snapshot() {
+    if (dead) return null;
+    const frame = now();
+    return { time: songOffset + frame / RATE, playing: playing && frame < lengthF,
+      side: active === 0 ? 'original' : 'result', matchVolume };
+  }
+
+  /** Restore while paused; resuming requires the caller to still be inside a user gesture. */
+  function restore(state, { resume = false } = {}) {
+    if (dead || !state || !Number.isFinite(state.time)) return;
+    pause();
+    position = clamp((state.time - songOffset) * RATE);
+    active = state.side === 'original' ? 0 : 1;
+    if (typeof state.matchVolume === 'boolean') matchVolume = state.matchVolume;
+    if (matchSwitch) matchSwitch.checked = matchVolume;
+    applyGains();
+    renderKeys();
+    renderVolume();
+    renderTime();
+    // A shorter version may already be at its end. Keep it there, rather than replaying
+    // from zero (the usual behavior of an explicit Play at the end).
+    if (resume && state.playing && position < lengthF) play();
+  }
+
+  return { el: root, pause, destroy, snapshot, restore };
 }
 
 /** A plain player for one file of a Library entry (with the browser's own controls). */

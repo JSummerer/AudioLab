@@ -502,6 +502,77 @@ def test_file_count_and_disk_space_limits_prevent_activation(setup, server, monk
     assert 'free space' in '\n'.join(setup.manager.log)
 
 
+@pytest.mark.parametrize('repair', [False, True])
+def test_interrupted_extraction_is_reclaimed_before_retry_disk_preflight(setup, server, monkeypatch, repair):
+    connect(setup, server)
+    assert finish(setup.manager)
+    previous = setup.manager.root / '1.0.0'
+    receipt = (setup.manager.root / 'active.json').read_bytes()
+    if not repair:
+        setup.manager.catalog = {**setup.manager.catalog, 'version': '2.0.0'}
+    count = len(setup.blob) // 2
+    partial(setup, count)
+    abandoned = setup.manager.root / 'staging' / f'install-{"a" * 32}'
+    setup.manager._directory(abandoned, create=True)
+    (abandoned / 'unpacked').write_bytes(b'interrupted extraction')
+    needed = (
+        len(setup.blob)
+        - count
+        + setup.manager.catalog['installed_bytes']
+        + max(64 * 1024**2, setup.manager.catalog['installed_bytes'] // 10)
+    )
+    observed_staging = []
+
+    def free_after_reclaim(path):
+        assert path == setup.manager.root
+        assert (previous / 'AudioLabAI').read_bytes() == b'fake executable'
+        assert (setup.manager.root / 'active.json').read_bytes() == receipt
+        assert (setup.manager.root / 'download.part').read_bytes() == setup.blob[:count]
+        observed_staging.append(abandoned.exists())
+        return SimpleNamespace(free=needed - int(abandoned.exists()))
+
+    monkeypatch.setattr(managed.shutil, 'disk_usage', free_after_reclaim)
+    assert finish(setup.manager, repair=repair), '\n'.join(setup.manager.log)
+    assert observed_staging == [False]
+    assert server.requests == [None, f'bytes={count}-']
+    assert setup.manager.status()['available']
+
+
+def test_retry_recovers_activation_before_reclaiming_staging(setup, server, monkeypatch):
+    connect(setup, server)
+    assert finish(setup.manager)
+    receipt = (setup.manager.root / 'active.json').read_bytes()
+    replace = managed.system.replace_file
+
+    def stop_after_backup(source, destination, *args, **kwargs):
+        replace(source, destination, *args, **kwargs)
+        if Path(destination).name.startswith('previous-'):
+            raise OSError('simulated interruption after backup')
+
+    monkeypatch.setattr(managed.system, 'replace_file', stop_after_backup)
+    assert not finish(setup.manager, repair=True)
+    assert not (setup.manager.root / '1.0.0').exists()
+    assert list((setup.manager.root / 'staging').glob('previous-*'))
+    monkeypatch.setattr(managed.system, 'replace_file', replace)
+    checked = []
+
+    def insufficient_space_after_recovery(path):
+        assert (path / '1.0.0' / 'AudioLabAI').read_bytes() == b'fake executable'
+        assert (path / 'active.json').read_bytes() == receipt
+        assert not (path / 'activation.json').exists()
+        assert not list((path / 'staging').iterdir())
+        assert (path / 'download.part').read_bytes() == setup.blob
+        checked.append(True)
+        return SimpleNamespace(free=1)
+
+    monkeypatch.setattr(managed.shutil, 'disk_usage', insufficient_space_after_recovery)
+    assert not finish(setup.manager, repair=True)
+    assert checked == [True]
+    assert 'free space' in '\n'.join(setup.manager.log)
+    assert (setup.manager.root / 'active.json').read_bytes() == receipt
+    assert setup.manager.status()['available']
+
+
 def test_failed_probe_preserves_previous_version_and_success_replaces_it(setup, server, monkeypatch):
     connect(setup, server)
     assert finish(setup.manager)

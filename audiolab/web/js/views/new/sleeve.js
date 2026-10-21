@@ -7,6 +7,7 @@ import { store } from '../../store.js';
 import { state, refs, definePart, isFileLike, RECIPE_LABELS } from './state.js';
 import { shownName } from './names.js';
 import { downloadChoices, enhanceFormatsInOrder } from './options.js';
+import { embeddedCoverNote } from './cover.js';
 import { TASK_ICON } from '../job/index.js';
 
 definePart('sleeve', renderSleeve);
@@ -55,14 +56,17 @@ function plan() {
     case 'download': {
       const d = state.download;
       const f = downloadChoices().find((c) => c.key === d.format);
-      const cover = d.embed_cover && f?.cover !== false && !['video', 'original'].includes(d.format);
-      return [join(f?.label || d.format.toUpperCase(), f?.description?.replace(/\.$/, '')), cover ? 'With cover art' : null];
+      return [join(f?.label || d.format.toUpperCase(), f?.description?.replace(/\.$/, '')),
+        embeddedCoverNote([f], d.embed_cover)];
     }
     case 'enhance': {
       const e = state.enhance;
       const all = store.health?.formats?.enhance || [];
-      const formats = enhanceFormatsInOrder(e.formats).map((k) => all.find((f) => f.key === k)?.label || k);
-      return [join(e.recipe === 'auto' ? 'Type detected' : RECIPE_LABELS[e.recipe], `${QUALITY[e.quality]} quality`), formats.join(', ') || null];
+      const keys = enhanceFormatsInOrder(e.formats);
+      const selected = keys.map((k) => all.find((f) => f.key === k));
+      const formats = selected.map((f, i) => f?.label || keys[i]);
+      return [join(e.recipe === 'auto' ? 'Type detected' : RECIPE_LABELS[e.recipe], `${QUALITY[e.quality]} quality`),
+        formats.join(', ') || null, embeddedCoverNote(selected, e.embed_cover)];
     }
     case 'separate': {
       const s = state.separate;

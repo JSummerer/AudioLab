@@ -656,14 +656,16 @@ class ManagedAI:
                     return
                 except (AudioLabError, OSError):
                     pass
+            # Recovery has restored or committed any previous pack. Reclaim only
+            # abandoned staging before the download checks space for a fresh unpack.
+            self._directory(self.root / 'staging', create=True)
+            for item in (self.root / 'staging').iterdir():
+                self._delete(item)
             self._phase = 'downloading'
             self.log.append('Downloading the optional AI pack…')
             archive = self._download(progress)
             self._phase = 'installing'
             self.log.append('Checking and unpacking the AI pack…')
-            self._directory(self.root / 'staging', create=True)
-            for item in (self.root / 'staging').iterdir():
-                self._delete(item)
             token = uuid.uuid4().hex
             staged = self.root / 'staging' / f'install-{token}'
             self._extract(archive, staged, progress)

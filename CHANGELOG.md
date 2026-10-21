@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.4.0b3 (2026-10-21, public beta)
+
+- Library comparisons carry position, Original/Enhanced choice and volume matching between versions
+  of the same recording. Playback continues when switching with the version button; unrelated recordings
+  and ordinary file players start independently. Recoverable playback errors release the audio output.
+- Cover controls distinguish artwork embedded in supported audio formats from an optional separate image.
+  Summaries respect your own image and format support; successful audio-only fallback records a warning.
+- Retrying an interrupted AI installation reclaims abandoned unpacking files before checking disk space,
+  while preserving recovery data and resumable downloads. Settings refreshes Storage after AI changes settle.
+- Core builds reuse the verified AI 1.0.0 release when its inputs are unchanged. Updating this app does
+  not require downloading an already installed compatible AI pack again; genuinely changed AI inputs
+  require a separately versioned helper.
+- The README offers both a GitHub release page and a clearly labelled direct download. Focused screenshots
+  and linked usage guidance explain enhancement, embedded cover art and comparison controls.
+
 ## 2.4.0b2 (2026-10-21, public beta)
 
 - Shorter README puts the Mac download and installation first; usage, server settings and credits

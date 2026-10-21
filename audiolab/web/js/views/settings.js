@@ -34,7 +34,7 @@ let spyPausedUntil = 0;
 let aiPending = false; // keep all AI actions disabled while a request is in flight
 let defaultsWaiting = false; // Defaults were drawn before /api/health brought the formats
 let folderDraft = null; // the output folder field's text while it is open (null = closed)
-const storage = { data: null, finished: null, key: null, timer: 0 };
+const storage = { data: null, finished: null, key: null, timer: 0, refreshPending: false, ai: null };
 
 export const settingsView = {
   el: null,
@@ -88,6 +88,7 @@ export const settingsView = {
       renderAll();
       loadHealth().catch(() => {});
       loadStorage();
+      if (storage.refreshPending) scheduleStorageRefresh();
       scroller.addEventListener('scroll', onScroll, { passive: true });
       spy();
     }
@@ -99,6 +100,7 @@ export const settingsView = {
     folderDraft = null;
     closeInfo();
     clearTimeout(storage.timer);
+    storage.timer = 0;
     scroller.removeEventListener('scroll', onScroll);
   },
 };
@@ -477,6 +479,7 @@ function bookmarklet() {
 function renderSystem() {
   const ff = store.health?.ffmpeg || {};
   const ai = store.health?.ai || {};
+  refreshAiStorage(ai);
   const canInstall = ai.install_supported === true;
   const managed = ai.managed === true;
   const outdated = managed && (ai.state === 'incompatible' || ai.state === 'outdated'
@@ -522,8 +525,7 @@ function renderSystem() {
       if (!ok) return;
       await api('/api/system/ai', { method: 'DELETE' });
       toast('AI add-on removed.', { kind: 'ok' });
-      clearTimeout(storage.timer);
-      storage.timer = setTimeout(loadStorage, STORAGE_CACHE_MS);
+      scheduleStorageRefresh();
     }));
   }
   const sizes = [];
@@ -544,6 +546,21 @@ function renderSystem() {
         sizes.length ? h('div', { class: 'adv-help' }, `${sizes.join(' ')} Allow extra space for installation and audio work.`) : null),
       ai.installing || (ai.install_log && (!ai.available || ai.install_ok === false)) ? h('pre', { class: 'install-log', 'aria-label': 'AI installation log' }, ai.install_log || 'Starting…') : null),
     statusRow(ff.ok ? 'ok' : 'bad', 'Audio engine (ffmpeg)', ff.ok ? `Version ${ff.version || '?'} · ${ff.source === 'bundled' ? 'built in' : 'installed on this computer'}` : (ff.error || 'Not found')));
+}
+
+/** Refresh once after AI changes settle, allowing both server storage caches to expire. */
+function refreshAiStorage(ai) {
+  if (ai.managed !== true) return;
+  const next = {
+    installing: !!ai.installing,
+    key: JSON.stringify([!!ai.available, ai.version || null, !!ai.removable, ai.install_ok ?? null]),
+  };
+  const previous = storage.ai;
+  storage.ai = next;
+  if (!visible || !previous || next.installing) return;
+  if (previous.installing || previous.key !== next.key) {
+    scheduleStorageRefresh();
+  }
 }
 
 /** One request at a time, including across health refreshes and confirmation dialogs. */
@@ -590,6 +607,20 @@ async function loadStorage() {
   if (visible) renderStorageInfo();
 }
 
+/** A navigation must not discard the refresh still owed after cached data expires. */
+function scheduleStorageRefresh() {
+  storage.refreshPending = true;
+  clearTimeout(storage.timer);
+  storage.timer = 0;
+  if (!visible) return;
+  storage.timer = setTimeout(() => {
+    storage.timer = 0;
+    if (!visible) return;
+    storage.refreshPending = false;
+    loadStorage();
+  }, STORAGE_CACHE_MS);
+}
+
 function renderStorageInfo() {
   const el = refs.storageInfo;
   const d = storage.data;
@@ -597,8 +628,7 @@ function renderStorageInfo() {
   const finished = [...store.jobs.values()].filter(isFinished).length;
   // Jobs finished or were cleared elsewhere: the sizes are stale, fetch them again.
   if (storage.finished != null && storage.finished !== finished) {
-    clearTimeout(storage.timer);
-    storage.timer = setTimeout(loadStorage, STORAGE_CACHE_MS);
+    scheduleStorageRefresh();
   }
   storage.finished = finished;
   // `jobs` fires many times a second while a job runs: only rebuild on a real change,
@@ -615,8 +645,7 @@ function renderStorageInfo() {
     storage.finished = null;
     storage.key = null; // rebuild even if clearing failed (re-enables the button)
     renderStorageInfo();
-    clearTimeout(storage.timer);
-    storage.timer = setTimeout(loadStorage, STORAGE_CACHE_MS);
+    scheduleStorageRefresh();
     // The button is now disabled (nothing left to clear): keep focus nearby.
     el.focus({ preventScroll: true });
   });

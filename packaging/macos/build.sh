@@ -25,8 +25,21 @@ uv pip sync --python "$BUILD_PYTHON" "$ROOT/packaging/macos/requirements.lock"
 uv pip install --python "$BUILD_PYTHON" --no-deps -e "$ROOT"
 export AUDIOLAB_BUILD_PYTHON="$BUILD_PYTHON"
 export AUDIOLAB_AI_WORK_DIR="$WORK/ai"
-export AUDIOLAB_AI_RELEASE_TAG="v$("$BUILD_PYTHON" -c 'from audiolab import __version__; print(__version__)')"
-bash "$ROOT/packaging/ai/build.sh"
+AI_MODE="${AUDIOLAB_AI_MODE:-reuse}"
+case "$AI_MODE" in
+  reuse)
+    [[ -z "${AUDIOLAB_AI_VERSION:-}${AUDIOLAB_AI_RELEASE_TAG:-}" ]] || {
+      echo 'Use AUDIOLAB_AI_MODE=rebuild to select a new AI version or release tag.' >&2; exit 1;
+    }
+    AI_ARGS=(--work "$AUDIOLAB_AI_WORK_DIR")
+    if [[ -n "${AUDIOLAB_AI_REUSE_DIR:-}" ]]; then
+      AI_ARGS+=(--source-directory "$AUDIOLAB_AI_REUSE_DIR")
+    fi
+    "$BUILD_PYTHON" "$ROOT/packaging/ai/reuse.py" "${AI_ARGS[@]}"
+    ;;
+  rebuild) bash "$ROOT/packaging/ai/build.sh" ;;
+  *) echo 'AUDIOLAB_AI_MODE must be reuse or rebuild.' >&2; exit 1 ;;
+esac
 export AUDIOLAB_AI_CATALOG="$AUDIOLAB_AI_WORK_DIR/release/catalog.json"
 export AUDIOLAB_MEDIA_BUILD_DIR="$WORK/media"
 # Obtain all pinned inputs before spending time compiling the media engine.
@@ -61,7 +74,9 @@ RELEASE="$WORK/release-$VERSION-$ARCH"
 mkdir "$RELEASE"  # fail rather than silently replace a prepared release
 "$BUILD_PYTHON" "$ROOT/packaging/macos/smoke.py" "$APP" "$RELEASE/smoke"
 "$BUILD_PYTHON" "$ROOT/packaging/macos/ai_smoke.py" "$APP" "$AUDIOLAB_AI_WORK_DIR/release" "$RELEASE/ai-smoke"
-cp "$AUDIOLAB_AI_WORK_DIR/release/"*.tar.gz "$RELEASE/"
+if [[ "$AI_MODE" == rebuild ]]; then
+  cp "$AUDIOLAB_AI_WORK_DIR/release/"*.tar.gz "$RELEASE/"
+fi
 cp "$AUDIOLAB_AI_CATALOG" "$RELEASE/ai-catalog.json"
 STAGE="$WORK/dmg-stage"
 mkdir -p "$STAGE"

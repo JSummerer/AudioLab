@@ -2,7 +2,7 @@
 `transcode()` and a multi-format `export()` used by every task.
 
 16-bit targets are TPDF-dithered by ffmpeg's resampler; lossless and lossy
-files get title/artist/album tags and, where the container supports it, the
+files get title/artist/album tags and, in formats supported by AudioLab, the
 cover image (always a JPEG of at most COVER_MAX_PX, see `cover_jpeg`). Files
 are written under a hidden temporary name and moved into place without ever
 replacing an existing file (`Name (2).ext` instead).
@@ -35,7 +35,7 @@ class FormatSpec:
     ext: str  # '.mp3'
     kind: str  # lossy | lossless | video | original
     description: str  # plain-language use case
-    cover: bool  # container can carry cover art
+    cover: bool  # AudioLab embeds cover art in this output format
     codec_args: tuple  # ffmpeg audio codec arguments
     sample_fmt: str | None = None  # dithered output sample format for 16-bit targets
     max_rate: int | None = None  # codec sample-rate ceiling (MP3: 48k, Opus: always 48k)
@@ -508,9 +508,9 @@ def transcode(
     """Convert `src` into format `fmt` at `dst`. Never overwrites: returns the
     path actually written (may carry a ' (2)' suffix).
 
-    `cover`: the JPEG to embed (in formats that can carry one). None = no picture: a picture `src`
+    `cover`: the JPEG to embed (in formats supported by AudioLab). None = no picture: a picture `src`
     carries is never copied on its own — whether there is one is the caller's choice (`common.cover_art`
-    takes an upload's picture when "Add cover art" is on).
+    takes an upload's picture when "Embed cover art" is on).
 
     `start_s`/`end_s` cut a sample-accurate excerpt (atrim on the decoded audio:
     input-side seeking lands up to ~10 ms off in WebM/M4A, and an output-side -ss
@@ -580,6 +580,7 @@ def transcode(
         return args
 
     art = bool(spec.cover and cover and Path(cover).is_file())
+    without_cover = False
     try:
         try:
             run_ffmpeg(build(art), progress=progress, duration_s=duration_s, what=f'{spec.label} export')
@@ -588,9 +589,13 @@ def transcode(
                 raise
             staging.unlink(missing_ok=True)  # cover muxing failed: keep the audio, drop the art
             run_ffmpeg(build(False), progress=progress, duration_s=duration_s, what=f'{spec.label} export')
+            without_cover = True
         if not staging.is_file() or staging.stat().st_size == 0:
             raise AudioLabError(f'{spec.label} export produced an empty file.')
-        return _commit(staging, dst)
+        path = _commit(staging, dst)
+        if without_cover:
+            progress.note('warning', f'Saved {path.name} without cover art. The picture could not be added.')
+        return path
     finally:
         if staging.exists():
             staging.unlink(missing_ok=True)

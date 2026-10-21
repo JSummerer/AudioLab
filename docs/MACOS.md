@@ -1,6 +1,6 @@
 # AudioLab for Mac
 
-**[Download AudioLab 2.4.0b2](https://github.com/JSummerer/AudioLab/releases/download/v2.4.0b2/AudioLab-2.4.0b2-macOS-arm64.dmg)** · about 106 MB · public beta
+**[View the release on GitHub](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b2)** · [Direct download (.dmg, 106 MB)](https://github.com/JSummerer/AudioLab/releases/download/v2.4.0b2/AudioLab-2.4.0b2-macOS-arm64.dmg) · public beta
 
 No Terminal, Python installation or AudioLab account is needed. The app contains its own audio tools.
 Save / Convert, Check, Light/Standard Enhance and the Library work without the optional AI download.
@@ -26,7 +26,8 @@ See [hardware and storage](HARDWARE.md) for memory, disk, model choices and the 
 
 ## Download and install
 
-1. **Download** using the link at the top of this page. The file is named
+1. **Choose your download:** open the GitHub release page above and select the `.dmg` under **Assets**,
+   or use **Direct download** to start immediately. The file is named
    **AudioLab-2.4.0b2-macOS-arm64.dmg** and normally appears in Downloads.
 2. **Open the downloaded file.** In its window, drag **AudioLab.app** into **Applications**.
    Wait for Finder to finish copying, then eject the AudioLab disk image in Finder's sidebar.
@@ -35,8 +36,7 @@ See [hardware and storage](HARDWARE.md) for memory, disk, model choices and the 
 That's the whole installation. You can keep the app in your Dock. After it opens successfully,
 you can delete the downloaded `.dmg` file; the installed app is independent of it.
 
-If you use the [release page](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b2) instead,
-choose the `.dmg` under **Assets**. You do not need **Source code (zip)**, the AI archive or the
+You do not need **Source code (zip)**, the AI archive or the
 third-party source archives to install the app. AudioLab downloads optional AI itself from Settings.
 
 ## First opening

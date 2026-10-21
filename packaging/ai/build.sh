@@ -4,8 +4,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 WORK="${AUDIOLAB_AI_WORK_DIR:-$ROOT/.work/ai-package}"
 PYTHON="${AUDIOLAB_BUILD_PYTHON:-python3}"
-VERSION="${AUDIOLAB_AI_VERSION:-1.0.0}"
+VERSION="${AUDIOLAB_AI_VERSION:?Set AUDIOLAB_AI_VERSION to an intentional new helper version.}"
 RELEASE_TAG="${AUDIOLAB_AI_RELEASE_TAG:-ai-v$VERSION}"
+PUBLISHED_VERSION="$("$PYTHON" -c 'import json, sys; print(json.load(open(sys.argv[1]))["catalog"]["version"])' \
+  "$ROOT/packaging/ai/published-helper.json")"
+[[ "$VERSION" != "$PUBLISHED_VERSION" ]] || {
+  echo "AI $VERSION is already published and immutable. Reuse it or choose a new helper version." >&2; exit 1;
+}
 [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]] || { echo 'Build the AI pack on Apple silicon macOS.' >&2; exit 1; }
 command -v uv >/dev/null || { echo 'Install uv before building (see packaging/ai/README.md).' >&2; exit 1; }
 mkdir -p "$WORK"

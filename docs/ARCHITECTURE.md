@@ -78,12 +78,19 @@ It starts the same native window/server/task pipeline without `start.sh`, uv, pi
 Its private downloader mode dispatches yt-dlp inside the frozen executable; that executable is not a
 general-purpose Python interpreter. `runtime.py` chooses this mode and the bundled FFmpeg/Deno.
 
-The main app exposes Save/Convert, Check and Light/Standard Enhance without AI. Version 2.4.0b2
+The main app exposes Save/Convert, Check and Light/Standard Enhance without AI. Since version 2.4.0b2 it
 offers a managed optional add-on containing a frozen AI helper and both
 supported model choices; the main app's bundled Python packages remain immutable. `ai.install_supported`
 is driven by a build-generated, bundled catalog, not simply `packaged`. Split/Best use the healthy
 managed helper when present. Source/CLI/Docker keep their existing optional-AI and update paths.
 Downloader self-updates remain disabled in packaged mode; replace the app to update the main delivery.
+
+Core builds normally reuse the immutable helper selected by `packaging/ai/published-helper.json`.
+`packaging/ai/reuse.py` checks the exact catalog/archive/source companion and the reviewed helper
+execution, protocol, model and build inputs before running its smoke checks. App version changes alone
+do not change the helper catalog, so an installed compatible add-on remains usable after an app update.
+A changed helper input requires an intentional new helper version and reviewed pin; see the
+[AI packaging guide](../packaging/ai/README.md). The original published assets must remain available.
 
 `ai/catalog.json` pins one compatible HTTPS release asset, archive checksum, exact byte counts,
 protocol, executable and model choices. No mutable latest-version lookup or user-supplied download URL
@@ -107,7 +114,8 @@ pinned local safetensors models with no remote fallback. Health and storage repo
 separately from the catalog's unpacked target size. See the [HTTP contract](API.md#health).
 
 The initial release target is macOS 14+ arm64 with identifier `io.github.jsummerer.audiolab`. The build
-produces an ad-hoc-signed `.app`/DMG, checksums, the optional AI archive/catalog and matching third-party source companions.
+produces an ad-hoc-signed `.app`/DMG, checksums, the AI catalog and a matching core source companion.
+An intentional helper rebuild also produces new AI runtime and source archives; reuse keeps their original published URLs.
 It has no Developer ID or Apple notarization. The build's selected FFmpeg is compiled from its
 recorded LGPL sources rather than using the source setup's imageio fallback. See the
 [packaging guide](../packaging/macos/README.md) for build inputs, licensing and artifact checks, and

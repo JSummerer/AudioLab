@@ -3,7 +3,7 @@
 For first-time setup, use the [Mac app guide](MACOS.md) or [source installation guide](INSTALLATION.md#install-from-source).
 
 [First recording](#your-first-recording) · [Sources and results](#sources-and-results) ·
-[Enhancement](#automatic-enhancement) · [Command line](#command-line) ·
+[Enhancement](#automatic-enhancement) · [Cover art](#cover-art) · [Compare versions](#compare-versions) · [Command line](#command-line) ·
 [Home server](#docker--home-server) · [Server settings](#server-settings)
 
 ## Your first recording
@@ -35,14 +35,25 @@ Use only material you have permission to process.
 - **Check:** inspect measurements and a spectrogram. Tempo, musical key and content type are estimates.
   Frequency range can suggest limitations; it cannot prove a file's encoding history.
 
-**More options** holds format and processing controls. Add your own cover art, edit title/artist names,
-or save a cover separately. A multi-file result can be downloaded as a ZIP.
+**More options** holds format and processing controls. Edit title/artist names, add [cover art](#cover-art),
+or choose several output formats. A multi-file result can be downloaded as a ZIP.
 
 Library keeps Save, Enhance and Split results with their versions. When the original is kept, Enhance
 offers full-length comparison with matched volume. Removing an entry does not delete the output files.
 Kept originals use disk space separately from your output folder; manage them in Settings → Storage.
 
 ## Automatic enhancement
+
+![Enhancement recipe, quality and output choices](img/enhance-options.png)
+
+| Quality | What changes | Needs AI? |
+|---|---|---|
+| **Light** | Mainly loudness; keeps the original tone | No |
+| **Standard** | Tone, dynamics and loudness using the chosen recipe | No |
+| **Best** | Adds an AI stage to the recipe; takes longer | Yes |
+
+Start with Light or Standard. “Best” is a processing choice, not a guarantee that you will prefer the sound.
+The **Standard / Fine-tuned AI model** choice is separate from Enhance quality; see [hardware guidance](HARDWARE.md).
 
 Auto chooses from the same recipes you can select yourself:
 
@@ -57,6 +68,46 @@ The app explains its choices, and you can override them. Noise reduction is off 
 choose it. Best quality can separate and recombine music stems or isolate speech before processing.
 These operations may change the sound in ways you dislike; compare before choosing your preferred result.
 Exporting a compressed source as WAV/FLAC does not restore missing detail.
+
+## Cover art
+
+![An own cover image with the optional separate-image switch turned off](img/cover-options.png)
+
+AudioLab can put a picture **inside the audio file**, so compatible music players can show it as
+album artwork. You do not need a separate picture file beside the song.
+
+- For **Save / Convert** or **Enhance**, use **Use my own image** to choose a JPG, PNG or WebP.
+  Your chosen picture takes priority over existing artwork.
+- Without your own image, **Embed cover art** in **More options** uses a link's thumbnail or an
+  audio file's existing cover, when available. This is on by default.
+- Choose **MP3, M4A/AAC, Apple Lossless or FLAC** to embed artwork. AudioLab does not add covers
+  to WAV or Opus; **Original** and video downloads are kept without new artwork.
+- **Also save a separate image** is optional. It puts an extra image alongside the finished
+  audio in your output folder; leave it off if you only want embedded artwork.
+
+These choices create new output files; they do not retag your input file in place. Cover display
+depends on the music player and its supported formats.
+
+## Compare versions
+
+![Original and enhanced comparison with matched volume](img/compare.png)
+
+Screenshots use generated sample audio; the displayed loudness difference is specific to that sample.
+
+In **Library**, open a recording's versions and choose **Compare with the original** on an enhanced result.
+This needs a kept original; **Settings → Storage → Keep originals for comparing** controls future jobs.
+
+Press **Play**, then switch between **Original** and **Enhanced** to hear the same point in the recording.
+Use the timeline or **−10 s / +10 s** to move around.
+**Match volume** reduces the louder side for a fairer comparison. Turn it off to hear the actual level
+difference. It changes playback only, not the saved files.
+
+Choose **Compare with the original** on another enhanced version of the same recording to keep
+your position, selected side and volume-matching choice. If you were playing, playback continues.
+Switching to another recording or an ordinary file player starts a separate listening session.
+
+Job pages may offer a shorter preview when a full comparison is unavailable. There is no Delta mode
+in the current app; listening to Original and Enhanced is the supported comparison.
 
 ## Command line
 

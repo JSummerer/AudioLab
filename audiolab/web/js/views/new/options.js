@@ -112,8 +112,8 @@ function sourceNote() {
 }
 
 /**
- * "Cover art" (More options of Save and Enhance). `chosen()`: the picked formats (Health
- * entries) — the help names those that can't hold a picture. An own image is always used.
+ * "Embed cover art" (More options of Save and Enhance). `chosen()`: the picked formats
+ * (Health entries) — the help names AudioLab's unsupported targets. An own image overrides the switch.
  */
 let syncCover = null; // refreshes that help after a format change
 
@@ -121,20 +121,27 @@ function coverRow(o, chosen) {
   const own = hasOwnCover();
   const help = h('span', { class: 'switch-row-help', id: 'coverArtHelp' });
   syncCover = () => {
-    const none = chosen().filter((f) => f.cover === false).map((f) => f.label);
+    const selected = chosen();
+    const supported = selected.filter((f) => f.cover === true).map((f) => f.label);
+    const none = selected.filter((f) => f.cover === false).map((f) => f.label);
+    let sourceHelp = isFileLike() ? 'Keeps existing album art inside the audio when available.'
+      : 'Embeds the video thumbnail inside the audio when available.';
+    if (own) {
+      sourceHelp = supported.length ? `Your image is embedded in ${supported.join(', ')}.`
+        : 'Choose a supported audio format to embed your image.';
+    }
     help.textContent = [
-      own ? 'Your own image is always added.'
-        : isFileLike() ? 'Keeps the picture the file already has.' : 'Adds the video thumbnail as album art.',
-      none.length ? `No cover in ${none.join(', ')}.` : null,
+      sourceHelp,
+      none.length ? `AudioLab adds no cover art to ${none.join(', ')}.` : null,
     ].filter(Boolean).join(' ');
   };
   syncCover();
   const sw = switchControl({
-    id: 'coverArt', checked: own || o.embed_cover, disabled: own, label: 'Cover art',
-    onChange: (v) => { o.embed_cover = v; syncMore?.(); },
+    id: 'coverArt', checked: own || o.embed_cover, disabled: own, label: 'Embed cover art',
+    onChange: (v) => { o.embed_cover = v; syncMore?.(); redraw('sleeve'); },
   });
   sw.setAttribute('aria-describedby', help.id);
-  return h('label', { class: 'switch-row', for: sw.id }, sw, h('span', { class: 'switch-row-label' }, 'Cover art'), help);
+  return h('label', { class: 'switch-row', for: sw.id }, sw, h('span', { class: 'switch-row-label' }, 'Embed cover art'), help);
 }
 
 /** Settings → Defaults: what the options start from, and what "Reset" returns to. */
@@ -317,7 +324,7 @@ function renderEnhanceOptions(el) {
         label: 'Quality', value: e.quality,
         options: [
           { value: 'light', label: 'Light', desc: 'Volume only · keeps the sound' },
-          { value: 'standard', label: 'Standard', desc: 'Fast · works on any computer' },
+          { value: 'standard', label: 'Standard', desc: 'No AI add-on needed' },
           {
             value: 'best', label: 'Best', disabled: !ai,
             desc: ai ? `Uses AI · slower${store.health?.ai?.device ? ` · ${deviceLabel(store.health.ai.device)}` : ''}` : null,

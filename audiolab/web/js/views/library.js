@@ -327,7 +327,7 @@ function entryActions(c, entry) {
   if (compareFile(entry)) {
     const b = h('button', {
       type: 'button', class: 'btn btn-key btn-sm', 'aria-expanded': 'false', 'aria-controls': c.stage.id,
-      onclick: () => togglePlayer(c, 'compare'),
+      onclick: (e) => togglePlayer(c, 'compare', e),
     }, icon('compare', 15), 'Compare with the original');
     c.toggles.set('compare', b);
     btns.push(b);
@@ -352,8 +352,13 @@ function compareFile(entry) {
 // ---------------------------------------------------------------------------
 // The player (one at a time)
 // ---------------------------------------------------------------------------
-function togglePlayer(c, what) {
+function togglePlayer(c, what, event) {
   const same = player?.entryId === c.entry.id && player.what === what;
+  // Only full-length comparisons share a transport, and only inside the server's
+  // recording group. Plain files may be stems/tracks with a different timeline.
+  const group = c.entry.group;
+  const state = !same && what === 'compare' && player?.what === 'compare'
+    && typeof group === 'string' && group && player.group === group ? player.snapshot?.() : null;
   closePlayer();
   if (same) return;
   const entry = c.entry;
@@ -361,8 +366,10 @@ function togglePlayer(c, what) {
     const result = compareFile(entry);
     if (!result) return;
     const p = libraryCompare(entry);
-    player = { ...p, entryId: entry.id, what, fileId: result.id, title: 'Comparing with the original' };
+    player = { ...p, entryId: entry.id, what, group, fileId: result.id, title: 'Comparing with the original' };
     attachPlayer(c);
+    // Route reveals also open players; they retain the position but never start sound.
+    p.restore?.(state, { resume: event?.isTrusted === true });
   } else {
     const file = (entry.files || []).find((f) => f.id === what);
     if (!file) return;

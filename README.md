@@ -6,9 +6,11 @@ Work with local files and supported web links. Keep your results together in a L
 
 ## Download for Mac
 
-**[Download AudioLab 2.4.0b2](https://github.com/JSummerer/AudioLab/releases/download/v2.4.0b2/AudioLab-2.4.0b2-macOS-arm64.dmg)** · Apple silicon · macOS 14+ · 106 MB
+**[View release and downloads](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b2)** · [Direct download (.dmg, 106 MB)](https://github.com/JSummerer/AudioLab/releases/download/v2.4.0b2/AudioLab-2.4.0b2-macOS-arm64.dmg)
 
-1. Download and open the **.dmg**.
+Apple silicon · macOS 14+ · public beta
+
+1. On the release page, choose the **.dmg** under **Assets**, or use the direct download above. Open the downloaded file.
 2. Drag **AudioLab.app** into **Applications**, then eject the disk image.
 3. Open AudioLab from **Applications**. No Terminal or Python setup.
 
@@ -16,8 +18,6 @@ This beta isn't verified by Apple. If macOS blocks the first launch, follow the 
 Start with a short recording; see [hardware and tested limits](docs/HARDWARE.md) before trying longer jobs.
 
 Intel Macs, Windows and Linux have an [experimental source installation](docs/INSTALLATION.md#install-from-source), with no packaged app yet.
-
-![AudioLab with a local audio sample ready to enhance](docs/img/app.png)
 
 ## What you can do
 
@@ -29,6 +29,10 @@ Intel Macs, Windows and Linux have an [experimental source installation](docs/IN
 | **Check** | Inspect loudness, dynamics and frequency range. |
 
 **Library** keeps finished results and their versions. Add names and cover art, or cut recordings into tracks.
+
+![Original and enhanced audio at the same position, with volume matching](docs/img/compare.png)
+
+Compare at the same point with **Match volume**. [See the controls](docs/USAGE.md#compare-versions) · [Embed album artwork](docs/USAGE.md#cover-art)
 
 ## Optional AI
 

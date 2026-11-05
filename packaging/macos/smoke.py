@@ -16,6 +16,39 @@ import wave
 from pathlib import Path
 
 
+def write_lowmid_fixture(path: Path) -> None:
+    """Generate a short, isolated low-mid rise against a steady stereo baseline."""
+    rate = 44100
+    duration = 16
+    frames = bytearray()
+    for frame in range(duration * rate):
+        t = frame / rate
+        fade = min(1.0, t / 0.05, (duration - t) / 0.05)
+        lowmid = 0.175 if 6.3 <= t < 7.3 else 0.015
+        sample = 0.09 * math.sin(math.tau * 1000 * t) + lowmid * math.sin(math.tau * 300 * t)
+        value = round(32767 * fade * sample)
+        frames.extend(struct.pack('<hh', value, value))
+    with wave.open(str(path), 'wb') as output:
+        output.setparams((2, 2, rate, 0, 'NONE', 'not compressed'))
+        output.writeframes(frames)
+
+
+def check_enhance_output(stdout: str, label: str, formats: set[str]) -> dict:
+    result = json.loads(stdout)
+    files = [file for file in result['files'] if file['kind'] == 'audio']
+    assert len(files) == len(formats) and {file['format'] for file in files} == formats, (
+        f'{label}: missing or unexpected audio exports'
+    )
+    for file in files:
+        check = file.get('verification', {})
+        name = file['name']
+        assert check.get('status') in {'verified', 'warning'}, f'{label}: export verification unavailable for {name}'
+        for field in ('integrated_lufs', 'true_peak_dbtp'):
+            reading = check.get(field)
+            assert type(reading) in (int, float) and math.isfinite(reading), f'{label}: invalid {field} for {name}'
+    return result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('app', type=Path)
@@ -58,7 +91,17 @@ def main() -> None:
     run('doctor', 'doctor', '--report')
     for fmt in ('mp3', 'm4a', 'flac', 'wav', 'opus'):
         run(f'convert-{fmt}', 'download', str(tone), '--format', fmt, '--json')
-    run('enhance', 'enhance', str(tone), '--formats', 'wav16', '--json')
+    check_enhance_output(run('enhance', 'enhance', str(tone), '--formats', 'wav16', '--json'), 'enhance', {'wav16'})
+    lowmid = root / 'lowmid-rise.wav'
+    write_lowmid_fixture(lowmid)
+    result = check_enhance_output(
+        run('enhance-adaptive', 'enhance', str(lowmid), '--type', 'music', '--formats', 'wav16', 'mp3_320', '--json'),
+        'enhance-adaptive',
+        {'wav16', 'mp3_320'},
+    )
+    processing = result['processing']
+    assert processing['params']['adaptive_lowmid_db'] > 0, 'Adaptive low-mid settings were not resolved'
+    assert processing['applied']['adaptive_lowmid']['engaged'] is True, 'Adaptive low-mid control did not engage'
     run('analyze', 'analyze', str(tone), '--json')
 
     class QuietHandler(http.server.SimpleHTTPRequestHandler):

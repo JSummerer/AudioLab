@@ -1,11 +1,15 @@
 """The mastering chain: one parameterised signal path for every recipe.
 
-    [AI stage] → rumble filter → noise reduction → tonal EQ → HF restore →
-    sub-bass harmonics → mono bass → compression → loudness → true-peak limiter →
-    24-bit dither → master FLAC (48 kHz)
+    [AI stage] → rumble filter → noise reduction → adaptive low-mids → tonal EQ → HF restore →
+    sub-bass harmonics → mono bass → compression → de-esser → loudness →
+    true-peak limiter → 24-bit dither → master FLAC (48 kHz)
+
+The de-esser follows compression (which lets short S sounds slip under its attack)
+and precedes the limiter (so peaks there are not S sounds). With the stem-aware AI
+stage it runs on the separated vocals only, so hi-hats never trigger it.
 
 This merges the prototype's Fast Polish and Deep Stem engines (their post
-chains were duplicates). The DSP math is the validated prototype math; what a
+chains were duplicates). The DSP builds on the prototype with regression-tested guards; what a
 stage does is decided entirely by `ChainParams` (see recipes.base.resolve).
 
 Quality "light" (`params.volume_only`) runs the same path with every tone and
@@ -38,7 +42,9 @@ from scipy.signal import butter
 
 from ..analysis.profile import DC_ALERT, SILENCE_DBFS
 from ..context import Progress
+from ..dsp.adaptive import control_lowmids
 from ..dsp.bus import glue_comp, mono_below
+from ..dsp.deess import deess
 from ..dsp.denoise import spectral_gate
 from ..dsp.dither import add_24bit_tpdf
 from ..dsp.exciter import hf_restore
@@ -46,7 +52,10 @@ from ..dsp.filters import filtfilt_stream, highpass_fq, highshelf_fq, lowshelf_f
 from ..dsp.limiter import tp_limit, true_peak_db
 from ..dsp.loudness import integrated_lufs, lra, programme_loudness
 from ..errors import AudioLabError, Cancelled
-from .base import LIGHT_MAX_LIMIT_DB, ChainParams
+from .base import LIGHT_MAX_LIMIT_DB, STEM_PRESENCE_DB, ChainParams
+
+# Clarity lift: narrow enough to stay out of the S sounds above 5 kHz.
+PRESENCE_HZ, PRESENCE_Q = 3000.0, 1.4
 
 
 def _f32(x: np.ndarray) -> np.ndarray:
@@ -80,19 +89,20 @@ def subharmonic_reinforce(
     return _f32(x)
 
 
-def _stem_eq(bass_db: float, sr: int) -> dict[str, list]:
-    """Per-stem zero-phase EQ of the prototype Deep Stem engine."""
+def _stem_eq(bass_db: float, presence: bool, sr: int) -> dict[str, list]:
+    """Per-stem zero-phase EQ of the prototype Deep Stem engine. The vocals' clarity lift is
+    narrow at 3 kHz (≤ +0.25 dB from 5 kHz up, where S sounds sit) and only when the recipe
+    wants one (`presence`: not on an already bright top end)."""
     bass = [peak_fq(300.0, -1.0, q=1.0, sr=sr), highshelf_fq(8000.0, -0.5, s=1.0, sr=sr)]
     if bass_db > 0:
         bass.insert(0, lowshelf_fq(70.0, bass_db, s=1.0, sr=sr))
+    vocals = [peak_fq(300.0, -0.75, q=1.0, sr=sr), highshelf_fq(10000.0, -0.5, s=1.0, sr=sr)]
+    if presence:
+        vocals.insert(1, peak_fq(PRESENCE_HZ, STEM_PRESENCE_DB, q=PRESENCE_Q, sr=sr))
     return {
         'drums': [highshelf_fq(9000.0, -0.75, s=1.0, sr=sr), peak_fq(350.0, -0.5, q=1.0, sr=sr)],
         'bass': bass,
-        'vocals': [
-            peak_fq(300.0, -0.75, q=1.0, sr=sr),
-            peak_fq(4000.0, +0.75, q=0.8, sr=sr),
-            highshelf_fq(10000.0, -0.5, s=1.0, sr=sr),
-        ],
+        'vocals': vocals,
         'other': [peak_fq(300.0, -0.75, q=1.0, sr=sr), highshelf_fq(9000.0, -0.75, s=1.0, sr=sr)],
         'guitar': [peak_fq(300.0, -0.75, q=1.0, sr=sr)],
         'piano': [peak_fq(300.0, -0.75, q=1.0, sr=sr)],
@@ -144,7 +154,8 @@ def _write_master(x: np.ndarray, sr: int, path: Path, check_cancel) -> None:
 
 
 def _ai_stage(ref: Path, params: ChainParams, n: int, sr: int, work_dir: Path, progress: Progress) -> dict[str, Any]:
-    """Run separation; returns {'x': array or None, 'report': {...}, 'warning': str|None}."""
+    """Run separation; returns {'x': array or None, 'report': {...}, 'warning': str|None,
+    'deess': the vocals stem's de-esser stats (stem-aware EQ only)}."""
     from ..ai.separation import separate
 
     stems_dir = Path(work_dir) / 'stems'
@@ -163,23 +174,33 @@ def _ai_stage(ref: Path, params: ChainParams, n: int, sr: int, work_dir: Path, p
             'x': None,
             'report': report,
             'warning': f'The AI separation was not clean enough (residual {sep["residual_db"]} dB) — '
-            f'used the standard chain instead.',
+            f'used the adaptive chain instead.',
         }
     if params.ai_stage == 'voice_isolate':
         x = _read_stem(sep['stems']['vocals'], n)
         progress(100)
         return {'x': x, 'report': report, 'warning': None}
-    eq = _stem_eq(params.bass_db, sr)
+    eq = _stem_eq(params.bass_db, params.presence_db > 0, sr)
     mix = np.zeros((n, 2), dtype=np.float32)
     names = list(sep['stems'])
+    ds: dict[str, Any] = {'engaged': False, 'skip_reason': 'off'}
     for i, name in enumerate(names):
         stem = _read_stem(sep['stems'][name], n)
         for sos in eq.get(name, []):
             stem = filtfilt_stream(sos, stem, check_cancel=progress.check_cancel)
+        if name == 'vocals' and params.deess_db > 0:
+            stem, ds = deess(stem, sr, max_gr_db=params.stem_deess_db(), mix=False, check_cancel=progress.check_cancel)
         mix += stem
         del stem
         progress(85 + 15 * (i + 1) / len(names), f'Polishing the {name} stem...')
-    return {'x': mix, 'report': report, 'warning': None}
+    return {'x': mix, 'report': report, 'warning': None, 'deess': ds}
+
+
+def _deess_step(stats: dict[str, Any], where: str) -> str:
+    return (
+        f'Softened sharp S sounds {where} (at most {stats["max_gr_db"]:.1f} dB, '
+        f'{stats["active_pct"]:.1f} % of the time)'
+    )
 
 
 def render(
@@ -202,6 +223,8 @@ def render(
     steps: list[str] = []
     warnings: list[str] = []
     ai_report = None
+    deess_stats: dict[str, Any] = {'engaged': False, 'skip_reason': 'off'}
+    adaptive_stats: dict[str, Any] = {'engaged': False, 'skip_reason': 'off'}
 
     # --- input + optional AI stage -------------------------------------------
     use_ai = params.ai_stage in ('stem_eq', 'voice_isolate')
@@ -230,24 +253,27 @@ def render(
             raise
         except Exception as e:  # MPS/CUDA OOM, missing model, ... → fall back, don't fail the job
             msg = str(e) if isinstance(e, AudioLabError) else f'{type(e).__name__}: {e}'
-            warnings.append(f'The AI stage failed ({msg[:160]}) — used the standard chain instead.')
+            warnings.append(
+                'The AI stage failed — used Adaptive processing instead. The full log has technical details.'
+            )
             ai_report = {'stage': params.ai_stage, 'fallback': True, 'error': msg[:300]}
         if x is None:
             x = _read_ref(ref)
             use_ai = False
         elif params.ai_stage == 'stem_eq':
-            steps.append(
-                'Split the mix into drums, bass, vocals and the rest with AI and polished each part on its own'
-            )
+            steps.append('Split the mix into drums, bass, vocals and the rest with AI and applied EQ to each part')
+            deess_stats = res.get('deess') or deess_stats
+            if deess_stats.get('engaged'):
+                steps.append(_deess_step(deess_stats, 'in the separated vocals'))
         else:
-            steps.append('Isolated the voice with AI — music and background sounds removed')
+            steps.append('Used AI to separate the voice from music and background sounds')
     p = chain_p
 
     # --- rumble filter ---------------------------------------------------------
     if params.highpass_hz > 0:
         p(5, 'Removing rumble...')
         x = filtfilt_stream(highpass_fq(params.highpass_hz, sr=sr), x, check_cancel=p.check_cancel)
-        steps.append(f'Removed inaudible rumble below {params.highpass_hz:.0f} Hz')
+        steps.append(f'Filtered low frequencies below {params.highpass_hz:.0f} Hz')
 
     # --- noise reduction -----------------------------------------------------
     if params.denoise in ('light', 'strong'):
@@ -261,49 +287,57 @@ def render(
     # --- tonal EQ (the stem-aware AI stage already did its own EQ) -------------
     if not (use_ai and params.ai_stage == 'stem_eq' or params.volume_only):
         p(32, 'Shaping the tone...')
-        if params.mud_cut_db < 0:
+        if params.adaptive_lowmid_db > 0:
+            x, adaptive_stats = control_lowmids(x, sr, params.adaptive_lowmid_db, check_cancel=p.check_cancel)
+            if adaptive_stats['engaged']:
+                steps.append(
+                    f'Controlled brief low-mid rises (at most {adaptive_stats["max_gr_db"]:.1f} dB, '
+                    f'{adaptive_stats["active_pct"]:.1f} % of the recording)'
+                )
+            else:
+                steps.append('Left the low-mids unchanged — no isolated rises needed control')
+        elif params.mud_cut_db < 0:
             x = filtfilt_stream(peak_fq(320.0, params.mud_cut_db, q=1.0, sr=sr), x, check_cancel=p.check_cancel)
-            steps.append('Cleaned up muddy low-mids around 320 Hz')
+            steps.append('Reduced low-mids around 320 Hz')
         if params.bass_db > 0:
             x = filtfilt_stream(lowshelf_fq(85.0, params.bass_db, s=1.0, sr=sr), x, check_cancel=p.check_cancel)
             steps.append(f'Added a little bass weight (+{params.bass_db:.1f} dB)')
         if params.presence_db:
-            x = filtfilt_stream(peak_fq(3400.0, params.presence_db, q=1.2, sr=sr), x, check_cancel=p.check_cancel)
-            steps.append(
-                'Made the voice clearer and more present'
-                if params.compressor == 'leveler'
-                else 'Brought vocals and lead sounds slightly forward'
+            x = filtfilt_stream(
+                peak_fq(PRESENCE_HZ, params.presence_db, q=PRESENCE_Q, sr=sr), x, check_cancel=p.check_cancel
             )
+            steps.append(f'Adjusted upper mids around 3 kHz ({params.presence_db:+.1f} dB)')
         if params.air_db:
             x = filtfilt_stream(highshelf_fq(11000.0, params.air_db, s=1.0, sr=sr), x, check_cancel=p.check_cancel)
-            steps.append('Added a touch of sparkle on top')
+            steps.append(f'Adjusted the high frequencies ({params.air_db:+.1f} dB)')
+    elif use_ai and params.ai_stage == 'stem_eq':
+        adaptive_stats = {'engaged': False, 'skip_reason': 'AI stem EQ already shapes the low-mids'}
 
     # --- HF restore (opt-in exciter) -----------------------------------------
     cutoff = (profile.get('bandwidth') or {}).get('cutoff_hz')
     if params.hf_restore and cutoff:
-        p(40, 'Re-creating missing highs...')
+        p(40, 'Adding high-frequency harmonics...')
         x, ex = hf_restore(x, sr, float(cutoff), progress=p.sub(40, 48))
         if ex.get('applied'):
-            steps.append(f'Re-created missing highs above {cutoff / 1000:.1f} kHz (subtle exciter)')
+            steps.append(f'Added new high-frequency harmonics above {cutoff / 1000:.1f} kHz')
 
     # --- bass: harmonics and mono fold ---------------------------------------
     fold_hz = params.mono_bass_hz or 90.0
     if params.sub_harmonics > 0:
         p(50, 'Reinforcing sub-bass...')
         x = subharmonic_reinforce(x, wet=params.sub_harmonics, fc=fold_hz, sr=sr, check_cancel=p.check_cancel)
-        steps.append('Reinforced the sub-bass so it carries on small speakers too')
+        steps.append('Added harmonics to the deep bass')
     if params.mono_bass_hz:
         p(56, 'Centering the bass...')
         x = mono_below(x, fc=params.mono_bass_hz, sr=sr, check_cancel=p.check_cancel)
-        steps.append(f'Tightened the bass below {params.mono_bass_hz:.0f} Hz so it hits harder on club and car systems')
+        steps.append(f'Made bass below {params.mono_bass_hz:.0f} Hz mono (shared between left and right)')
 
     # --- compression -----------------------------------------------------------
     comp_stats: dict[str, Any] = {'engaged': False}
     if params.compressor == 'glue':
         p(62, 'Gluing the mix...')
         x, comp_stats = glue_comp(x, thresh_dbfs=-16.5, ratio=1.5, max_gr_db=1.5, sr=sr, check_cancel=p.check_cancel)
-        comp_stats['engaged'] = True
-        steps.append(f'Gently glued the mix together (at most {comp_stats["max_gr_db"]:.1f} dB of compression)')
+        comp_stats['mode'] = 'glue'
     elif params.compressor == 'leveler':
         p(62, 'Evening out the levels...')
         thresh = integrated_lufs(x, sr=sr, check_cancel=p.check_cancel) + 3.0
@@ -317,10 +351,25 @@ def render(
             sr=sr,
             check_cancel=p.check_cancel,
         )
-        comp_stats.update(engaged=True, mode='leveler', thresh_dbfs=round(thresh, 1))
-        steps.append('Evened out loud and quiet moments of the voice')
+        comp_stats.update(mode='leveler', thresh_dbfs=round(thresh, 1))
     else:
         comp_stats['skip_reason'] = 'off for this recipe'
+
+    if params.compressor in ('glue', 'leveler'):
+        comp_stats['engaged'] = comp_stats['max_gr_db'] > 0
+        if comp_stats['engaged']:
+            steps.append(f'Compressed louder moments (at most {comp_stats["max_gr_db"]:.1f} dB of reduction)')
+        else:
+            comp_stats['skip_reason'] = 'no measurable gain reduction'
+            steps.append('Compression made no measurable level change')
+
+    # --- de-esser (the stem-aware AI stage already treated the vocals) --------
+    if params.deess_db > 0 and not params.volume_only and not (use_ai and params.ai_stage == 'stem_eq'):
+        p(66, 'Softening sharp S sounds...')
+        mix = params.deess_mix and params.ai_stage != 'voice_isolate'
+        x, deess_stats = deess(x, sr, max_gr_db=params.deess_db, mix=mix, check_cancel=p.check_cancel)
+        if deess_stats.get('engaged'):
+            steps.append(_deess_step(deess_stats, 'and cymbal hits'))
 
     # --- light: DC offset (inaudible, but it eats headroom) --------------------
     tp_now = None  # true peak of x when already known
@@ -367,6 +416,7 @@ def render(
             'tp_before': round(tp_now, 3),
             'tp_after': round(tp_now, 3),
             'max_gr_db': 0.0,
+            'active_pct': 0.0,
             'skip_reason': 'peaks already below the ceiling',
         }
     else:
@@ -430,6 +480,8 @@ def render(
         'input': input_metrics,
         'loudness_gain_db': round(gain_db, 2),
         'compressor': comp_stats,
+        'deess': deess_stats,
+        'adaptive_lowmid': adaptive_stats,
         'limiter': tp_stats,
         'steps': steps,
         'ai': ai_report,

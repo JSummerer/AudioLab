@@ -10,7 +10,7 @@ For first-time setup, use the [Mac app guide](MACOS.md) or [source installation 
 
 1. Choose **New → Choose files** and select an audio file, or paste a supported web link and press **Load**.
 2. Pick **Convert** for a file (**Save** for a link), **Enhance** to process it, or **Check** to inspect it. Defaults are a good
-   starting point; **Light** enhancement mainly adjusts volume.
+   starting point; **Volume only** enhancement mainly adjusts volume.
 3. Press the main action button. Follow progress in **Activity**, then play or download the result.
 
 Finished audio goes to **`Music/AudioLab`** in your home folder. Change that in **Settings → Files**.
@@ -29,8 +29,8 @@ site; a local file is the simplest starting point. For a playlist, choose the it
 Use only material you have permission to process.
 
 - **Save / Convert:** convert formats, save an original stream, or cut chapters/a pasted tracklist into tracks.
-- **Enhance:** choose a recipe or use Auto. Light quality mainly adjusts volume; Standard uses the
-  recipe's processing; Best adds the optional AI stage.
+- **Enhance:** choose a recipe or use Auto. Volume only mainly adjusts volume; Adaptive uses the
+  recipe's processing; AI stems adds the optional AI stage.
 - **Split:** produce vocals/instrumental or four stems using the optional AI pack.
 - **Check:** inspect measurements and a spectrogram. Tempo, musical key and content type are estimates.
   Frequency range can suggest limitations; it cannot prove a file's encoding history.
@@ -46,14 +46,16 @@ Kept originals use disk space separately from your output folder; manage them in
 
 ![Enhancement recipe, quality and output choices](img/enhance-options.png)
 
-| Quality | What changes | Needs AI? |
+| Processing | What changes | Needs AI? |
 |---|---|---|
-| **Light** | Mainly loudness; keeps the original tone | No |
-| **Standard** | Tone, dynamics and loudness using the chosen recipe | No |
-| **Best** | Adds an AI stage to the recipe; takes longer | Yes |
+| **Volume only** | Mainly loudness; keeps the original tone | No |
+| **Adaptive** | Tone, dynamics and loudness using the chosen recipe | No |
+| **AI stems** | Adds an AI stage to the recipe; takes longer | Yes |
 
-Start with Light or Standard. “Best” is a processing choice, not a guarantee that you will prefer the sound.
-The **Standard / Fine-tuned AI model** choice is separate from Enhance quality; see [hardware guidance](HARDWARE.md).
+Start with Volume only or Adaptive. AI stems can alter tone and is not a guarantee that you will prefer
+the sound. Earlier versions called these choices Light, Standard and Best; existing screenshots still
+show those names. The **Standard / Fine-tuned AI model** choice is separate from Enhance processing;
+see [hardware guidance](HARDWARE.md).
 
 Auto chooses from the same recipes you can select yourself:
 
@@ -65,9 +67,24 @@ Auto chooses from the same recipes you can select yourself:
 | Podcast / speech | Rumble filtering, clarity and more even volume |
 
 The app explains its choices, and you can override them. Noise reduction is off unless you explicitly
-choose it. Best quality can separate and recombine music stems or isolate speech before processing.
+choose it. The highs are lifted only when the measured top end is dull, and **Sharp S sounds** (Auto)
+softens S sounds and cymbal hits only where they jump out; choose Strong for harsh recordings or Off.
+AI stems can separate and recombine music stems or isolate speech before processing.
 These operations may change the sound in ways you dislike; compare before choosing your preferred result.
 Exporting a compressed source as WAV/FLAC does not restore missing detail.
+
+**Adaptive low-mids** checks the whole recording for brief rises around 180–480 Hz compared with nearby
+audio. Auto permits at most 1.5 dB reduction, Strong 3 dB; a small total-change budget can reduce that
+further. Steady warmth, sustained contrasts and short attacks are left alone in the detector's tested
+cases. It cannot identify musical intent: use Off if an intentional brief accent is softened. The result
+says how much it did, including when no change was needed. AI stem EQ bypasses this additional stage.
+**Bass harmonics** is separately off by default; changing Bass boost does not enable it.
+
+Each full-length export gets its own loudness and peak check. A warning means it exceeded the selected
+ceiling or could not be measured; try a lower ceiling or a lossless format when more headroom is needed.
+The file stays saved. Master readings describe the audio before encoding, and split tracks are not
+individually checked. Library's **Processing details** keeps settings, reasons, actual changes and
+file checks even after the job expires. Older entries have only the details they originally recorded.
 
 ## Cover art
 
@@ -101,13 +118,21 @@ Press **Play**, then switch between **Original** and **Enhanced** to hear the sa
 Use the timeline or **−10 s / +10 s** to move around.
 **Match volume** reduces the louder side for a fairer comparison. Turn it off to hear the actual level
 difference. It changes playback only, not the saved files.
+New full-length comparisons use the selected export's measured loudness; if it could not be measured,
+matching is unavailable. Earlier entries use their master-level estimate.
+
+Open **Repeat a section**, move the playhead and use **Set start** and **Set end**, then enable **Repeat**.
+The range must be at least one second. Points use a 40 ms grid; both versions repeat together, with
+short fades at the boundaries. Seeking outside the range turns Repeat off. A valid range also follows
+you between versions of the same recording.
 
 Choose **Compare with the original** on another enhanced version of the same recording to keep
 your position, selected side and volume-matching choice. If you were playing, playback continues
 after any brief buffering needed to load that version.
 Switching to another recording or an ordinary file player starts a separate listening session.
 
-Job pages may offer a shorter preview when a full comparison is unavailable. There is no Delta mode
+Job pages may offer a shorter preview of the final master when a full comparison is unavailable;
+it does not include output codec artifacts. There is no Delta mode
 in the current app; listening to Original and Enhanced is the supported comparison.
 
 ## Command line

@@ -55,8 +55,8 @@ recipe, format, task, view or support for another OS. The HTTP contract between 
 ## macOS binary delivery
 
 The binary targets macOS 14+ arm64. Its main download includes Save/Convert, Check and
-Light/Standard Enhance. Settings manages a separate immutable AI helper archive for Split and
-Best Enhance, with both offline models. The app never runs pip or changes shared environments.
+Volume only/Adaptive Enhance. Settings manages a separate immutable AI helper archive for Split and
+AI stems Enhance, with both offline models. The app never runs pip or changes shared environments.
 Source installation and the Windows/Linux browser paths remain separate.
 See [packaging/macos/README.md](packaging/macos/README.md) for the pinned build environment, selected
 FFmpeg sources/licenses, app entry, smoke checks and release artifacts.

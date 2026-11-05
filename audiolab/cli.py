@@ -461,6 +461,11 @@ def main(argv=None) -> int:
     p.add_argument('--bass', type=float, help='bass boost in dB (0–6)')
     p.add_argument('--denoise', choices=['off', 'light', 'strong'])
     p.add_argument('--restore-highs', action='store_true', help='regenerate missing treble on lossy sources')
+    p.add_argument('--deess', choices=['auto', 'off', 'strong'], help='soften sharp S sounds (default auto)')
+    p.add_argument(
+        '--adaptive-lowmid', choices=['auto', 'off', 'strong'], help='control brief low-mid rises (default auto)'
+    )
+    p.add_argument('--harmonics', choices=['on', 'off'], help='add bass harmonics for small speakers (default off)')
     p.add_argument('--sample-rate', type=int, choices=[44100, 48000, 96000])
 
     def run_enhance(a):
@@ -470,6 +475,9 @@ def main(argv=None) -> int:
             'bass_db': a.bass,
             'denoise': a.denoise,
             'hf_restore': 'on' if a.restore_highs else None,
+            'deess': a.deess,
+            'adaptive_lowmid': a.adaptive_lowmid,
+            'harmonics': a.harmonics,
             'sample_rate': a.sample_rate,
         }
         opts = {

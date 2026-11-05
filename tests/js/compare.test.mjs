@@ -2,7 +2,7 @@
 // No browser, network, personal audio, or npm dependency is used by these regressions.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { comparePlayer } from '../../audiolab/web/js/compare.js';
+import { comparePlayer, libraryCompare } from '../../audiolab/web/js/compare.js';
 
 class FakeNode {
   constructor(tag = '', text = '') {
@@ -14,6 +14,8 @@ class FakeNode {
     this.className = '';
     this._text = text;
     this.hidden = false;
+    this.checked = false;
+    this.disabled = false;
     this.dataset = {};
     this.style = { setProperty() {} };
     this.classList = {
@@ -30,7 +32,7 @@ class FakeNode {
   setAttribute(key, value) {
     this.attributes.set(key, value);
     if (['id', 'value', 'min', 'max', 'type'].includes(key)) this[key] = value;
-    if (['hidden', 'checked'].includes(key)) this[key] = true;
+    if (['hidden', 'checked', 'disabled'].includes(key)) this[key] = true;
   }
   getAttribute(key) { return this.attributes.get(key); }
   removeAttribute(key) { this.attributes.delete(key); }
@@ -88,6 +90,24 @@ class FakeNode {
 const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
 const find = (root, predicate) => predicate(root) ? root : root.children.map((c) => find(c, predicate)).find(Boolean);
 const button = (root, label) => find(root, (n) => n.tagName === 'button' && n.getAttribute('aria-label') === label);
+const toggle = (root, label) => find(root, (n) => n.getAttribute('role') === 'switch' && n.getAttribute('aria-label') === label);
+const seekTo = (root, value) => {
+  const seek = root.querySelector('.ab-seek');
+  seek.value = value;
+  seek.fire('change');
+};
+function markRepeat(root, start, end) {
+  for (const [point, value] of [['start', start], ['end', end]]) {
+    seekTo(root, value);
+    find(root, (n) => n.tagName === 'button' && n.textContent === `Set ${point}`).click();
+  }
+  return toggle(root, 'Repeat');
+}
+function enableRepeat(input) {
+  assert.equal(input.disabled, false);
+  input.checked = true;
+  input.fire('change');
+}
 
 function setup(t) {
   const names = ['Node', 'document', 'window', 'navigator', 'location', 'localStorage', 'fetch',
@@ -101,17 +121,25 @@ function setup(t) {
   });
   const env = { contexts: [], requests: [], timers: new Map(), mode: 'ok', library: null, totalFrames: 20 * 48000 };
   let serial = 0;
-  const parameter = () => ({ value: 1,
-    cancelScheduledValues() {}, setValueAtTime(v) { this.value = v; },
-    setTargetAtTime(v) { this.value = v; }, linearRampToValueAtTime(v) { this.value = v; },
+  const parameter = () => ({ value: 1, events: [],
+    cancelScheduledValues() {},
+    setValueAtTime(v, when) { this.value = v; this.events.push(['set', v, when]); },
+    setTargetAtTime(v) { this.value = v; },
+    linearRampToValueAtTime(v, when) { this.value = v; this.events.push(['ramp', v, when]); },
   });
   class FakeContext {
     constructor() { this.currentTime = 0; this.sampleRate = 48000; this.state = 'suspended';
-      this.sources = []; this.suspends = 0; env.contexts.push(this); }
-    createGain() { return { gain: parameter(), connect() {} }; }
+      this.sources = []; this.gains = []; this.suspends = 0; env.contexts.push(this); }
+    createGain() {
+      const node = { gain: parameter(),
+        connect(destination) { this.destination = destination; },
+        disconnect() { this.destination = null; } };
+      this.gains.push(node);
+      return node;
+    }
     createBuffer(channels, length) { return { length, getChannelData: () => new Float32Array(length) }; }
     createBufferSource() {
-      const source = { starts: [], stops: [], connect() {}, disconnect() {},
+      const source = { starts: [], stops: [], connect(node) { this.connectedTo = node; }, disconnect() {},
         start(at) { this.starts.push(at); }, stop(at) { this.stops.push(at); } };
       this.sources.push(source);
       return source;
@@ -138,7 +166,8 @@ function setup(t) {
     }
   };
   env.pcm = (request) => {
-    const frames = Math.max(0, Math.min(request.frames, env.totalFrames - request.offset));
+    const total = request.path.endsWith('/result') ? (env.resultFrames ?? env.totalFrames) : env.totalFrames;
+    const frames = Math.max(0, Math.min(request.frames, total - request.offset));
     return { ok: true, arrayBuffer: async () => new Float32Array(frames * 2).buffer };
   };
   globalThis.fetch = async (path, options = {}) => {
@@ -273,6 +302,176 @@ test('a snapshot taken after audio ends cannot revive playback in the next versi
   assert.equal(second.snapshot().playing, false);
 });
 
+test('a short repeat schedules both sides at exactly the same boundaries and reuses PCM through wraps', async (t) => {
+  const env = setup(t);
+  const player = env.create();
+  const repeat = markRepeat(player.el, 3.16, 6.36);
+  enableRepeat(repeat);
+  assert.equal(player.snapshot().time, 3.16);
+  button(player.el, 'Play').click();
+  await flush();
+  const ctx = env.contexts[0];
+  for (let i = 1; i <= 51; i++) {
+    ctx.currentTime = i / 5;
+    env.runTimers(200);
+    await flush();
+  }
+  assert.deepEqual(env.requests.map(({ offset, frames }) => [offset, frames]),
+    [[151680, 96000], [151680, 96000], [247680, 57600], [247680, 57600]]);
+  assert.ok(ctx.sources.length >= 16); // at least four passes of both chunks
+  for (let i = 0; i < ctx.sources.length; i += 2) {
+    const [a, b] = ctx.sources.slice(i, i + 2);
+    const phase = i / 2;
+    const expected = ctx.sources[0].starts[0] + Math.floor(phase / 2) * 3.2 + (phase % 2 ? 2 : 0);
+    assert.equal(a.starts[0], b.starts[0]);
+    assert.ok(Math.abs(a.starts[0] - expected) < 1e-10);
+    assert.equal(a.buffer.length, phase % 2 ? 57600 : 96000);
+    assert.equal(b.buffer.length, a.buffer.length);
+  }
+  assert.equal(player.snapshot().time, 3.71);
+  player.pause();
+  env.runTimers(200);
+  assert.equal(ctx.state, 'suspended');
+  assert.ok(ctx.sources.at(-1).stops.length);
+  assert.deepEqual(player.snapshot().repeat, { start: 3.16, end: 6.36, enabled: true });
+});
+
+test('repeat fades match on both sides and only touch the edges of the selected range', async (t) => {
+  const env = setup(t);
+  for (const { end, fades } of [
+    { end: 3.24, fades: [[true, true], [true, true]] }, // both edges in one chunk
+    { end: 5.2, fades: [[true, false], [false, true], [true, false]] }, // split after 2 s, then wrap
+  ]) {
+    const player = env.create();
+    enableRepeat(markRepeat(player.el, 2, end));
+    button(player.el, 'Play').click();
+    await flush();
+    const { sources, gains } = env.contexts.at(-1);
+    fades.forEach(([fadeIn, fadeOut], i) => {
+      const pair = sources.slice(i * 2, i * 2 + 2);
+      assert.equal(pair.length, 2);
+      assert.equal(pair[0].starts[0], pair[1].starts[0]);
+      for (const [side, source] of pair.entries()) {
+        assert.equal(source.connectedTo.destination, gains[side + 1]);
+        const expected = [];
+        const rampFrames = 576; // 12 ms at 48 kHz
+        if (fadeIn) expected.push(['set', 0, 0], ['ramp', 1, rampFrames]);
+        if (fadeOut) expected.push(['set', 1, source.buffer.length - rampFrames], ['ramp', 0, source.buffer.length]);
+        const events = source.connectedTo.gain.events.map(([event, value, time]) =>
+          [event, value, Math.round((time - source.starts[0]) * 48000)]);
+        assert.deepEqual(events, expected);
+      }
+    });
+    sources[0].onended();
+    assert.equal(sources[0].connectedTo.destination, null);
+    player.destroy();
+  }
+});
+
+test('long repeats stop fetching at the selected end and a seek outside leaves repeat mode', async (t) => {
+  const env = setup(t);
+  const player = env.create();
+  const repeat = markRepeat(player.el, 2, 14.32);
+  enableRepeat(repeat);
+  button(player.el, 'Play').click();
+  await flush();
+  const ctx = env.contexts[0];
+  for (const seconds of [6.2, 9, 13]) {
+    ctx.currentTime = seconds;
+    env.runTimers(200);
+    await flush();
+  }
+  const offsets = env.requests.filter((r) => r.path.endsWith('/original')).map(({ offset, frames }) => [offset, frames]);
+  assert.deepEqual(offsets, [[96000, 96000], [192000, 384000], [576000, 111360], [96000, 384000]]);
+  assert.ok(Math.abs(ctx.sources[6].starts[0] - (ctx.sources[0].starts[0] + 12.32)) < 1e-10);
+  seekTo(player.el, 18);
+  await flush();
+  assert.equal(repeat.checked, false);
+  assert.equal(env.requests.findLast((r) => r.path.endsWith('/original') && r.offset === 18 * 48000).frames, 96000);
+  assert.ok(ctx.sources[6].stops.length);
+});
+
+test('the timeline can mark the final grid point and seeking to it leaves repeat mode', async (t) => {
+  const env = setup(t);
+  const player = env.create();
+  const repeat = markRepeat(player.el, 18, 20);
+  enableRepeat(repeat);
+  assert.deepEqual(player.snapshot().repeat, { start: 18, end: 20, enabled: true });
+  button(player.el, 'Play').click();
+  await flush();
+  seekTo(player.el, 20);
+  await flush();
+  assert.equal(repeat.checked, false);
+  assert.equal(env.requests.at(-1).offset, 19.96 * 48000);
+  const ctx = env.contexts[0];
+  ctx.currentTime = 1;
+  env.runTimers(200);
+  assert.equal(player.snapshot().time, 20);
+  assert.equal(player.snapshot().playing, false);
+});
+
+test('repeat rejects a short range and stops repeating if one side reaches an earlier end', async (t) => {
+  const env = setup(t);
+  const player = env.create();
+  assert.equal(markRepeat(player.el, 2, 2.96).disabled, true);
+  const repeat = markRepeat(player.el, 2, 3.6);
+  env.resultFrames = 3 * 48000;
+  enableRepeat(repeat);
+  button(player.el, 'Play').click();
+  await flush();
+  assert.equal(repeat.checked, false);
+  assert.equal(repeat.disabled, true);
+  assert.match(player.el.querySelector('.cmp-repeat-note').textContent, /One version ends before this range/);
+  assert.equal(player.snapshot().playing, false);
+  assert.equal(env.requests.length, 2);
+  assert.equal(env.contexts[0].sources.length, 0);
+});
+
+test('pending repeat audio is discarded after an in-range seek, pause and destroy', async (t) => {
+  const env = setup(t);
+  const player = env.create();
+  env.mode = 'deferred';
+  enableRepeat(markRepeat(player.el, 2, 6));
+  button(player.el, 'Play').click();
+  seekTo(player.el, 4.4);
+  assert.equal(toggle(player.el, 'Repeat').checked, true);
+  const [first, seek] = [env.requests.slice(0, 2), env.requests.slice(2, 4)];
+  assert.ok(first.every((r) => r.signal.aborted));
+  first.forEach((r) => r.resolve());
+  await flush();
+  assert.equal(env.contexts[0].sources.length, 0);
+  seek.forEach((r) => r.resolve());
+  await flush();
+  assert.equal(env.contexts[0].sources.length, 2);
+  const next = env.requests.slice(4);
+  assert.equal(next.length, 2);
+  player.pause();
+  player.destroy();
+  assert.ok(next.every((r) => r.signal.aborted));
+  next.forEach((r) => r.resolve());
+  await flush();
+  assert.equal(env.contexts[0].sources.length, 2);
+  assert.equal(env.contexts[0].state, 'closed');
+});
+
+test('a repeat can retry a transient read error without losing its range', async (t) => {
+  const env = setup(t);
+  const player = env.create();
+  const repeat = markRepeat(player.el, 2, 5.2);
+  enableRepeat(repeat);
+  env.mode = 'failure';
+  button(player.el, 'Play').click();
+  await flush();
+  assert.equal(player.snapshot().playing, false);
+  assert.equal(repeat.checked, true);
+  assert.equal(env.contexts[0].sources.length, 0);
+  env.mode = 'ok';
+  find(player.el, (n) => n.tagName === 'button' && n.textContent.includes('Try again')).click();
+  await flush();
+  assert.equal(player.snapshot().playing, true);
+  assert.deepEqual(player.snapshot().repeat, { start: 2, end: 5.2, enabled: true });
+});
+
 let librarySerial = 0;
 async function librarySetup(t, entries) {
   const env = setup(t);
@@ -296,6 +495,43 @@ const entry = (id, group = 'file:test', duration_s = 20) => ({ id, group, durati
   task: 'enhance', title: 'Generated fixture', source: { kind: 'file', name: 'fixture.wav' },
   original: { kept: true }, loudness: { original_lufs: -20, result_lufs: -14 }, compare_file_id: 'f0',
   files: [{ id: 'f0', name: 'fixture.wav', label: 'WAV', kind: 'enhanced', mime: 'audio/wav', playable: true, exists: true }] });
+
+test('Library matches volume using the chosen export, including when its peak check warns', async (t) => {
+  const env = setup(t);
+  const result = entry('level');
+  result.files.push({ id: 'other', label: 'MP3', verification: { status: 'verified', integrated_lufs: -10 } });
+  result.files[0].verification = { status: 'warning', integrated_lufs: -18 };
+  const player = libraryCompare(result);
+  t.after(() => player.destroy());
+  button(player.el, 'Play').click();
+  await flush();
+  const resultGain = env.contexts[0].gains[2].gain;
+  assert.ok(Math.abs(resultGain.value - 10 ** (-2 / 20)) < 1e-10);
+  assert.match(player.el.querySelector('.cmp-volume-note').textContent, /2\.0 dB louder/);
+  assert.ok(env.requests.some((r) => r.path.endsWith('/f0')));
+});
+
+test('a new export with no reliable loudness cannot use the legacy master level', async (t) => {
+  const env = setup(t);
+  for (const verification of [null, { status: 'unverified', integrated_lufs: null },
+    { status: 'verified', integrated_lufs: null }]) {
+    const result = entry('unverified');
+    result.files[0].verification = verification;
+    const player = libraryCompare(result);
+    const match = toggle(player.el, 'Match volume');
+    assert.equal(match.disabled, true);
+    assert.equal(match.checked, false);
+    assert.match(player.el.querySelector('.cmp-volume-note').textContent, /needs a loudness measurement/);
+    button(player.el, 'Play').click();
+    await flush();
+    assert.equal(env.contexts.at(-1).gains[2].gain.value, 1);
+    player.destroy();
+  }
+  const legacy = libraryCompare(entry('legacy'));
+  t.after(() => legacy.destroy());
+  assert.equal(toggle(legacy.el, 'Match volume').checked, true);
+  assert.match(legacy.el.querySelector('.cmp-volume-note').textContent, /6\.0 dB louder/);
+});
 
 test('Library same-recording click preserves playback, side and match choice; unrelated groups reset', async (t) => {
   const env = await librarySetup(t, [entry('one'), entry('two'), entry('other', 'file:other')]);
@@ -331,6 +567,48 @@ test('Library programmatic opens retain position but do not resume sound', async
   assert.ok(button(env.card('two'), 'Play'));
   assert.equal(env.contexts.length, 1);
   assert.equal(env.contexts[0].state, 'closed');
+});
+
+test('Library repeat range follows versions of the same recording when it fits', async (t) => {
+  const env = await librarySetup(t, [entry('one'), entry('two'), entry('shorter', 'file:test', 4)]);
+  env.open('one');
+  enableRepeat(markRepeat(env.card('one'), 2, 6));
+  button(env.card('one'), 'Play').click();
+  await flush();
+  env.open('two');
+  await flush();
+  assert.equal(toggle(env.card('two'), 'Repeat').checked, true);
+  assert.ok(button(env.card('two'), 'Pause'));
+  assert.match(env.card('two').querySelector('.cmp-repeat-note').textContent, /Start 0:02\.00 · End 0:06\.00/);
+  env.open('shorter', false);
+  assert.equal(toggle(env.card('shorter'), 'Repeat').checked, false);
+  assert.equal(toggle(env.card('shorter'), 'Repeat').disabled, true);
+  assert.ok(button(env.card('shorter'), 'Play'));
+});
+
+test('an unavailable match preserves the user’s volume preference across Library versions', async (t) => {
+  const first = entry('one');
+  const unavailable = entry('unavailable');
+  unavailable.files[0].verification = { status: 'unverified', integrated_lufs: null };
+  const env = await librarySetup(t, [first, unavailable, entry('two')]);
+  env.open('one');
+  const match = toggle(env.card('one'), 'Match volume');
+  match.checked = false;
+  match.fire('change');
+  button(env.card('one'), 'Play').click();
+  await flush();
+  env.open('unavailable');
+  await flush();
+  const disabled = toggle(env.card('unavailable'), 'Match volume');
+  assert.equal(disabled.disabled, true);
+  assert.equal(disabled.checked, false);
+  assert.equal(env.contexts.at(-1).gains[2].gain.value, 1);
+  env.open('two');
+  await flush();
+  const next = toggle(env.card('two'), 'Match volume');
+  assert.equal(next.disabled, false);
+  assert.equal(next.checked, false);
+  assert.equal(env.contexts.at(-1).gains[2].gain.value, 1);
 });
 
 test('Library plain files and missing group identity never inherit comparison transport', async (t) => {

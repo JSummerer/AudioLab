@@ -139,7 +139,7 @@ def preflight(
             hints.append(
                 f'Split a shorter piece, or use {faster}.'
                 if task == 'separate'  # Split has no other quality to fall back on
-                else f'Use Standard quality (no AI) for long recordings, or use {faster}.'
+                else f'Use Adaptive processing (no AI) for long recordings, or use {faster}.'
             )
 
         mem = memory_report()

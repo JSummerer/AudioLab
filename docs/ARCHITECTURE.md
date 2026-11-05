@@ -24,7 +24,7 @@ line and the Docker image.
 │ yt-dlp  │ │ profile   │   │  params +    │ │ Demucs    │ │ excerpt for│
 │ ffmpeg  │ │ classify  │   │  one chain   │ │ (optional)│ │ comparing  │
 │ export  │ └─────┬─────┘   └───────┬──────┘ └───────────┘ └────────────┘
-└─────────┘       └──────── dsp/ ───┘   filters · bus · loudness · limiter · dither · denoise · exciter
+└─────────┘       └──────── dsp/ ───┘   filters · bus · loudness · limiter · dither · denoise · exciter · deess
 
    system.py — the only module that knows the operating system (used by all of the above)
 ```
@@ -43,11 +43,12 @@ line and the Docker image.
 | `context.py` | `Progress` (scoped progress, journal notes, cancellation, child-process registry) and `TaskContext` (stages of one job) |
 | `tasks/` | The four user-facing tasks (`validate`, `stages`, `run`); `common.py` acquires sources and publishes outputs |
 | `media/` | `proc.py` (cancellable subprocesses), `ffmpeg.py` (system or bundled ffmpeg, probing incl. embedded tags, `decode_pcm`: 48 kHz chunks on a 1/25 s grid that join like one decode; WebM/Matroska's millisecond timestamps get a seek offset measured once per file), `youtube.py` (yt-dlp + deno, the artist/title rule for links, tracks from chapters/tracklists, self-repair update, browser sign-in), `export.py` (format matrix, the file types that can be added, tags, cover art, sample-accurate track cutting) |
-| `analysis/` | `profile.py` (loudness, true peak, LRA, bandwidth, bands, alerts), `classify.py` (content type + reasons), `key.py` (musical key estimate) |
+| `analysis/` | `profile.py` (loudness, true peak, LRA, bandwidth, bands, alerts), `levels.py` (bounded whole-reference level scan), `classify.py` (content type + reasons), `key.py` (musical key estimate) |
 | `recipes/` | `Recipe` + `ChainParams`, `resolve()` turns recipe + measurements + user overrides into parameters *with reasons*; `chain.render()` is the single mastering chain |
 | `ai/` | Lazy source torch/demucs detection and windowed separation; `install.py` installs source packages, `managed.py` owns the catalog-pinned packaged runtime lifecycle selected by `api/state.py`, `client.py` invokes the isolated helper, `worker.py` runs/probes it and loads local offline weights |
 | `dsp/` | Float32 signal-processing blocks, with streamed filters; whole Enhance still holds full-length arrays, so total memory grows with duration |
 | `previews.py` | The Enhance before/after excerpt (a loud 45 s passage, or the whole recording when shorter) at the true relative level, one shared headroom gain; compared when the original isn't kept |
+| `processing.py` | Bounded, path-free projection of resolved and applied Enhance processing for results and durable Library history; legacy entries remain readable |
 | `settings.py` | Data/output folders (the output folder is only resolved here, never created: whatever writes creates it), env-var limits (`AUDIOLAB_*`), persisted user preferences (checked on load/update; a new snapshot becomes active only after saving succeeds) |
 | `resources.py` | Memory/disk/duration preflight, run before any big download; also refuses an output folder that can't be written to |
 | `diagnostics.py` | Log file setup and the plain-text system/job report for bug reports (`/api/diagnostics`, `audiolab doctor --report`) |
@@ -78,10 +79,10 @@ It starts the same native window/server/task pipeline without `start.sh`, uv, pi
 Its private downloader mode dispatches yt-dlp inside the frozen executable; that executable is not a
 general-purpose Python interpreter. `runtime.py` chooses this mode and the bundled FFmpeg/Deno.
 
-The main app exposes Save/Convert, Check and Light/Standard Enhance without AI. Since version 2.4.0b2 it
+The main app exposes Save/Convert, Check and Volume only/Adaptive Enhance without AI. Since version 2.4.0b2 it
 offers a managed optional add-on containing a frozen AI helper and both
 supported model choices; the main app's bundled Python packages remain immutable. `ai.install_supported`
-is driven by a build-generated, bundled catalog, not simply `packaged`. Split/Best use the healthy
+is driven by a build-generated, bundled catalog, not simply `packaged`. Split/AI stems use the healthy
 managed helper when present. Source/CLI/Docker keep their existing optional-AI and update paths.
 Downloader self-updates remain disabled in packaged mode; replace the app to update the main delivery.
 
@@ -201,25 +202,52 @@ returns `413`. The route must parse the whole form before sending a response.
 ## Enhance in detail
 
 ```
-acquire ─▶ decode to a float working copy ─▶ profile (whole file up to 3 min, 3×30 s excerpts up to 20 min, 5×24 s beyond)
+acquire ─▶ decode to a float working copy ─▶ profile (whole-file levels; spectral excerpts beyond 3 min)
         ─▶ classify (metadata + audio features) ─▶ recipe_for_type ─▶ resolve(params, decisions)
-        ─▶ chain.render: [AI stage] → HPF → (denoise) → tonal EQ → (HF restore)
-                         → (sub-harmonics) → (mono bass) → (glue / leveler)
+        ─▶ chain.render: [AI stage] → HPF → (denoise) → adaptive low-mids + tonal EQ → (HF restore)
+                         → (sub-harmonics) → (mono bass) → (glue / leveler) → (de-esser)
                          → loudness → true-peak limiter → dither
-        ─▶ previews ─▶ export (all formats, tags, cover) into "<Title> (Enhanced)/"
+        ─▶ previews ─▶ export + file checks (all formats, tags, cover) into "<Title> (Enhanced)/"
 ```
 
 Light quality skips the AI, tone, bass and dynamics stages; it still removes a DC offset when there is
 one, then sets loudness and runs the true-peak limiter. Rules the chain follows:
-preservation first (only the `club` recipe uses bold moves by default), every automatic choice has a
+preservation first (only the `club` recipe uses bold moves by default), the highs are lifted only where
+the profile's `top_end` measurement says they are dull (never on a compressed source) and the clarity lift
+is dropped on a bright one, the de-esser softens only spikes measured against the track's own typical
+S-band share (in Best's stem-aware stage, on the separated vocals only), every automatic choice has a
 `why`, quality gates are enforced (true-peak ceiling re-checked; a failed AI reconstruction falls back
 to the DSP chain).
 
+`dsp/adaptive.py` replaces the automatic static low-mid cut with relative, time-varying control.
+It analyzes every 100 ms against the surrounding 20 s, using channel energy so out-of-phase stereo
+does not disappear from detection. Only isolated 0.3–3 s rises in 180–480 Hz qualify, with a 6 dB
+relative margin and an audible-level gate. Pinning each event's reference prevents a sustained
+change from appearing brief as the moving reference catches up. Duration checks bridge up to two
+intervening 100 ms dips, including quiet ones; those dips gain no processing eligibility. This can
+conservatively leave closely spaced events alone. A 300 ms gain envelope subtracts
+the zero-phase band; maximum reduction is 1.5 dB (3 dB in Strong), with a 0.25 dB modeled whole-band
+energy budget. These conservative defaults are engineering hypotheses, not a learned preferred tone.
+The control runs before bass boosts/harmonics, skips AI stem EQ, and runs on AI fallback. Volume only
+bypasses it. The old static cut remains available only to direct `ChainParams` callers and cannot
+stack with the new stage. Bass harmonics are separately opt-in.
+
+`media/verification.py` decodes each complete Enhance export once to measure native-rate loudness
+and a 192 kHz true-peak estimate, including buffered tail samples. A ceiling miss or failed check
+retains the output and adds a warning; it never silently re-masters a format. Split tracks are not
+individually checked. Master and file measurements remain distinct. The compare player uses the
+selected export's loudness; master excerpts still use master measurements. Its optional repeat range
+uses 40 ms grid points and schedules both sides together, caching at most 8 s for short repeats.
+These checks do not qualify sonic preference or every codec implementation.
+
 Noise reduction stays off unless explicitly chosen; quiet programme levels are not evidence of noise.
 Profile and classification share the already measured LRA, and bandwidth uses the profile's existing
-Welch spectrum; the classifier's time-resolved spectrum serves a different purpose. A silent excerpt
-triggers a cancellable whole-file scan with bounded blocks, then a bounded excerpt anchored at detected
-sound. This does not make every reading a whole-file measurement. A successful AI stage transfers its
+Welch spectrum; the classifier's time-resolved spectrum serves a different purpose. Long-file levels
+use 10 s reads with overlap for true peak and carried K-weighting state; only scalar energy windows
+remain in memory. Loudness, LRA, peaks, clipping, DC and programme percentiles cover the whole file.
+Spectrum, stereo, key and classifier features still use 3×30 s excerpts up to 20 min, 5×24 s beyond;
+silent excerpts are replaced with a bounded excerpt anchored at sound found by the level scan.
+Separate basis fields prevent mistaking these estimates for complete spectral coverage. A successful AI stage transfers its
 audio array to the chain rather than retaining a second obsolete buffer through the remaining DSP.
 
 ## Extending

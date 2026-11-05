@@ -112,10 +112,30 @@ and they may still list a `difference` preview ("Only the changes", gone in 2.4)
 `is_silent`, `dc_offset`, and the source's own format: `samplerate`, `channels`, `source_audio_codec`,
 `source_bitrate_kbps` (the analysis itself runs on a 48 kHz stereo copy),
 `alerts` (`[{"level": "ok|info|warning|danger", "title", "message"}]`).
-Long recordings are measured from bounded excerpts (`analysis_basis` describes them). If those excerpts
-are silent, a cancellable scan checks the file and anchors a new excerpt to detected sound.
+Loudness, LRA, true peak, clipping, DC and programme-level percentiles cover the whole reference
+(`level_analysis_basis`). Long recordings still use bounded excerpts for spectrum, stereo, key and
+classifier features (`analysis_basis` describes these). If those excerpts are silent, the whole-file
+level scan anchors a new spectral excerpt to detected sound. Older results may have excerpt-only levels.
 Legacy `noise_floor_db` and `snr_db` fields describe the lower programme-level percentile and its spread;
 they do not identify background noise or measure signal-to-noise ratio.
+
+New Enhance results also include `processing: {params, applied}`: resolved chain parameters and
+actual `loudness_gain_db`, `steps`, `compressor`, `deess`, `limiter`, `ai`, `adaptive_lowmid` reports.
+The adaptive report has `engaged`, a `skip_reason` when unchanged, or `max_gr_db`, `active_pct`,
+`band_change_db` (modeled band-energy change), and up to 12 strongest `events`
+(`start_s`, `end_s`, `max_gr_db`, in recording time). Its configuration/coverage fields are
+`band_hz`, `analysis_hop_s`, `reference_window_s`, `margin_db`, `cap_db`, `windows_total`,
+`candidate_pct`, `sustained_pct`. Missing stages/fields mean unavailable, not zero processing.
+
+Each full-length Enhance file has `verification: {status, integrated_lufs, true_peak_dbtp,
+ceiling_dbtp, ceiling_met, tolerance_db, message}`. Status is `verified` (peak within the ceiling),
+`warning` (ceiling missed), or `unverified` (measurement failed). A complete decode measures
+integrated loudness at the file's rate and estimates true peak at 192 kHz; `tolerance_db` is 0.05.
+Loudness is `null` below the meter's gate or without a complete 400 ms block; a silent peak is `null`.
+For `unverified`, the readings and `ceiling_met` are `null`. Failures/misses also enter `warnings`;
+the saved file is retained, without automatic re-encoding. Split tracks are not individually checked.
+`metrics.after` still describes the master, before export; the checks are measurements at creation,
+not proof that a file has not been edited later or that every decoder will produce identical peaks.
 
 ---
 
@@ -131,9 +151,16 @@ they do not identify background noise or measure signal-to-noise ratio.
 `enhance.advanced` (all optional, omitted = auto except noise reduction, which stays off):
 `target_lufs` (number), `tp_ceiling_db` (number, −3…−0.1), `bass_db` (0…6), `glue` (`"on"|"off"`),
 `hf_restore` (`"on"|"off"`), `denoise` (`"off"|"light"|"strong"`), `mono_bass` (`"on"|"off"`),
+`deess` (`"auto"|"off"|"strong"`: sharp S sounds, softened only where they jump out; auto takes up to
+3 dB off a mix, 4 off a voice or Best's separated vocals, strong up to 6),
+`adaptive_lowmid` (`"auto"|"off"|"strong"`: whole-recording relative low-mid control, at most 1.5 dB
+in Auto or 3 dB in Strong; bypassed while AI stem EQ runs), `harmonics` (`"on"|"off"`, default off;
+independent of `bass_db`),
 `sample_rate` (44100 | 48000 | 96000), `model` (an `ai_models` key, used with `quality: "best"`).
 `quality: "best"` uses the AI stage of the recipe (stem-aware EQ for music, voice isolation for speech)
 and requires the AI pack.
+The UI calls these modes **Volume only**, **Adaptive**, and **AI stems**; the API values remain
+`light`, `standard`, `best` for compatibility. AI stems is a different process, not a quality guarantee.
 Noise reduction is explicit-only: choose `denoise: "light"` or `"strong"` when wanted.
 The programme-level percentiles cannot reliably distinguish noise from quiet desired content.
 
@@ -284,7 +311,7 @@ detail.
 ### Health
 ```jsonc
 {
-  "app": "AudioLab", "version": "2.4.0b3", "local": true, "packaged": false,
+  "app": "AudioLab", "version": "2.4.0b4", "local": true, "packaged": false,
   "ffmpeg": {"ok": true, "version": "7.1", "source": "system" | "bundled", "error": null},
   "downloader": {"ok": true, "version": "2026.08.19", "age_days": 47, "update_supported": true},
   "ai": {"available": false, "device": null, "reason": "AI pack not installed", "install_supported": true, "installing": false,
@@ -414,6 +441,15 @@ characters → `400`.
 Every job that finishes with files (Save, Enhance, Split — not Check) is recorded in the Library, which outlives
 the job (jobs expire after `AUDIOLAB_RETENTION_DAYS`, "Clear finished" removes them; the Library keeps its
 entries until they are removed with `DELETE /api/library/{id}`). Runs from the command line are not recorded.
+New Enhance entries retain `processing: {requested, resolved, applied, metrics}` after job removal.
+`requested` holds validated recipe, quality, formats, advanced settings and cover/split switches;
+`resolved` holds `{recipe, params, decisions}`. `applied` and `metrics` use the Result fields above.
+The projection omits source paths, tracklists and raw tool errors, bounds strings/lists and rejects
+non-finite numbers. Older entries omit `processing`; no historical settings are invented.
+Enhanced `files[].verification` keeps the Result export checks except `message`. Library
+`loudness.result_lufs` remains the master measurement; the compare player uses the selected export's
+measured loudness when available. An explicitly unverified/unmeasurable export disables volume matching;
+legacy entries with no check use their original master-based estimate.
 An entry is the original plus the final output files — nothing else is written for it (no excerpts: comparing
 decodes the full files in chunks, `…/pcm/…`). For Enhance the acquired original is kept as it came — the
 downloaded stream (e.g. Opus in `.webm`) or the uploaded file, never a decoded WAV — only in AudioLab's data

@@ -1,6 +1,11 @@
 """True-peak limiter with 4x oversampling, max-pooling peak detection,
 min-hold plateau lookahead, and edge-replicated smoothing to avoid boundary dips.
 
+The gain moves on a 6 ms hold + 5 ms smoothing scale: the prototype's 2 ms + 0.5 ms
+recovered within ~2.5 ms of every over, an audio-rate gain wobble that spreads grit
+around cymbals and S sounds (~12 dB more energy 150-1500 Hz around a 7 kHz tone
+under limited kicks) for ~0.03 dB more loudness on dense material.
+
 The 4x oversampling is the expensive part (~2.5 s per pass on 10 min of stereo),
 so each limiter pass oversamples once: the same pass yields the needed gain and
 the true peak it was measured from. The optional `check_cancel` callable is
@@ -14,23 +19,28 @@ import numpy as np
 from scipy.ndimage import minimum_filter1d, uniform_filter1d
 from scipy.signal import resample_poly
 
+TRUE_PEAK_CONTEXT = 8192
 
-def true_peak_db(x: np.ndarray, os: int = 4, chunk: int = 1 << 20, check_cancel=None) -> float:
+
+def true_peak_db(
+    x: np.ndarray, os: int = 4, chunk: int = 1 << 20, check_cancel=None, *, span: tuple[int, int] | None = None
+) -> float:
     """4x-oversampled true peak (dBTP), computed in chunks.
 
     Each chunk is oversampled with `ctx` samples of real context on both sides,
     but only the chunk's OWN samples are measured: the context edges are where
     resample_poly assumes zeros beyond the slice and rings, which used to read
-    up to ~1 dB high and made the chain over-limit."""
+    up to ~1 dB high and made the chain over-limit. `span` limits measurement to
+    a region of x while the surrounding samples still provide context."""
     n = x.shape[0]
-    ctx = 8192
+    start, stop = span or (0, n)
     peak = 0.0
-    for s0 in range(0, n, chunk):
+    for s0 in range(start, stop, chunk):
         if check_cancel is not None:
             check_cancel()
-        a = max(0, s0 - ctx)
-        b = min(n, s0 + chunk + ctx)
-        L = min(chunk, n - s0)
+        L = min(chunk, stop - s0)
+        a = max(0, s0 - TRUE_PEAK_CONTEXT)
+        b = min(n, s0 + L + TRUE_PEAK_CONTEXT)
         y = resample_poly(x[a:b], os, 1, axis=0)
         own = y[(s0 - a) * os : (s0 - a + L) * os]
         if own.size:
@@ -47,7 +57,7 @@ def tp_need_gain(
     caught; like true_peak_db, only each chunk's own samples are used.
     With return_peak: (gain, true peak dBTP of x) from the same pass."""
     n = x.shape[0]
-    ctx = 8192
+    ctx = TRUE_PEAK_CONTEXT
     over = 10.0 ** (ceiling_db / 20.0)
     g = np.ones(n, dtype=np.float32)
     peak = 0.0
@@ -89,28 +99,32 @@ def tp_limit(
     x: np.ndarray,
     ceiling_db: float = -1.25,
     max_extra_gr_db: float = 4.0,
-    lookahead_ms: float = 2.0,
+    lookahead_ms: float = 6.0,
+    smooth_ms: float = 5.0,
     sr: int = 48000,
     max_passes: int = 3,
     check_cancel=None,
     in_place: bool = False,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Calibrated true-peak safety limiter:
-    Calculates needed gain -> 2ms min-hold plateau -> edge-replicated smoothing.
-    Repeats until under ceiling. `in_place=True` limits x itself (saves a full
-    copy on long programmes when the caller no longer needs the input).
+    Calculates needed gain -> min-hold plateau (`lookahead_ms`, centred) -> edge-replicated
+    smoothing (`smooth_ms`, never longer than the hold: a wider average would lift the gain
+    at the peak itself). Repeats until under ceiling. `in_place=True` limits x itself (saves
+    a full copy on long programmes when the caller no longer needs the input).
+    `active_pct`: the share of samples turned down by more than 0.5 dB.
     """
     g, tp_now = tp_need_gain(x, ceiling_db, return_peak=True, check_cancel=check_cancel)
     info = {'engaged': False, 'tp_before': round(tp_now, 3)}
     if tp_now <= ceiling_db:
         info['tp_after'] = info['tp_before']
         info['max_gr_db'] = 0.0
+        info['active_pct'] = 0.0
         return x, info
 
     x_out = x if in_place else x.copy()
     floor = np.float32(10.0 ** (-max_extra_gr_db / 20.0))
     L = max(1, int(lookahead_ms / 1000.0 * sr))
-    k = max(1, int(0.0005 * sr))  # 0.5 ms smoothing
+    k = max(1, min(L, int(smooth_ms / 1000.0 * sr)))
     g_total = np.ones(len(x), dtype=np.float32)
 
     for it in range(max_passes):
@@ -140,6 +154,11 @@ def tp_limit(
     # ~0.01 dB; a floating-point hair above the ceiling is not a real miss.
     info['ceiling_met'] = tp_final <= ceiling_db + 0.01
     info['max_gr_db'] = round(float(-20.0 * math.log10(max(1e-6, float(g_total.min())))), 2)
+    half_db = np.float32(10.0 ** (-0.5 / 20.0))
+    active = sum(
+        int(np.count_nonzero(g_total[s0 : s0 + (1 << 22)] < half_db)) for s0 in range(0, len(g_total), 1 << 22)
+    )
+    info['active_pct'] = round(100.0 * active / max(1, len(g_total)), 2)
     if not info['ceiling_met']:
         info['warning'] = (
             f'True peak {tp_final:.2f} dBTP still above ceiling after {max_passes} limiter passes '

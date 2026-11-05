@@ -8,12 +8,13 @@
 // One player is open at a time. The list is fetched on show and when a job finishes;
 // cards are kept and only rebuilt when their data changes, so a player keeps going
 // through a reload. #/library/<id> scrolls to that version and opens its comparison.
-import { h, icon, clear, append, fmtBytes, fmtDuration, fmtAgo } from '../dom.js';
+import { h, icon, clear, append, fmtBytes, fmtDuration, fmtAgo, fmtNum, fmtSigned } from '../dom.js';
 import { api } from '../api.js';
 import { store, on } from '../store.js';
 import { toast, toastError, callout, confirmDialog } from '../ui.js';
 import { jobPath, currentRoute } from '../router.js';
 import { libraryCompare, plainPlayer, libraryFileUrl, codecName } from '../compare.js';
+import { PROCESSING_LABELS } from './new/state.js';
 
 const TASK_ICON = { download: 'download', enhance: 'sparkle', separate: 'layers' };
 const REVEAL_LABEL = /Mac/i.test(navigator.platform || navigator.userAgent) ? 'Show in Finder' : 'Show in folder';
@@ -248,6 +249,7 @@ function fillCard(c, entry) {
   c.toggles = new Map();
   const files = (entry.files || []).filter((f) => f.kind !== 'original' && f.kind !== 'track');
   const tracks = (entry.files || []).filter((f) => f.kind === 'track').sort((a, b) => (a.track ?? 0) - (b.track ?? 0));
+  c.processing = processingDetails(entry, files, c.processing?.open);
   c.stage = h('div', { class: 'lib-stage', id: `${c.el.id}-player`, hidden: true });
   const when = dateText(entry.created_at, true);
   append(clear(c.el), [
@@ -257,6 +259,7 @@ function fillCard(c, entry) {
         when ? h('span', { class: 'lib-when' }, ` · ${when}`) : null),
       entryActions(c, entry)),
     files.length ? h('ul', { class: 'files' }, files.map((f) => fileRow(c, entry, f))) : null,
+    c.processing,
     tracks.length ? h('details', {
       class: 'disclosure lib-tracks', open: keep && tracks.some((t) => t.id === player.what),
     }, h('summary', null, `Tracks (${tracks.length})`), h('ul', { class: 'files' }, tracks.map((f) => fileRow(c, entry, f)))) : null,
@@ -267,6 +270,95 @@ function fillCard(c, entry) {
     const targets = [...c.el.querySelectorAll('a, button, summary')];
     (targets[focusIndex] || c.el).focus({ preventScroll: true });
   }
+}
+
+const OVERRIDES = {
+  target_lufs: ['Loudness target', ' LUFS'], tp_ceiling_db: ['Peak ceiling', ' dBTP'], bass_db: ['Bass punch', ' dB'],
+  glue: ['Compression'], hf_restore: ['Restore highs'], mono_bass: ['Mono bass'], denoise: ['Noise reduction'],
+  deess: ['Sharp S sounds'], harmonics: ['Bass harmonics'], adaptive_lowmid: ['Adaptive low-mids'],
+  sample_rate: ['Sample rate', ' Hz'], model: ['AI model'],
+};
+
+function processingDetails(entry, files, open) {
+  const checked = files.filter((f) => f.verification);
+  const p = entry.processing;
+  if (!p && !checked.length) return null;
+  const requested = p?.requested || {};
+  const resolved = p?.resolved || {};
+  const applied = p?.applied || {};
+  const recipe = requested.recipe === 'auto' ? 'Automatic' : resolved.recipe?.name;
+  const mode = PROCESSING_LABELS[requested.quality];
+  const formats = (requested.formats || []).map((key) =>
+    store.health?.formats?.enhance?.find((f) => f.key === key)?.label || files.find((f) => f.format === key)?.label || key);
+  const selected = [recipe, mode, ...formats].filter(Boolean).join(' · ');
+  const overrides = Object.entries(OVERRIDES).flatMap(([key, [label, unit = '']]) => {
+    const value = requested.advanced?.[key];
+    return value == null ? [] : [[label, `${value}${unit}`]];
+  });
+  for (const [key, label] of [['split_tracks', 'Split into tracks'], ['embed_cover', 'Embed cover'], ['save_cover', 'Save cover image']]) {
+    if (typeof requested[key] === 'boolean') overrides.push([label, requested[key] ? 'On' : 'Off']);
+  }
+  const steps = [...(applied.steps || [])];
+  if (applied.ai?.fallback) steps.push('The AI stage could not be used. Adaptive processing was applied.');
+  const adaptive = applied.adaptive_lowmid;
+  if (adaptive?.engaged === false && adaptive.skip_reason && !['off', 'no isolated low-mid rises needing control'].includes(adaptive.skip_reason)) {
+    steps.push(`Adaptive low-mid control stayed off: ${adaptive.skip_reason}.`);
+  }
+  const measured = [
+    [applied.loudness_gain_db, 'Loudness gain before peak limiting', ' dB', fmtSigned],
+    [applied.limiter?.corrective_gain_db, 'Extra gain reduction to protect peaks', ' dB', fmtSigned],
+    [adaptive?.engaged ? adaptive.active_pct : null, 'Time with active low-mid control', '%', fmtNum],
+  ].filter(([v]) => Number.isFinite(v));
+  const section = (label, ...body) => h('section', null, h('h4', null, label), ...body);
+  const anyWarning = checked.some((f) => f.verification.status === 'warning');
+  const anyUnverified = checked.some((f) => f.verification.status === 'unverified');
+  const checkNote = anyWarning ? ' · Export warning' : anyUnverified ? ' · Export check unavailable' : '';
+  return h('details', { class: 'disclosure lib-processing', open },
+    h('summary', null, `Processing details${checkNote}`),
+    h('div', { class: 'lib-processing-body small' },
+      steps.length || measured.length ? section('What changed',
+        steps.length ? h('ul', { class: 'plain-list' }, steps.map((step) => h('li', null, step))) : null,
+        measured.length ? h('dl', { class: 'facts' }, measured.map(([v, label, unit, fmt]) =>
+          [h('dt', null, label), h('dd', { class: 'num' }, `${fmt(v, 2)}${unit}`)])) : null) : null,
+      processingMeasurements(p?.metrics, section),
+      checked.length ? section('Export checks',
+        h('ul', { class: 'plain-list' }, checked.map((f) => exportCheck(f)))) : null,
+      selected || overrides.length ? section('Requested settings',
+        selected ? h('p', null, selected) : null,
+        overrides.length ? h('dl', { class: 'facts' }, overrides.map(([label, value]) =>
+          [h('dt', null, label), h('dd', null, value)])) : null) : null,
+      resolved.decisions?.length ? section('Settings used and why',
+        h('ul', { class: 'plain-list' }, resolved.decisions.map((d) =>
+          h('li', null, h('strong', null, `${d.label}: ${d.value}`), d.why ? ` — ${d.why}` : null)))) : null));
+}
+
+function processingMeasurements(metrics, section) {
+  const b = metrics?.before || {};
+  const a = metrics?.after || {};
+  const rows = [
+    ['lufs', 'Loudness', 'LUFS'], ['true_peak_dbtp', 'True peak', 'dBTP'], ['lra', 'Loudness range', 'LU'],
+  ].filter(([key]) => Number.isFinite(b[key]) || Number.isFinite(a[key]));
+  return rows.length ? section('Original and master',
+    h('p', { class: 'muted' }, 'The master is the audio before it is saved in your selected formats.'),
+    h('table', { class: 'data' },
+      h('thead', null, h('tr', null, h('th', { scope: 'col' }, 'Measurement'), h('th', { scope: 'col' }, 'Original'), h('th', { scope: 'col' }, 'Master'))),
+      h('tbody', null, rows.map(([key, label, unit]) => h('tr', null,
+        h('th', { scope: 'row' }, `${label} (${unit})`), h('td', { class: 'num' }, fmtNum(b[key])),
+        h('td', { class: 'num' }, fmtNum(a[key]))))))) : null;
+}
+
+function exportCheck(file) {
+  const check = file.verification;
+  const status = check.status === 'unverified' ? 'Could not check the saved file'
+    : check.ceiling_met === false ? 'Peak above the ceiling'
+      : check.status === 'verified' ? 'Peak within the ceiling' : 'Review the saved file';
+  const measurements = [
+    Number.isFinite(check.integrated_lufs) ? `${fmtNum(check.integrated_lufs, 2)} LUFS` : null,
+    Number.isFinite(check.true_peak_dbtp) ? `${fmtNum(check.true_peak_dbtp, 2)} dBTP` : null,
+    Number.isFinite(check.ceiling_dbtp) ? `ceiling ${fmtNum(check.ceiling_dbtp, 2)} dBTP` : null,
+  ].filter(Boolean);
+  return h('li', null, h('strong', null, file.label || file.name || 'Export'), ` — ${status}`,
+    measurements.length ? ` (${measurements.join(' · ')})` : null);
 }
 
 function taskLabel(entry) {

@@ -1,8 +1,8 @@
 # Building the macOS tester app
 
 This folder builds the application and its separate optional AI add-on. The main app bundles Python
-and native tools for Save/Convert, Check and Light/Standard Enhance. Settings can download the
-compatible add-on for Split and Best Enhance; testers install neither Python nor uv.
+and native tools for Save/Convert, Check and Volume only/Adaptive Enhance. Settings can download the
+compatible add-on for Split and AI stems Enhance; testers install neither Python nor uv.
 
 The **Build macOS tester app** workflow in GitHub Actions is the maintained release path. Start it
 manually from the Actions tab; it creates build artifacts without publishing a release.
@@ -59,10 +59,10 @@ dependency notices are embedded in the app, with source provenance in the releas
 The source Python app retains its existing dependencies and optional AI install workflow.
 
 The core smoke check exercises the **frozen executable**, generated three-second audio, each core
-conversion format, Standard Enhance, Check, a localhost link, and HTTP/UI assets. It removes
+conversion format, Adaptive Enhance, Check, a localhost link, and HTTP/UI assets. It removes
 external Python from PATH and uses isolated data/output folders. It does not test real websites.
 The AI check installs the real archive through the production manager with a localhost transport
-fixture, then exercises frozen Split, Best Enhance, removal and reinstallation. The independent
+fixture, then exercises frozen Split, AI stems Enhance, removal and reinstallation. The independent
 helper check runs for both reused and new archives, exercises both offline models using the
 helper's selected device (MPS where available), and verifies that a worker keeps the installation locked if
 its parent dies. Check installation from the actual public HTTPS release URL after publication.

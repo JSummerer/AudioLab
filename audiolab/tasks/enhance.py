@@ -6,15 +6,18 @@ say *what* was done and *why* in plain words.
 """
 
 import math
+from pathlib import Path
 from typing import Any
 
 from .. import recipes
 from ..analysis import classify
 from ..analysis import profile as prof
 from ..context import TaskContext
-from ..errors import AudioLabError
+from ..errors import AudioLabError, Cancelled
 from ..media import export
+from ..media.verification import PEAK_TOLERANCE_DB, measure_export
 from ..previews import make_previews
+from ..processing import report_details
 from ..recipes.chain import render
 from ..settings import SETTINGS
 from ..util import sanitize_filename
@@ -27,6 +30,9 @@ CHOICES = {
     'hf_restore': ('on', 'off'),
     'mono_bass': ('on', 'off'),
     'denoise': ('off', 'light', 'strong'),
+    'deess': ('auto', 'off', 'strong'),
+    'adaptive_lowmid': ('auto', 'off', 'strong'),
+    'harmonics': ('on', 'off'),
 }
 RANGES = {'target_lufs': (-30.0, -5.0), 'tp_ceiling_db': (-3.0, -0.1), 'bass_db': (0.0, 6.0)}
 
@@ -48,8 +54,8 @@ def validate(options: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
         quality = 'standard'
     if quality == 'best' and not common.ai_device():
         raise AudioLabError(
-            '"Best" quality uses AI, which is not installed yet.',
-            hints=['Enable AI features in Settings (one-time download), or use Standard quality.'],
+            'AI stems processing needs the AI add-on, which is not installed yet.',
+            hints=['Enable AI features in Settings (one-time download), or use Adaptive processing.'],
             fix='install_ai',
         )
     formats = options.get('formats') or SETTINGS.get().enhance_formats
@@ -138,14 +144,14 @@ def _summary(kind, recipe, chosen_by_user, before, after, report, folder, files)
     tb, ta = before.get('true_peak_dbtp'), after.get('true_peak_dbtp')
     if tb is not None and ta is not None:
         if tb > -0.5 and ta < tb:
-            lines.append(f'Fixed peaks that went over the safe limit ({tb:+.1f} → {ta:+.1f} dBTP).')
+            lines.append(f"Reduced the master's high peaks ({tb:+.1f} → {ta:+.1f} dBTP).")
         elif volume_only and limiter.get('engaged'):
             lines.append(
                 f'The limiter took at most {limiter.get("max_gr_db", 0):.1f} dB off the highest peaks '
                 f'(now {ta:+.1f} dBTP).'
             )
         else:
-            lines.append(f'Peaks stay safely below the limit ({ta:+.1f} dBTP).')
+            lines.append(f'Master peaks measured {ta:+.1f} dBTP; saved formats have their own checks.')
     # The loudness/peak lines above already cover the chain's level steps.
     lines += [s for s in (report.get('steps') or []) if 'LUFS' not in s and 'dBTP' not in s][:5]
     ai = report.get('ai')
@@ -214,11 +220,13 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
     previews = []
     excerpt = None
     try:
-        pv = make_previews(ref, master, common.previews_dir(ctx))
+        pv = make_previews(ref, master, common.previews_dir(ctx), check_cancel=p.check_cancel)
         for key, label in (('original', 'Original'), ('enhanced', 'Enhanced')):
             media[key] = str(pv[key])
             previews.append({'key': key, 'label': label})
         excerpt = {'start_s': pv['start_s'], 'duration_s': pv['duration_s']}
+    except Cancelled:
+        raise
     except Exception as e:  # preview is a convenience — never fail the job for it
         ctx.note('warning', f'Preview skipped: {e}')
 
@@ -236,10 +244,44 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
         opts['formats'],
         tags=common.tags_for(acq, ' (Enhanced)'),
         cover=cover,
-        progress=p.sub(0, 50) if split else p,
+        progress=p.sub(0, 45 if split else 70),
         sample_rate=rate,
     )
     files = common.file_entries(outputs)
+    verification_end = 65 if split else 100
+    verification_start = 45 if split else 70
+    for i, file in enumerate(files):
+        start = verification_start + (verification_end - verification_start) * i / len(files)
+        stop = verification_start + (verification_end - verification_start) * (i + 1) / len(files)
+        vp = p.sub(start, stop)
+        vp(0, f'Checking the saved {file["label"]}…')
+        try:
+            measurement = measure_export(
+                Path(file['path']),
+                ceiling_dbtp=params.tp_ceiling_db,
+                progress=vp,
+                duration_s=report.get('duration_s'),
+            )
+        except Cancelled:
+            raise
+        except AudioLabError:
+            measurement = {
+                'status': 'unverified',
+                'integrated_lufs': None,
+                'true_peak_dbtp': None,
+                'ceiling_dbtp': params.tp_ceiling_db,
+                'ceiling_met': None,
+                'tolerance_db': PEAK_TOLERANCE_DB,
+                'message': f'{file["label"]} was saved, but its loudness and peaks could not be verified.',
+            }
+        file['verification'] = measurement
+        if measurement.get('message'):
+            warning = measurement['message']
+            if measurement['status'] == 'warning':
+                warning += ' Try a lower peak ceiling or a lossless format if you need more headroom.'
+            report.setdefault('warnings', []).append(warning)
+            ctx.note('warning', warning)
+        vp(100)
     track_files, tracks_dir, tracks_lines = [], None, []
     if split:  # cut the finished master, in the first selected format, into "<folder>/Tracks"
         track_files, tracks_dir = common.split_into_tracks(
@@ -250,7 +292,7 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
             opts['formats'][0],
             common.tags_for(acq, ' (Enhanced)'),
             cover,
-            p.sub(50, 100),
+            p.sub(65, 100),
             start=len(files),
             sample_rate=rate,
         )
@@ -284,6 +326,7 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
         'recipe': {'key': recipe.key, 'name': recipe.name},
         'decisions': decisions,
         'metrics': metrics,
+        'processing': report_details(report),
         'analysis': analysis,
         'spectrogram': None,
         'warnings': list(report.get('warnings') or []),

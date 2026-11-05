@@ -30,6 +30,27 @@ def _tone(seconds=2.0):
     return np.column_stack((mono, mono)).astype(np.float32)
 
 
+@pytest.mark.parametrize(
+    ('mode', 'gain', 'engaged'), [('glue', 0.01, False), ('leveler', 0.01, False), ('glue', 4, True)]
+)
+def test_compression_report_distinguishes_running_from_actually_reducing_levels(tmp_path, mode, gain, engaged):
+    src = tmp_path / 'source.wav'
+    sf.write(src, _tone() * gain, SR, subtype='FLOAT')
+    params = ChainParams(highpass_hz=0, compressor=mode, target_lufs=-20)
+
+    report = chain.render(src, tmp_path / 'master.flac', params, {}, tmp_path / 'work')
+
+    assert report['compressor']['mode'] == mode
+    assert report['compressor']['engaged'] is engaged
+    if engaged:
+        assert report['compressor']['max_gr_db'] > 0
+        assert any('Compressed louder moments' in step for step in report['steps'])
+    else:
+        assert report['compressor']['max_gr_db'] == 0
+        assert report['compressor']['skip_reason'] == 'no measurable gain reduction'
+        assert 'Compression made no measurable level change' in report['steps']
+
+
 class _VirtualAudio:
     """A 240 s file with generated sound in selected one-second blocks."""
 
@@ -38,16 +59,16 @@ class _VirtualAudio:
         self.cancel_at = cancel_at
         self.cancel = threading.Event()
         self.reads = []
-        self.blocks_seen = 0
         self.info = SimpleNamespace(samplerate=SR, frames=240 * SR, duration=240.0, channels=2)
         self.tone = _tone(1.0)
         monkeypatch.setattr(prof.sf, 'info', lambda *a, **kw: self.info)
         monkeypatch.setattr(prof.sf, 'read', self.read)
-        monkeypatch.setattr(prof.sf, 'blocks', self.blocks)
 
     def read(self, path, start=0, stop=None, **kwargs):
         stop = self.info.frames if stop is None else stop
         self.reads.append((start, stop))
+        if self.cancel_at is not None and len(self.reads) == 3 + self.cancel_at:
+            self.cancel.set()  # the three initial reads are the scheduled excerpts
         x = np.zeros((stop - start, 2), np.float32)
         for second in self.audible:
             lo, hi = max(start, second * SR), min(stop, (second + 1) * SR)
@@ -55,14 +76,11 @@ class _VirtualAudio:
                 x[lo - start : hi - start] = self.tone[lo - second * SR : hi - second * SR]
         return x, SR
 
-    def blocks(self, path, **kwargs):
-        assert kwargs['blocksize'] == SR
-        silent = np.zeros((SR, 2), np.float32)
-        for second in range(240):
-            self.blocks_seen += 1
-            if self.blocks_seen == self.cancel_at:
-                self.cancel.set()
-            yield self.tone if second in self.audible else silent
+
+def _assert_complete_bounded_scan(reads):
+    assert reads[0][0] == 0 and reads[-1][1] == 240 * SR
+    assert all(end >= following for (_, end), (following, _) in zip(reads, reads[1:]))
+    assert all(end - start <= 11 * SR for start, end in reads)
 
 
 @pytest.mark.parametrize('audible,expected_span', [({0, 239}, (0, 180)), (range(235, 240), (235, 240))])
@@ -74,7 +92,8 @@ def test_fallback_contains_detected_sound_and_stays_bounded(monkeypatch, audible
     assert audio.reads[-1] == tuple(int(s * SR) for s in expected_span)
     assert len(x) == (expected_span[1] - expected_span[0]) * SR <= 180 * SR
     assert all(stop - start <= 180 * SR for start, stop in audio.reads)
-    assert len(audio.reads) == 4 and audio.blocks_seen == 240
+    _assert_complete_bounded_scan(audio.reads[3:-1])
+    assert report['level_analysis_basis'] == 'whole file'
     assert 'contiguous excerpt' in report['analysis_basis'] and 'detected sound' in report['analysis_basis']
     assert 'rest is silent' not in report['analysis_basis']
 
@@ -83,7 +102,7 @@ def test_silent_excerpts_need_a_complete_silence_scan(monkeypatch):
     audio = _VirtualAudio(monkeypatch, set())
     report, x, _ = prof.analyze_file(Path('virtual.wav'))
     assert report['is_silent'] and not x.any()
-    assert audio.blocks_seen == 240 and len(audio.reads) == 3
+    _assert_complete_bounded_scan(audio.reads[3:])
     assert report['analysis_basis'] == 'whole-file silence confirmed by a streamed peak scan'
 
 
@@ -91,13 +110,7 @@ def test_fallback_scan_cancellation_stops_on_the_requested_block(monkeypatch):
     audio = _VirtualAudio(monkeypatch, {0, 239}, cancel_at=3)
     with pytest.raises(Cancelled):
         prof.analyze_file(Path('virtual.wav'), progress=Progress.null(audio.cancel))
-    assert audio.blocks_seen == 3 and len(audio.reads) == 3
-
-
-def test_audible_scan_works_without_progress(monkeypatch):
-    audio = _VirtualAudio(monkeypatch, {2, 239})
-    assert prof._audible_span(Path('virtual.wav')) == (2 * SR, 240 * SR)
-    assert audio.blocks_seen == 240
+    assert len(audio.reads) == 6
 
 
 @pytest.mark.parametrize('channels', [1, 3])

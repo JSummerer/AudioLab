@@ -26,7 +26,7 @@ def require_install_supported() -> None:
     if runtime.is_packaged():
         raise AudioLabError(
             'AI features cannot be added to this core AudioLab app.',
-            hints=['Save, Convert, Check, and Standard or Light enhancement work in this app.'],
+            hints=['Save, Convert, Check, and Adaptive or Volume only processing work in this app.'],
         )
 
 

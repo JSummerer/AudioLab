@@ -108,11 +108,21 @@ function fileRow(job, f) {
       h('strong', null, f.label || f.format || f.name),
       // Narrow windows show the size after the name instead of in its own column.
       h('span', { class: 'file-name', title: f.name }, f.name,
-        there && f.size_bytes ? h('span', { class: 'file-size-inline' }, ` · ${fmtBytes(f.size_bytes)}`) : null)),
+        there && f.size_bytes ? h('span', { class: 'file-size-inline' }, ` · ${fmtBytes(f.size_bytes)}`) : null),
+      f.verification ? h('span', { class: 'file-name' }, exportCheckText(f.verification)) : null),
     h('span', { class: 'file-size' }, there ? fmtBytes(f.size_bytes) : ''),
     there
       ? h('a', { class: 'btn btn-ghost btn-sm', href: fileUrl(job.id, f.id), download: f.name, 'aria-label': `Download ${f.label || f.name}` }, icon('download', 14), h('span', { class: 'dl-text' }, 'Download'))
       : h('span', { class: 'lib-missing' }, icon('alert', 14), 'Moved or deleted'));
+}
+
+function exportCheckText(v) {
+  if (v.status === 'unverified') return 'Export saved · measurements unavailable';
+  const values = [
+    Number.isFinite(v.integrated_lufs) ? `${v.integrated_lufs.toFixed(1)} LUFS` : 'loudness unavailable',
+    Number.isFinite(v.true_peak_dbtp) ? `${v.true_peak_dbtp.toFixed(2)} dBTP` : 'silent',
+  ].join(' · ');
+  return `${v.status === 'warning' ? 'Export exceeds peak ceiling' : 'Export checked'} · ${values}`;
 }
 
 /** A cover file's picture in place of the icon (the icon when it is gone or won't load). */
@@ -203,6 +213,12 @@ function enhanceAbout(job, r) {
     out.push(m);
   }
   if (showDetails() && (r.decisions || []).length) out.push(decisionsBlock(r));
+  const adaptive = r.processing?.applied?.adaptive_lowmid;
+  if (showDetails() && adaptive) {
+    out.push(block('Adaptive low-mids', h('p', { class: 'muted small' }, adaptive.engaged
+      ? `Checked the whole recording every ${adaptive.analysis_hop_s}s against nearby audio. Reduced brief rises by at most ${adaptive.max_gr_db.toFixed(2)} dB, during ${adaptive.active_pct.toFixed(1)}% of the recording. This detector cannot judge musical intent.`
+      : `Unchanged: ${adaptive.skip_reason || 'no change needed'}.`)));
+  }
   if (showDetails() && r.spectrogram) out.push(spectrogramBlock(job, r));
   return out;
 }

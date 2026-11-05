@@ -5,9 +5,11 @@ turns recipe + measured profile + quality + user overrides into concrete
 ChainParams and a list of decisions, each with a plain-language reason, so
 both novices ("why does it sound like this?") and experts can audit "auto".
 
-Defaults are preservation-first: only the validated `club` chain does the
-heavy things (sub-harmonics, mono bass, glue) by default. Everything that
-invents content (HF exciter) is opt-in.
+Defaults are preservation-first: the `club` chain uses mono bass and glue
+where its recipe calls for them. Stages that invent content (bass harmonics,
+HF exciter) are opt-in. The highs are a tightrope (sharp S sounds
+and cymbals when played loud): clarity and air lifts stay only where the
+measured top end says something is missing.
 
 Quality "light" is volume only: one fixed loudness per recipe (so a playlist
 or folder plays evenly) plus true-peak safety — no EQ, compression, noise
@@ -25,12 +27,15 @@ SAMPLE_RATES = (44100, 48000, 96000)
 class ChainParams:
     highpass_hz: float = 25.0
     mud_cut_db: float = 0.0  # peak cut @ 320 Hz (<= 0)
+    adaptive_lowmid_db: float = 0.0  # maximum temporary 180–480 Hz reduction; 0 = bypass
     bass_db: float = 0.0  # low shelf @ 85 Hz (>= 0)
-    presence_db: float = 0.0  # peak @ 3.4 kHz
-    air_db: float = 0.0  # high shelf @ 11 kHz
+    presence_db: float = 0.0  # peak @ 3 kHz (Best: the vocals stem's own lift instead)
+    air_db: float = 0.0  # high shelf @ 11 kHz, only for a measured dull top end
     sub_harmonics: float = 0.0  # wet amount of sub-bass harmonics, 0 = off
     mono_bass_hz: float | None = None
     hf_restore: bool = False  # exciter above a lossy cutoff
+    deess_db: float = 0.0  # most the de-esser takes off S-sound spikes, 0 = off (see stem_deess_db)
+    deess_mix: bool = True  # False: a voice alone, no cymbals to dull (dsp.deess safety budget)
     denoise: str = 'off'  # off | light | strong
     compressor: str = 'off'  # off | glue | leveler
     target_lufs: float = -14.0
@@ -42,6 +47,10 @@ class ChainParams:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    def stem_deess_db(self) -> float:
+        """A separated vocal holds no hi-hats, so it can take at least DEESS_STEM_DB."""
+        return max(self.deess_db, DEESS_STEM_DB) if self.deess_db > 0 else 0.0
 
 
 @dataclass
@@ -61,7 +70,7 @@ RECIPES: dict[str, Recipe] = {
         'Club / DJ set',
         'Punchy and loud, tight bass — made for big speakers',
         'The original ClubReady chain for DJ sets and electronic mixes: loudness matched to the '
-        "set's energy, cleaned-up low-mids, extra bass weight and sub-bass harmonics, bass below "
+        "set's energy, adaptive low-mid control, extra bass weight, bass below "
         '90 Hz folded to mono for club systems, gentle glue compression and a true-peak limiter.',
     ),
     'live': Recipe(
@@ -93,6 +102,12 @@ _AI_STAGE = {'club': 'stem_eq', 'music': 'stem_eq', 'voice': 'voice_isolate', 'l
 
 _TP_CEILING = {'club': -1.25, 'live': -1.0, 'music': -1.0, 'voice': -1.5}
 
+# De-esser: the most it takes off an S-sound spike. A separated vocal (Best) or a voice can take
+# more than a full mix, where the same band also holds the hi-hats.
+_DEESS_DB = {'club': 3.0, 'live': 3.0, 'music': 3.0, 'voice': 4.0}
+DEESS_STEM_DB, DEESS_STRONG_DB = 4.0, 6.0
+STEM_PRESENCE_DB = 0.75  # Best's stem-aware EQ: the separated vocals' own clarity lift (chain._stem_eq)
+
 # Light quality: a fixed level per recipe (consistency across many files, unlike
 # Standard, which keeps a song's own loudness), and why that level.
 LIGHT_TARGETS = {
@@ -121,6 +136,9 @@ _SOUND_OVERRIDES = {
     'hf_restore': lambda v: v == 'on',
     'denoise': lambda v: v in ('light', 'strong'),
     'mono_bass': lambda v: v == 'on',
+    'deess': lambda v: v == 'strong',
+    'adaptive_lowmid': lambda v: v == 'strong',
+    'harmonics': lambda v: v == 'on',
 }
 
 
@@ -177,7 +195,6 @@ def resolve(
     lra_v = float(prof.get('lra', 5.0))
     bw = prof.get('bandwidth') or {}
     lossy = bool(bw.get('is_lossy_cutoff'))
-    has_mud = bool(prof.get('has_mud_excess', False))
     stereo = prof.get('stereo') or {}
     antiphase = bool(stereo.get('antiphase_bass'))
     style = prof.get('dynamics_style') or {}
@@ -222,14 +239,6 @@ def resolve(
             if lra_v < 3.2
             else 'skipped to keep the wide dynamics',
         )
-        p.sub_harmonics = 0.25 if p.bass_db > 0 else 0.0
-        d.set(
-            'sub_harmonics',
-            'Sub-bass harmonics',
-            'on' if p.sub_harmonics else 'off',
-            'recipe',
-            'makes the sub-bass audible on smaller speakers too' if p.sub_harmonics else 'no bass boost requested',
-        )
         p.mono_bass_hz = 90.0
         p.presence_db, p.air_db = (0.0, 0.0) if lossy else (0.75, 1.0)
     elif key == 'live':
@@ -272,7 +281,7 @@ def resolve(
             'Voice clarity',
             _db(p.presence_db),
             'recipe',
-            'a lift around 3.4 kHz makes speech easier to understand',
+            'a lift around 3 kHz makes speech easier to understand',
         )
         p.compressor = 'leveler'
         d.set('compressor', 'Leveler', 'on', 'recipe', 'evens out loud and quiet speakers / moments')
@@ -284,23 +293,10 @@ def resolve(
             'off by default to preserve the recording — choose Light or Strong if you hear steady background noise',
         )
 
-    if has_mud:
-        p.mud_cut_db = -1.25 if key == 'club' else -1.0
-        d.set(
-            'mud_cut_db',
-            'Low-mid clean-up',
-            _db(p.mud_cut_db),
-            'auto',
-            f'low-mids sit {prof.get("mud_excess_db", 0):+.1f} dB above the overall balance',
-        )
-    if lossy:
-        d.set(
-            'air_db',
-            'High-end lift',
-            'off',
-            'auto',
-            f'the top end stops at {bw.get("cutoff_hz", 0) / 1000:.1f} kHz — boosting it would only lift noise',
-        )
+    # A coarse spectrum cannot establish that warmth is a defect. The full chain
+    # judges temporary rises against nearby context instead of cutting the whole file.
+    p.adaptive_lowmid_db = 1.5
+    _highs(key, prof, p, d)
     if p.mono_bass_hz and antiphase:
         p.mono_bass_hz = None
         d.set(
@@ -359,18 +355,67 @@ def resolve(
                     'AI stage',
                     'none (fallback)',
                     'auto',
-                    f'Best quality needs the AI pack ({status.get("reason") or "not available"}) — used Standard',
+                    'AI stems processing needs the AI add-on — used Adaptive processing because it is unavailable',
                 )
     p.ai_stage = stage
+    if stage == 'stem_eq' and p.presence_db:
+        d.set(
+            'presence_db',
+            'Clarity lift',
+            _db(STEM_PRESENCE_DB),
+            'recipe',
+            'on the separated vocals only — brings them slightly forward (3 kHz)',
+        )
+    p.deess_db, p.deess_mix = _DEESS_DB[key], key != 'voice'
+    d.set(
+        'deess',
+        'Sharp S sounds',
+        'auto',
+        'recipe',
+        f'softened on the separated vocals only, by at most {p.stem_deess_db():.0f} dB — cymbals stay untouched'
+        if stage == 'stem_eq'
+        else f'softened only where S sounds or cymbal hits jump out, by at most {p.deess_db:.0f} dB — '
+        'the rest of the top end stays as it is',
+    )
+    if stage == 'stem_eq' and p.air_db:
+        p.air_db = 0.0
+        d.set(
+            'air_db',
+            'High-end lift',
+            'off',
+            'recipe',
+            "the AI stage shapes each part's top end itself (slightly softer above 9 kHz)",
+        )
 
     # --- expert overrides ----------------------------------------------------
     _level_overrides(adv, p, d)
     v = _num(adv.get('bass_db'))
     if v is not None:
         p.bass_db = round(max(0.0, min(6.0, v)), 2)
-        if key == 'club':
-            p.sub_harmonics = 0.25 if p.bass_db > 0 else 0.0
         d.set('bass_db', 'Bass punch', _db(p.bass_db), 'user', 'set by you')
+    c = _choice(adv.get('harmonics'), ('on', 'off'))
+    p.sub_harmonics = 0.25 if c == 'on' else 0.0
+    d.set(
+        'sub_harmonics',
+        'Bass harmonics',
+        'on' if p.sub_harmonics else 'off',
+        'user' if c else 'auto',
+        'adds harmonics from the bass for smaller speakers; separate from bass weight'
+        if p.sub_harmonics
+        else 'off to preserve the original bass; adding new harmonics is optional',
+    )
+    c = _choice(adv.get('adaptive_lowmid'), ('auto', 'off', 'strong'))
+    p.adaptive_lowmid_db = 0.0 if c == 'off' else 3.0 if c == 'strong' else 1.5
+    d.set(
+        'adaptive_lowmid',
+        'Adaptive low-mids',
+        'off' if not p.adaptive_lowmid_db else f'up to {p.adaptive_lowmid_db:g} dB',
+        'user' if c in ('off', 'strong') else 'auto',
+        'bypassed by you'
+        if c == 'off'
+        else 'checks the whole recording for brief 180–480 Hz rises relative to nearby audio; '
+        'steady warmth, short attacks and sustained changes are left alone; skipped when AI stem EQ runs',
+    )
     c = _choice(adv.get('glue'), ('on', 'off'))
     if c:
         p.compressor = ('leveler' if key == 'voice' else 'glue') if c == 'on' else 'off'
@@ -404,6 +449,16 @@ def resolve(
             'set by you'
             + (' — note: the bass is partly out of phase, mono may thin it' if c == 'on' and antiphase else ''),
         )
+    c = _choice(adv.get('deess'), ('auto', 'off', 'strong'))
+    if c in ('off', 'strong'):
+        p.deess_db = 0.0 if c == 'off' else DEESS_STRONG_DB
+        d.set(
+            'deess',
+            'Sharp S sounds',
+            c,
+            'user',
+            'set by you' + (f' — softened by up to {DEESS_STRONG_DB:.0f} dB' if c == 'strong' else ''),
+        )
     model = adv.get('model')
     if isinstance(model, str) and model in ('htdemucs', 'htdemucs_ft'):
         p.ai_model = model
@@ -417,6 +472,47 @@ def resolve(
             'keeps peaks safe on every speaker and after MP3/AAC conversion',
         )
     return p, d.list()
+
+
+_LOSSLESS_CODECS = ('pcm', 'flac', 'alac', 'wavpack', 'ape', 'tta', 'truehd', 'mlp')
+
+
+def _highs(key: str, prof: dict[str, Any], p: ChainParams, d: _Decisions) -> None:
+    """Keep the recipe's clarity and air lifts only where the measured top end needs them."""
+    bw = prof.get('bandwidth') or {}
+    top = prof.get('top_end')
+    label = 'Voice clarity' if key == 'voice' else 'Clarity lift'
+    if p.presence_db and top == 'bright':
+        p.presence_db = 0.0
+        d.set('presence_db', label, 'off', 'auto', 'the highs are already bright — a lift would sharpen S sounds')
+    elif p.presence_db and 'presence_db' not in d._items:
+        d.set('presence_db', label, _db(p.presence_db), 'recipe', 'brings vocals slightly forward (3 kHz)')
+    if bw.get('is_lossy_cutoff'):
+        d.set(
+            'air_db',
+            'High-end lift',
+            'off',
+            'auto',
+            f'the top end stops at {bw.get("cutoff_hz", 0) / 1000:.1f} kHz — boosting it would only lift noise',
+        )
+        return
+    if not p.air_db:
+        return
+    codec = str(prof.get('source_audio_codec') or '').lower()
+    if top != 'dull':
+        p.air_db = 0.0
+        d.set('air_db', 'High-end lift', 'off', 'auto', 'the top end is in balance — more would only add sharpness')
+    elif codec and not codec.startswith(_LOSSLESS_CODECS):
+        p.air_db = 0.0
+        d.set(
+            'air_db',
+            'High-end lift',
+            'off',
+            'auto',
+            f'the source is compressed audio ({codec}) — lifting its top end brings out the compression artefacts',
+        )
+    else:
+        d.set('air_db', 'High-end lift', _db(p.air_db), 'auto', 'the top end is dull — a gentle lift above 11 kHz')
 
 
 def _level_overrides(adv: dict[str, Any], p: ChainParams, d: _Decisions) -> None:
@@ -487,7 +583,7 @@ def _resolve_light(
             'Other settings',
             'not used',
             'auto',
-            'Light changes the volume only — bass, compression, noise reduction, mono bass and '
-            'restore highs need Standard quality',
+            'Light changes the volume only — bass, compression, noise reduction, mono bass, '
+            'restore highs, harmonics, adaptive low-mids and sharp S sounds need Standard processing',
         )
     return p, d.list()

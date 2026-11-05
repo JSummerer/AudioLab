@@ -16,6 +16,7 @@ const RATE = 48000;       // what the server sends
 const GRID = 1920;        // frames: chunks start and end on this grid (docs/API.md)
 const FIRST = 2 * RATE;   // the first chunk after play or a seek: quick to start
 const CHUNK = 8 * RATE;   // then 8 s at a time
+const REPEAT_MIN = RATE;  // the shortest repeat is one second
 const LOW_S = 4;          // fetch the next chunk when less than this is queued
 const LEAD_S = 0.05;      // the first chunk starts this far ahead of the clock
 const FADE_S = 0.025;     // switching crossfade
@@ -90,6 +91,14 @@ const resultLabel = (file) =>
 /** The full-length comparison of a Library entry: its kept original and its `compare_file_id`. */
 export function libraryCompare(entry, extra = {}) {
   const file = (entry.files || []).find((f) => f.id === entry.compare_file_id);
+  // The chosen export can have a different level from the master after encoding.
+  // Only entries that predate verification fall back to the historical measurement.
+  const measured = Object.hasOwn(file, 'verification');
+  const check = file.verification;
+  const loudness = measured ? {
+    original_lufs: entry.loudness?.original_lufs,
+    result_lufs: ['verified', 'warning'].includes(check?.status) ? check.integrated_lufs : null,
+  } : entry.loudness;
   const side = (fileId, label) => ({
     label,
     url: (offset, frames) => url(`/api/library/${encodeURIComponent(entry.id)}/pcm/${encodeURIComponent(fileId)}`, { offset, frames }),
@@ -101,7 +110,8 @@ export function libraryCompare(entry, extra = {}) {
     length: duration,
     songDuration: duration,
     markers: entry.markers,
-    loudness: entry.loudness,
+    loudness,
+    showMatchUnavailable: measured,
     ...extra,
   });
 }
@@ -113,7 +123,8 @@ export function libraryCompare(entry, extra = {}) {
  * songOffset: the song time of the sides' frame 0 (an excerpt's start), length: how long
  * the sides are, songDuration: the whole song (for "1:52 / 4:45"), startAt: the song time to
  * start from, markers: tracks/chapters in song time, loudness: {original_lufs, result_lufs}
- * of the whole song for "Match volume" (null: no switch), note: one line under the player.
+ * of the whole song for "Match volume" (null: no switch unless showMatchUnavailable),
+ * note: one line under the player.
  */
 export function comparePlayer(opts) {
   const sides = opts.sides.map((s) => ({ ...s, gain: null }));
@@ -137,7 +148,7 @@ export function comparePlayer(opts) {
   let gen = 0;          // one per play or seek: answers for an older one are dropped
   let abort = null;     // the running fetches
   let queue = [];       // scheduled chunks, oldest first: { frame, frames, when, nodes }
-  let anchor = null;    // { frame, when }: `frame` plays at context time `when`
+  let clock = null;     // { when, frames }: first audio time and frames scheduled since then
   let nextFrame = 0;    // where the next chunk starts
   let fetching = false;
   let endFrame = null;  // set once the last chunk is scheduled
@@ -148,6 +159,11 @@ export function comparePlayer(opts) {
   let stall = 0;        // the check after Play that the clock runs
   let stalled = false;  // … and it didn't: the next Play starts with a new context
   let soon = 0;         // a seek from the timeline's keys, waiting for them to rest
+  let repeatStart = null;
+  let repeatEnd = null;
+  let repeating = false;
+  let repeatLimit = Infinity; // the earliest decoded end of either side, once known
+  const repeatCache = new Map(); // stable chunk pairs of a short repeat, cleared when it changes
 
   const root = h('div', { class: 'ab cmp', tabindex: '-1', role: 'group', 'aria-label': `Compare the original with ${label}` });
   if (!AC) {
@@ -160,7 +176,7 @@ export function comparePlayer(opts) {
   const ticks = h('div', { class: 'cmp-ticks', 'aria-hidden': 'true' });
   const time = h('span', { class: 'ab-time' });
   const keys = h('div', { class: 'ab-keys', role: 'radiogroup', 'aria-label': 'Version' });
-  const volumeNote = h('span', { class: 'cmp-volume-note' });
+  const volumeNote = h('span', { class: 'cmp-volume-note', id: `${id}-volume-note` });
   const problem = h('div', { class: 'cmp-problem', role: 'alert', hidden: true });
   const markerList = markers.length > 1 ? h('div', { class: 'cmp-markers', role: 'group', 'aria-label': 'Jump to' }) : null;
 
@@ -224,7 +240,10 @@ export function comparePlayer(opts) {
   }
 
   function renderVolume() {
-    if (!hasLoudness) return;
+    if (!hasLoudness) {
+      volumeNote.textContent = 'Volume matching needs a loudness measurement for both versions.';
+      return;
+    }
     const diff = loud.result_lufs - loud.original_lufs;
     const louder = diff > 0 ? label.split(' · ')[0] : 'Original';
     const db = Math.abs(diff);
@@ -249,6 +268,7 @@ export function comparePlayer(opts) {
   /** Let go of the context (it is made again on the next Play). */
   function dropContext() {
     halt();
+    repeatCache.clear();
     const c = ctx;
     quietly(() => c?.close?.());
     ctx = null;
@@ -258,9 +278,9 @@ export function comparePlayer(opts) {
 
   /** The frame playing now. */
   function now() {
-    if (!playing || !anchor) return position;
+    if (!playing || !clock) return position;
     const t = ctx.currentTime;
-    let f = anchor.frame;
+    let f = queue[0]?.frame ?? position;
     for (const c of queue) {
       if (t < c.when) break;
       f = c.frame + Math.min(c.frames, Math.round((t - c.when) * RATE)); // in a gap (late chunk): its end
@@ -293,7 +313,7 @@ export function comparePlayer(opts) {
     abort?.abort();
     abort = null;
     stopSources(fade);
-    anchor = null;
+    clock = null;
     fetching = false;
     clearInterval(timer);
     timer = 0;
@@ -311,7 +331,7 @@ export function comparePlayer(opts) {
   /** Play from `frame` (snapped to the grid): the first chunk of both, then the rest as it goes. */
   function startAt(frame) {
     halt(true);
-    position = Math.floor(clamp(frame) / GRID) * GRID;
+    position = Math.floor(clamp(repeating && !inRepeat(frame) ? repeatStart : frame) / GRID) * GRID;
     nextFrame = position;
     endFrame = null;
     abort = new AbortController();
@@ -325,7 +345,14 @@ export function comparePlayer(opts) {
       const detail = await res.json().then((d) => (typeof d?.detail === 'string' ? d.detail : ''), () => '');
       throw Object.assign(new Error(detail || `error ${res.status}`), { status: res.status, side, detail });
     }
-    const data = new Float32Array(await res.arrayBuffer());
+    const data = await res.arrayBuffer();
+    if (data.byteLength % 8 || data.byteLength > frames * 8) {
+      throw Object.assign(new Error('Invalid PCM'), { side, detail: 'the app returned invalid audio' });
+    }
+    return new Float32Array(data);
+  }
+
+  function audioBuffer(data) {
     const n = data.length >> 1;
     if (!n) return null;
     const buf = ctx.createBuffer(2, n, RATE);
@@ -335,21 +362,67 @@ export function comparePlayer(opts) {
     return buf;
   }
 
+  /** Soften a repeat jump on each side before the A/B gains. Internal joins have no fade. */
+  function connectSource(src, destination, fadeStart, fadeEnd) {
+    if (fadeStart == null && fadeEnd == null) {
+      src.connect(destination);
+      return;
+    }
+    const edge = ctx.createGain();
+    if (fadeStart != null) {
+      edge.gain.setValueAtTime(0, fadeStart);
+      edge.gain.linearRampToValueAtTime(1, fadeStart + EDGE_S);
+    }
+    if (fadeEnd != null) {
+      edge.gain.setValueAtTime(1, fadeEnd - EDGE_S);
+      edge.gain.linearRampToValueAtTime(0, fadeEnd);
+    }
+    src.connect(edge);
+    edge.connect(destination);
+    src.onended = () => edge.disconnect();
+  }
+
   async function fill(my, frames) {
     if (fetching || endFrame != null) return;
     fetching = true;
     const at = nextFrame;
+    // Every request ends at or before repeatEnd. Short repeats use fixed chunk
+    // boundaries so their PCM can be reused on each pass, even after a seek.
+    const shortRepeat = repeating && repeatEnd - repeatStart <= CHUNK;
+    const split = repeatStart + FIRST;
+    if (shortRepeat && at < split) frames = Math.min(frames, split - at);
+    if (repeating) frames = Math.min(frames, repeatEnd - at);
+    const cacheKey = shortRepeat && (at === repeatStart || (at === split && at + frames === repeatEnd))
+      ? `${at}:${frames}` : null;
     let bufs;
     try {
-      bufs = await Promise.all(sides.map((s) => load(s, at, frames, abort.signal)));
+      bufs = repeatCache.get(cacheKey);
+      if (!bufs) {
+        const data = await Promise.all(sides.map((s) => load(s, at, frames, abort.signal)));
+        if (my !== gen) return;
+        bufs = data.map(audioBuffer);
+      }
     } catch (e) {
-      if (my !== gen || e.name === 'AbortError') return;
+      if (my !== gen) return;
       fail(e);
       return;
     }
-    if (my !== gen) return;
     fetching = false;
-    const n = Math.max(0, ...bufs.map((b) => b?.length || 0));
+    const lengths = bufs.map((b) => b?.length || 0);
+    const n = Math.max(...lengths);
+    const shortest = Math.min(...lengths);
+    if (shortest < frames) {
+      repeatLimit = Math.min(repeatLimit, at + shortest);
+      if (repeating) {
+        repeating = false;
+        repeatCache.clear();
+        // Do not carry on outside the selected range, or repeat a section only one side has.
+        pause();
+        renderRepeat();
+        return;
+      }
+      renderRepeat();
+    } else if (cacheKey) repeatCache.set(cacheKey, bufs);
     if (n < frames) { // the last chunk (both are shorter than asked)
       endFrame = at + n;
       lengthF = endFrame;
@@ -361,24 +434,32 @@ export function comparePlayer(opts) {
     if (n) {
       // Each chunk starts where the one before ends, on the context's clock. A late one (the
       // fetch took longer than what was queued) starts a little later instead: a short gap.
-      let when = anchor ? anchor.when + (at - anchor.frame) / RATE : 0;
-      if (!anchor || when < ctx.currentTime + 0.01) {
+      let when = scheduledEnd();
+      if (!clock || when < ctx.currentTime + 0.01) {
         when = Math.ceil((ctx.currentTime + LEAD_S) * ctx.sampleRate) / ctx.sampleRate;
-        anchor = { frame: at, when };
+        clock = { when, frames: 0 };
         fadeIn(when);
       }
+      const wraps = repeating && at + n === repeatEnd;
+      const fadeStart = repeating && at === repeatStart ? when : null;
+      const fadeEnd = wraps ? clock.when + (clock.frames + n) / RATE : null;
       const nodes = bufs.map((b, i) => {
         if (!b) return null;
         const src = ctx.createBufferSource();
         src.buffer = b;
-        src.connect(sides[i].gain);
+        connectSource(src, sides[i].gain, fadeStart, fadeEnd);
         src.start(when); // the same time for both versions
         return src;
       });
       queue.push({ frame: at, frames: n, when, nodes });
-      nextFrame = at + n;
+      clock.frames += n;
+      nextFrame = wraps ? repeatStart : at + n;
     }
     tick();
+  }
+
+  function scheduledEnd() {
+    return clock ? clock.when + clock.frames / RATE : 0;
   }
 
   function tick() {
@@ -392,8 +473,7 @@ export function comparePlayer(opts) {
       renderTime();
       return;
     }
-    const queued = anchor ? anchor.when + (nextFrame - anchor.frame) / RATE - t : 0;
-    if (anchor && queued < LOW_S) fill(gen, CHUNK);
+    if (clock && scheduledEnd() - t < LOW_S) fill(gen, CHUNK);
     renderTime(f);
   }
 
@@ -458,9 +538,20 @@ export function comparePlayer(opts) {
     setTimeout(() => { if (!playing && my === gen && ctx === c) quietly(() => c.suspend?.()); }, EDGE_S * 1000 + 50);
   }
 
+  function seekFrame(s) {
+    const f = clamp(s * RATE);
+    if (repeating && !inRepeat(f)) {
+      repeating = false;
+      repeatCache.clear();
+      renderRepeat();
+    }
+    // A paused cue can mark the exact end. When playing, start from a frame before EOF.
+    return playing && f === lengthF ? Math.max(0, f - 1) : f;
+  }
+
   /** To `s` seconds of the sides; playing carries on from there. */
   function seekTo(s) {
-    const f = clamp(Math.min(s * RATE, lengthF - GRID));
+    const f = seekFrame(s);
     if (playing) startAt(f);
     else position = f;
     renderTime(f);
@@ -471,7 +562,7 @@ export function comparePlayer(opts) {
   function seekSoon(s) {
     if (!playing) { seekTo(s); return; }
     halt(true);
-    position = clamp(Math.min(s * RATE, lengthF - GRID));
+    position = seekFrame(s);
     renderTime(position);
     soon = setTimeout(() => { if (playing) startAt(position); }, SEEK_REST_MS);
   }
@@ -507,7 +598,57 @@ export function comparePlayer(opts) {
   function renderLength() {
     seek.max = lengthF / RATE; // a value past the new end moves back to it
     renderTicks();
+    renderRepeat();
     if (dragging) renderDrag();
+  }
+
+  // ---------------------------------------------------------------- section repeat
+  function inRepeat(f) {
+    return f >= repeatStart && f < repeatEnd;
+  }
+
+  function repeatReady() {
+    return repeatStart != null && repeatStart >= 0 && repeatEnd != null && repeatEnd - repeatStart >= REPEAT_MIN
+      && repeatEnd <= Math.min(lengthF, repeatLimit);
+  }
+
+  function markRepeat(which) {
+    const f = now();
+    const point = Math.min(Math.round(f / GRID), Math.floor(lengthF / GRID)) * GRID;
+    if (which === 'start') repeatStart = point;
+    else repeatEnd = point;
+    if (repeating) setRepeating(false, f);
+    else renderRepeat();
+  }
+
+  function setRepeating(on, f = now()) {
+    repeating = on && repeatReady();
+    if (!repeating) repeatCache.clear();
+    if (playing) startAt(f);
+    else position = repeating && !inRepeat(f) ? repeatStart : f;
+    renderRepeat();
+    renderTime();
+  }
+
+  function pointTime(f) {
+    const hundredths = Math.round((songOffset + f / RATE) * 100);
+    return `${fmtDuration(Math.floor(hundredths / 100))}.${String(hundredths % 100).padStart(2, '0')}`;
+  }
+
+  function renderRepeat() {
+    repeatSwitch.checked = repeating;
+    repeatSwitch.disabled = !repeatReady();
+    const summary = repeating ? 'Repeat a section · On' : 'Repeat a section';
+    if (repeatSummary.textContent !== summary) repeatSummary.textContent = summary;
+    const bounds = [
+      repeatStart != null && `Start ${pointTime(repeatStart)}`,
+      repeatEnd != null && `End ${pointTime(repeatEnd)}`,
+    ].filter(Boolean).join(' · ');
+    const hint = repeatEnd != null && repeatEnd > repeatLimit ? 'One version ends before this range. Choose an earlier end.'
+      : repeatStart == null || repeatEnd == null ? 'Move the playhead to each point, then set the start and end.'
+        : !repeatReady() ? 'Choose an end at least one second after the start.' : '';
+    const msg = [bounds, hint].filter(Boolean).join('. ');
+    if (repeatNote.textContent !== msg) repeatNote.textContent = msg;
   }
 
   // ---------------------------------------------------------------- markers
@@ -578,10 +719,25 @@ export function comparePlayer(opts) {
     onclick: () => seekTo(now() / RATE + s),
   }, s < 0 ? `−${-s} s` : `+${s} s`);
 
-  const matchSwitch = hasLoudness ? switchControl({
-    id: `${id}-match`, checked: true, label: 'Match volume',
+  const matchSwitch = hasLoudness || opts.showMatchUnavailable ? switchControl({
+    id: `${id}-match`, checked: hasLoudness, disabled: !hasLoudness, label: 'Match volume',
     onChange: (v) => { matchVolume = v; applyGains(true); renderVolume(); },
   }) : null;
+  matchSwitch?.setAttribute('aria-describedby', volumeNote.id);
+
+  const repeatSummary = h('summary', { class: 'cmp-repeat-summary' });
+  const repeatNote = h('p', { class: 'cmp-repeat-note', id: `${id}-repeat-note`, role: 'status' });
+  const repeatSwitch = switchControl({
+    id: `${id}-repeat`, checked: false, label: 'Repeat', disabled: true, onChange: setRepeating,
+  });
+  repeatSwitch.setAttribute('aria-describedby', repeatNote.id);
+  const repeatPoint = (which) => h('button', {
+    type: 'button', class: 'btn btn-key btn-sm', onclick: () => markRepeat(which),
+  }, `Set ${which}`);
+  const repeatDetails = h('details', { class: 'cmp-repeat' }, repeatSummary,
+    h('div', { class: 'cmp-repeat-controls' }, repeatPoint('start'), repeatPoint('end'),
+      h('label', { class: 'details-toggle', for: `${id}-repeat` }, repeatSwitch, 'Repeat')),
+    repeatNote);
 
   // Version tabs; play, timeline and time; the note on where it starts; −10/+10 s and Match
   // volume with its one line; the track and chapter starts.
@@ -593,7 +749,8 @@ export function comparePlayer(opts) {
     h('div', { class: 'cmp-tools' },
       h('div', { class: 'cmp-skip' }, skip(-SKIP_S, `Back ${SKIP_S} seconds`), skip(SKIP_S, `Forward ${SKIP_S} seconds`)),
       matchSwitch ? h('label', { class: 'details-toggle', for: `${id}-match` }, matchSwitch, 'Match volume') : null,
-      hasLoudness ? h('p', { class: 'ab-matched' }, volumeNote) : null),
+      matchSwitch ? h('p', { class: 'ab-matched' }, volumeNote) : null),
+    repeatDetails,
     markerList]);
   renderKeys();
   renderPlay();
@@ -607,6 +764,7 @@ export function comparePlayer(opts) {
     playing = false;
     clearTimeout(stall);
     halt();
+    repeatCache.clear();
     const c = ctx;
     quietly(() => c?.close?.());
     ctx = null;
@@ -616,8 +774,12 @@ export function comparePlayer(opts) {
   function snapshot() {
     if (dead) return null;
     const frame = now();
-    return { time: songOffset + frame / RATE, playing: playing && frame < lengthF,
+    const state = { time: songOffset + frame / RATE, playing: playing && (repeating || frame < lengthF),
       side: active === 0 ? 'original' : 'result', matchVolume };
+    if (repeatReady()) state.repeat = {
+      start: songOffset + repeatStart / RATE, end: songOffset + repeatEnd / RATE, enabled: repeating,
+    };
+    return state;
   }
 
   /** Restore while paused; resuming requires the caller to still be inside a user gesture. */
@@ -627,10 +789,19 @@ export function comparePlayer(opts) {
     position = clamp((state.time - songOffset) * RATE);
     active = state.side === 'original' ? 0 : 1;
     if (typeof state.matchVolume === 'boolean') matchVolume = state.matchVolume;
-    if (matchSwitch) matchSwitch.checked = matchVolume;
+    if (matchSwitch) matchSwitch.checked = hasLoudness && matchVolume;
+    const { start, end, enabled } = state.repeat || {};
+    const fromSong = (t) => Math.round(((t - songOffset) * RATE) / GRID) * GRID;
+    repeatStart = Number.isFinite(start) ? fromSong(start) : null;
+    repeatEnd = Number.isFinite(end) ? fromSong(end) : null;
+    if (!repeatReady()) repeatStart = repeatEnd = null;
+    repeating = enabled === true && repeatReady();
+    if (repeating && !inRepeat(position)) position = repeatStart;
+    repeatCache.clear();
     applyGains();
     renderKeys();
     renderVolume();
+    renderRepeat();
     renderTime();
     // A shorter version may already be at its end. Keep it there, rather than replaying
     // from zero (the usual behavior of an explicit Play at the end).

@@ -115,6 +115,7 @@ def test_entry_written_on_finish_and_outlives_the_job(manager):
     (group,) = library.groups()
     (entry,) = group['entries']
     assert entry['id'] == job.id and entry['job_exists'] is False and entry['artist'] == 'Artist'
+    assert 'processing' not in entry  # entries from before processing details stay readable
     original = entry['files'][-1]
     assert original['id'] == 'original' and original['exists'] and original['mime'] == 'audio/webm'
     assert original['codec'] == 'opus'
@@ -128,6 +129,115 @@ def test_entry_written_on_finish_and_outlives_the_job(manager):
     # Check (analyze) results are not library material
     check = run_job(manager, task='analyze')
     assert 'library_id' not in manager.public(check.id)['result']
+
+
+def test_enhance_processing_and_export_check_survive_job_removal(manager, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from audiolab.api import create_app
+
+    secret = '/private/work/model/checkpoint.th'
+
+    def runner(job, ctx):
+        result = lib_runner(job, ctx)
+        result.update(
+            recipe={'key': 'music', 'name': 'Song / music'},
+            decisions=[
+                {
+                    'key': 'recipe',
+                    'label': 'Recipe',
+                    'value': 'Song / music',
+                    'source': 'auto',
+                    'why': 'Detected music',
+                },
+                {
+                    'key': 'ai_stage',
+                    'label': 'AI stage',
+                    'value': 'none (fallback)',
+                    'source': 'auto',
+                    'why': f'The AI pack could not open {secret}',
+                },
+            ],
+            processing={
+                'params': {'target_lufs': -14.0, 'highpass_hz': 25.0, 'mono_bass_hz': None, 'cache': secret},
+                'applied': {
+                    'steps': ['Removed inaudible rumble below 25 Hz', f'Wrote the master to {secret}', 'x' * 1_000],
+                    'ai': {'stage': 'stem_eq', 'fallback': True, 'error': secret},
+                    'limiter': {'engaged': False, 'max_gr_db': 0.0, 'tp_after': float('nan')},
+                    'adaptive_lowmid': {
+                        'engaged': True,
+                        'max_gr_db': 1.2,
+                        'band_hz': [140.0, 320.0],
+                        'events': [{'start_s': i, 'end_s': i + 0.5, 'max_gr_db': 1.2} for i in range(20)],
+                    },
+                },
+            },
+        )
+        result['files'][0]['verification'] = {
+            'status': 'warning',
+            'integrated_lufs': -11.9,
+            'true_peak_dbtp': -0.8,
+            'ceiling_dbtp': -1.0,
+            'tolerance_db': 0.05,
+            'ceiling_met': False,
+            'message': secret,
+        }
+        return result
+
+    SETTINGS.update({'keep_originals': False})
+    monkeypatch.setattr(manager, '_runner', runner)
+    options = {
+        'recipe': 'auto',
+        'quality': 'best',
+        'formats': ['aac_256'],
+        'advanced': {
+            'target_lufs': -14.0,
+            'glue': 'off',
+            'harmonics': 'on',
+            'adaptive_lowmid': 'strong',
+            'cache': secret,
+        },
+        'split_tracks': False,
+        'meta': {'title': secret},
+    }
+    job = manager.submit('enhance', dict(URL_SOURCE), options, title='Measured song')
+    wait_for(lambda: manager.get(job.id).status == 'done')
+    manager.delete(job.id)
+    raw = (SETTINGS.library_dir / f'{job.id}.json').read_text()
+    assert secret not in raw and 'NaN' not in raw and 'x' * 100 not in raw
+    with TestClient(create_app(local=False, token='t', manager=manager), headers={'X-AudioLab-Token': 't'}) as c:
+        response = c.get(f'/api/library/{job.id}')
+        assert response.status_code == 200
+        entry = response.json()
+        assert entry == c.get('/api/library').json()['groups'][0]['entries'][0]
+        assert entry['job_exists'] is False and entry['original']['kept'] is False
+        details = entry['processing']
+        assert details['requested'] == {
+            'recipe': 'auto',
+            'quality': 'best',
+            'formats': ['aac_256'],
+            'split_tracks': False,
+            'advanced': {'target_lufs': -14.0, 'glue': 'off', 'harmonics': 'on', 'adaptive_lowmid': 'strong'},
+        }
+        assert details['resolved']['recipe'] == {'key': 'music', 'name': 'Song / music'}
+        assert details['resolved']['params'] == {'target_lufs': -14.0, 'highpass_hz': 25.0, 'mono_bass_hz': None}
+        assert details['resolved']['decisions'][0]['why'] == 'Detected music'
+        assert 'Adaptive processing' in details['resolved']['decisions'][1]['why']
+        applied = details['applied']
+        assert applied['ai'] == {'stage': 'stem_eq', 'fallback': True}
+        assert applied['limiter'] == {'engaged': False, 'max_gr_db': 0.0}
+        assert applied['steps'] == ['Removed inaudible rumble below 25 Hz']
+        assert len(applied['adaptive_lowmid']['events']) == 12
+        assert details['metrics']['after']['lufs'] == entry['loudness']['result_lufs'] == -12.0
+        assert entry['files'][0]['verification'] == {
+            'status': 'warning',
+            'integrated_lufs': -11.9,
+            'true_peak_dbtp': -0.8,
+            'ceiling_dbtp': -1.0,
+            'tolerance_db': 0.05,
+            'ceiling_met': False,
+        }
+        assert 'verification' not in entry['files'][1]
 
 
 def test_remove_entry_keeps_files_and_drops_unreferenced_original(manager):

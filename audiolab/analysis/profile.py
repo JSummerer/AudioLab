@@ -1,12 +1,12 @@
 """Audio profile: the measurements every other decision builds on.
 
-Fast by design: long files are measured on a few spread-out excerpts
-(see `load_samples`), short files completely. Everything here is plain
-numpy/scipy (no ffmpeg), 48 kHz in, float32.
+Levels cover the whole file. For long recordings, spectrum, stereo and key use
+spread-out excerpts (see `load_samples`). Everything here is plain numpy/scipy
+(no ffmpeg), 48 kHz in, float32.
 
 Reported (see `profile`): loudness (BS.1770 integrated LUFS, true peak, LRA),
 flat-top clipping, real audio bandwidth (lossy-cutoff detection), octave band
-balance and low-mid "mud", programme level percentiles, stereo width / mono / antiphase bass,
+balance, low-mid "mud" and how bright the top end is, programme level percentiles, stereo width / mono / antiphase bass,
 DC offset, a musical key estimate, the club-dynamics style used by the `club`
 recipe, and novice-friendly alerts. Silent material gets one plain alert
 instead of meaningless numbers.
@@ -23,12 +23,26 @@ from scipy.signal import butter, sosfiltfilt
 from ..dsp.limiter import true_peak_db
 from ..dsp.loudness import lra, programme_loudness
 from .key import estimate_key
+from .levels import (
+    SILENCE_DBFS,
+    ProgrammeLevels,
+    flat_top_count,
+    frame_rms_db,
+    programme_percentiles,
+    scan_levels,
+    stereo_samples,
+)
 
 OCTAVE_CENTERS = [31.5, 63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0]
 _WELCH_NFFT = 8192
 _FALLBACK_SECONDS = 180  # contiguous material anchored at a detected audible block
-SILENCE_DBFS = -80.0  # sample peak below this = silent (nothing a listener could hear)
 DC_ALERT = 0.01  # |mean| above -40 dBFS = a real DC offset
+# Top end: the 8 kHz octave (5.7-11.3 kHz: S sounds, cymbals) against the 1-2 kHz octaves.
+# Finished pop and dance masters measure about -5 to -7 dB, a dull concert recording -14,
+# pink noise 0. Provisional: calibrated on a few references, conservative on purpose (Enhance
+# lifts the highs only when they are clearly dull).
+TOP_END_BRIGHT_DB = -4.0
+TOP_END_DULL_DB = -10.0
 
 
 # ---------------------------------------------------------------------------
@@ -64,22 +78,16 @@ def load_samples(path: Path, span: tuple[int, int] | None = None) -> tuple[np.nd
             part, _ = sf.read(str(path), start=start, stop=start + n, dtype='float32', always_2d=True)
             parts.append(part)
         x = np.concatenate(parts, axis=0)
-    if x.shape[1] == 1:
-        x = np.repeat(x, 2, axis=1)
-    elif x.shape[1] > 2:
-        x = x[:, :2]
-    if not np.isfinite(x).all():  # broken float files: NaN/inf samples count as silence
-        x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
-    return x, sr, basis
+    return stereo_samples(x), sr, basis
 
 
 # ---------------------------------------------------------------------------
 # Spectrum helpers
 # ---------------------------------------------------------------------------
-def average_psd(
-    x: np.ndarray, sr: int, nfft: int = _WELCH_NFFT, max_frames: int = 400
-) -> tuple[np.ndarray, np.ndarray]:
-    """Welch-averaged power spectrum of the mid signal (mean over up to max_frames windows)."""
+def average_psd(x: np.ndarray, sr: int, nfft: int = _WELCH_NFFT, max_frames: int = 400, channels: bool = False):
+    """Welch-averaged power spectrum of the mid signal (mean over up to max_frames windows).
+    `channels=True` also returns the mean of the channels' own spectra from the same windows,
+    in which wide or out-of-phase stereo content counts at its real level instead of cancelling."""
     mono = x.mean(axis=1) if x.ndim > 1 else x
     nfft = min(nfft, 1 << int(math.log2(max(256, len(mono)))))
     hop = nfft // 2
@@ -88,13 +96,21 @@ def average_psd(
         starts = starts[np.linspace(0, len(starts) - 1, max_frames).astype(int)]
     win = np.hanning(nfft).astype(np.float32)
     acc = np.zeros(nfft // 2 + 1, dtype=np.float64)
+    acc_ch = np.zeros_like(acc)
+    two_d = x if x.ndim > 1 else x[:, None]
     for s0 in starts:
         seg = mono[s0 : s0 + nfft]
         if len(seg) < nfft:
             seg = np.pad(seg, (0, nfft - len(seg)))
         acc += np.abs(np.fft.rfft(seg * win)) ** 2
-    psd = acc / max(1, len(starts)) / (nfft * float((win**2).sum()))
-    return np.fft.rfftfreq(nfft, 1.0 / sr), psd
+        if channels:
+            segs = two_d[s0 : s0 + nfft]
+            if len(segs) < nfft:
+                segs = np.pad(segs, ((0, nfft - len(segs)), (0, 0)))
+            acc_ch += (np.abs(np.fft.rfft(segs * win[:, None], axis=0)) ** 2).mean(axis=1)
+    norm = max(1, len(starts)) * (nfft * float((win**2).sum()))
+    freqs = np.fft.rfftfreq(nfft, 1.0 / sr)
+    return (freqs, acc / norm, acc_ch / norm) if channels else (freqs, acc / norm)
 
 
 def octave_bands_db(freqs: np.ndarray, psd: np.ndarray) -> dict[str, float]:
@@ -198,16 +214,6 @@ def _bandwidth_from_psd(freqs: np.ndarray, psd: np.ndarray, sr: int, source_rate
 # ---------------------------------------------------------------------------
 # Level / stereo helpers
 # ---------------------------------------------------------------------------
-def frame_rms_db(x: np.ndarray, sr: int, frame_s: float = 0.05) -> np.ndarray:
-    mono_power = (x.astype(np.float32) ** 2).mean(axis=1) if x.ndim > 1 else x.astype(np.float32) ** 2
-    n = int(frame_s * sr)
-    m = len(mono_power) // n
-    if m == 0:
-        return np.array([-120.0])
-    p = mono_power[: m * n].reshape(m, n).mean(axis=1)
-    return 10.0 * np.log10(p + 1e-14)
-
-
 def noise_floor(x: np.ndarray, sr: int) -> dict[str, float]:
     """Programme-level percentiles, with legacy result names kept for compatibility.
 
@@ -215,13 +221,7 @@ def noise_floor(x: np.ndarray, sr: int) -> dict[str, float]:
     silence excluded); `snr_db` is the 90th-to-10th percentile distance. Neither
     statistic distinguishes wanted content from noise or diagnoses background noise.
     """
-    db = frame_rms_db(x, sr)
-    live = db[db > -100.0]
-    if live.size < 10:
-        return {'noise_floor_db': -120.0, 'snr_db': 120.0}
-    nf = float(np.percentile(live, 10))
-    loud = float(np.percentile(live, 90))
-    return {'noise_floor_db': round(nf, 1), 'snr_db': round(loud - nf, 1)}
+    return programme_percentiles(frame_rms_db(x, sr))
 
 
 def flat_top_clipping(x: np.ndarray, threshold: float = 0.999) -> float:
@@ -233,11 +233,7 @@ def flat_top_clipping(x: np.ndarray, threshold: float = 0.999) -> float:
     so up to +3 dBFS full scale stays the reference."""
     peak = float(np.abs(x).max(initial=0.0))
     ref = peak if peak > 1.41 else 1.0
-    hot = np.abs(x) >= threshold * ref
-    if not hot.any():
-        return 0.0
-    run = hot[2:] & hot[1:-1] & hot[:-2]
-    return round(100.0 * float(run.sum()) / max(1, hot.size), 4)
+    return round(100.0 * flat_top_count(x, threshold * ref) / max(1, x.size), 4)
 
 
 def stereo_info(x: np.ndarray, sr: int) -> dict[str, Any]:
@@ -295,13 +291,14 @@ def dynamics_style(lufs: float, lra_val: float) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Profile
 # ---------------------------------------------------------------------------
-def _silent_profile(sr: int, duration_s: float, basis: str, channels: int | None) -> dict[str, Any]:
+def _silent_profile(sr: int, duration_s: float, basis: str, level_basis: str, channels: int | None) -> dict[str, Any]:
     msg = 'This file is silent — there is nothing to measure or enhance.'
     return {
         'duration_s': round(float(duration_s), 2),
         'samplerate': sr,
         'channels': channels,
         'analysis_basis': basis,
+        'level_analysis_basis': level_basis,
         'is_silent': True,
         'integrated_lufs': -70.0,
         'true_peak_dbtp': -120.0,
@@ -320,6 +317,8 @@ def _silent_profile(sr: int, duration_s: float, basis: str, channels: int | None
         'bands_db': {str(int(fc)) if fc >= 100 else str(fc): -120.0 for fc in OCTAVE_CENTERS},
         'mud_excess_db': 0.0,
         'has_mud_excess': False,
+        'top_end_db': 0.0,
+        'top_end': 'normal',
         'noise_floor_db': -120.0,
         'snr_db': 0.0,
         'stereo': {'width_db': 0.0, 'is_mono': True, 'antiphase_bass': False, 'bass_correlation': 1.0},
@@ -337,28 +336,43 @@ def profile(
     channels: int | None = None,
     source_rate: int | None = None,
     check_cancel=None,
+    levels: ProgrammeLevels | None = None,
 ) -> dict[str, Any]:
     """`channels` / `source_rate`: the source file's own format (reported as `channels` and
     `samplerate`); x itself is the 48 kHz stereo analysis copy. `check_cancel` (optional)
-    is called between the measurements."""
+    is called between the measurements. `levels` supplies separately scanned
+    whole-file values when x contains excerpts."""
     channels = channels if channels is not None else (x.shape[1] if x.ndim > 1 else 1)
-    if x.shape[0] == 0 or float(np.abs(x).max(initial=0.0)) < 10.0 ** (SILENCE_DBFS / 20.0):
-        return _silent_profile(source_rate or sr, duration_s, basis, channels)
+    level_basis = 'whole file' if levels is not None else basis
+    silent = (
+        levels.audible_span is None
+        if levels is not None
+        else max(float(x.max(initial=0)), -float(x.min(initial=0))) < 10.0 ** (SILENCE_DBFS / 20.0)
+    )
+    if silent:
+        return _silent_profile(source_rate or sr, duration_s, basis, level_basis, channels)
     check = check_cancel or (lambda: None)
-    lufs = programme_loudness(x, sr=sr, check_cancel=check_cancel)
-    lra_val = lra(x, sr=sr, check_cancel=check_cancel)
-    tp = true_peak_db(x, check_cancel=check_cancel)
-    clip_pct = flat_top_clipping(x)
-    dc = float(np.abs(x.mean(axis=0)).max())
+    if levels is None:
+        lufs = programme_loudness(x, sr=sr, check_cancel=check_cancel)
+        lra_val = lra(x, sr=sr, check_cancel=check_cancel)
+        tp = true_peak_db(x, check_cancel=check_cancel)
+        clip_pct = flat_top_clipping(x)
+        dc = float(np.abs(x.mean(axis=0)).max())
+        nf = noise_floor(x, sr)
+    else:
+        lufs, lra_val, tp = levels.lufs, levels.lra, levels.true_peak_dbtp
+        clip_pct, dc, nf = levels.clipped_samples_pct, levels.dc_offset, levels.percentiles
     check()
-    freqs, psd = average_psd(x, sr)
+    freqs, psd, psd_ch = average_psd(x, sr, channels=True)
     bands = octave_bands_db(freqs, psd)
     bandwidth = _bandwidth_from_psd(freqs, psd, sr, source_rate)
     mud_est = (bands['250'] + bands['500']) / 2.0
     broadband = sum(bands.values()) / len(bands)
     mud_excess = round(mud_est - broadband, 2)
+    lr = octave_bands_db(freqs, psd_ch)  # channels' own spectra: wide highs must not read as dull
+    top_end_db = round(lr['8000'] - (lr['1000'] + lr['2000']) / 2.0, 2)
+    top_end = 'bright' if top_end_db > TOP_END_BRIGHT_DB else 'dull' if top_end_db < TOP_END_DULL_DB else 'normal'
     check()
-    nf = noise_floor(x, sr)
     stereo = stereo_info(x, sr)
     style = dynamics_style(lufs, lra_val)
     check()
@@ -423,8 +437,18 @@ def profile(
         alerts.append(
             {
                 'level': 'info',
-                'title': 'A bit boomy / boxy',
-                'message': f'Low-mids (250–500 Hz) sit {mud_excess:+.1f} dB above the overall balance.',
+                'title': 'Prominent low-mids',
+                'message': f'Low-mids (250–500 Hz) sit {mud_excess:+.1f} dB above the average octave level. '
+                'This can be intentional warmth; the spectrum alone does not call for a correction.',
+            }
+        )
+    if top_end == 'bright':
+        alerts.append(
+            {
+                'level': 'info',
+                'title': 'Bright top end',
+                'message': 'S sounds and cymbals (6–11 kHz) are brighter than in most music, '
+                'so it can sound sharp when played loud.',
             }
         )
     if stereo['antiphase_bass']:
@@ -443,6 +467,7 @@ def profile(
         'samplerate': source_rate or sr,
         'channels': channels,
         'analysis_basis': basis,
+        'level_analysis_basis': level_basis,
         'is_silent': False,
         'integrated_lufs': round(lufs, 2),
         'true_peak_dbtp': round(tp, 2),
@@ -454,6 +479,8 @@ def profile(
         'bands_db': bands,
         'mud_excess_db': mud_excess,
         'has_mud_excess': bool(mud_excess > 1.0),
+        'top_end_db': top_end_db,
+        'top_end': top_end,
         'noise_floor_db': nf['noise_floor_db'],
         'snr_db': nf['snr_db'],
         'stereo': stereo,
@@ -461,26 +488,6 @@ def profile(
         'key': key,
         'alerts': alerts,
     }
-
-
-def _audible_span(path: Path, check_cancel=None) -> tuple[int, int] | None:
-    """Outer bounds of audible 1 s blocks, by a streamed peak scan.
-
-    There may be silent gaps between these bounds. None means silence throughout.
-    """
-    thr = 10.0 ** (SILENCE_DBFS / 20.0)
-    sr = sf.info(str(path)).samplerate
-    first = last = None
-    pos = 0
-    for blk in sf.blocks(str(path), blocksize=sr, dtype='float32', always_2d=True):
-        if check_cancel:
-            check_cancel()
-        blk = np.nan_to_num(blk, nan=0.0, posinf=0.0, neginf=0.0)
-        if blk.size and max(float(blk.max()), -float(blk.min())) >= thr:
-            first = pos if first is None else first
-            last = pos + len(blk)
-        pos += len(blk)
-    return None if first is None else (first, last)
 
 
 def analyze_file(
@@ -494,26 +501,29 @@ def analyze_file(
         progress(5, 'Reading audio for analysis...')
     info = sf.info(str(path))
     x, sr, basis = load_samples(Path(path))
-    if progress is not None:
-        progress(40, 'Measuring loudness, peaks and frequency range...')
     check = progress.check_cancel if progress is not None else None
     fmt = {'channels': source_channels or info.channels, 'source_rate': source_rate, 'check_cancel': check}
-    rep = profile(x, sr, info.duration, basis, **fmt)
-    if rep['is_silent'] and basis != 'whole file':
-        # The sampled spots were silent: check the whole file before saying so, and
-        # if there is sound somewhere, include a block that actually contains it.
-        span = _audible_span(Path(path), check_cancel=check)
-        if span is not None:
-            first, last = span
+    levels = None
+    if basis != 'whole file':
+        if progress is not None:
+            progress(40, 'Measuring levels across the whole recording...')
+        levels = scan_levels(Path(path), sr, info.frames, progress.sub(40, 80) if progress is not None else None)
+        if levels.audible_span is None:
+            basis = 'whole-file silence confirmed by a streamed peak scan'
+        elif max(float(x.max(initial=0)), -float(x.min(initial=0))) < 10.0 ** (SILENCE_DBFS / 20.0):
+            # The scheduled spectral excerpts missed the audible material.
+            first, last = levels.audible_span
             stop = min(last, first + _FALLBACK_SECONDS * sr)
             x, sr, _ = load_samples(Path(path), (first, stop))
             basis = (
                 f'{(stop - first) / sr:g} s contiguous excerpt starting at {first / sr:g} s '
                 '(anchored at the first block with detected sound)'
             )
-            rep = profile(x, sr, info.duration, basis, **fmt)
-        else:
-            rep['analysis_basis'] = 'whole-file silence confirmed by a streamed peak scan'
+        if progress is not None:
+            progress(80, 'Measuring frequency range in excerpts...')
+    elif progress is not None:
+        progress(40, 'Measuring loudness, peaks and frequency range...')
+    rep = profile(x, sr, info.duration, basis, levels=levels, **fmt)
     if progress is not None:
         progress(100, 'Analysis done')
     return rep, x, sr

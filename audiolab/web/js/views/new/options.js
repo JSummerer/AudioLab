@@ -2,10 +2,10 @@
 // Check) and the options of the chosen task. Rarely used choices and fine-tuning
 // sit under each task's "More options"; whatever is set there is sent.
 import { h, icon, clear } from '../../dom.js';
-import { store, aiAvailable, deviceLabel, isShown, setShown, formatInfo } from '../../store.js';
+import { store, aiAvailable, isShown, setShown, formatInfo } from '../../store.js';
 import { segmented, chips, switchControl, autoRange, toast, callout } from '../../ui.js';
 import { go, settingsPath } from '../../router.js';
-import { state, refs, redraw, definePart, isFileLike, isLinkSource, appliedAdvanced, TASKS, LIGHT_KEYS, RECIPE_LABELS } from './state.js';
+import { state, refs, redraw, definePart, isFileLike, isLinkSource, appliedAdvanced, TASKS, LIGHT_KEYS, RECIPE_LABELS, PROCESSING_LABELS } from './state.js';
 import { tracksBlock } from './tracks.js';
 import { hasOwnCover } from './cover.js';
 import { TASK_ICON } from '../job/index.js';
@@ -319,22 +319,22 @@ function renderEnhanceOptions(el) {
   el.append(
     optionBlock('Type of audio',
       segmented({ label: 'Type of audio', value: e.recipe, options: recipeOptions(), onChange: (v) => { e.recipe = v; redraw('sleeve'); } })),
-    optionBlock('Quality',
+    optionBlock('Processing',
       segmented({
-        label: 'Quality', value: e.quality,
+        label: 'Processing', value: e.quality,
         options: [
-          { value: 'light', label: 'Light', desc: 'Volume only · keeps the sound' },
-          { value: 'standard', label: 'Standard', desc: 'No AI add-on needed' },
+          { value: 'light', label: PROCESSING_LABELS.light, desc: 'Sets the loudness and keeps peaks in check' },
+          { value: 'standard', label: PROCESSING_LABELS.standard, desc: 'Adjusts tone and level to suit the recording' },
           {
-            value: 'best', label: 'Best', disabled: !ai,
-            desc: ai ? `Uses AI · slower${store.health?.ai?.device ? ` · ${deviceLabel(store.health.ai.device)}` : ''}` : null,
+            value: 'best', label: PROCESSING_LABELS.best, disabled: !ai,
+            desc: ai ? 'Treats parts separately where the recipe supports it. Slower and can change the tone.' : null,
             reason: store.health?.ai?.install_supported === false ? 'AI is unavailable in this build' : 'Needs the AI add-on',
           },
         ],
         onChange: (v) => {
           const wasLight = e.quality === 'light';
           e.quality = v;
-          // Light takes fewer fine-tuning settings.
+          // Volume only takes fewer fine-tuning settings.
           if (wasLight !== (v === 'light')) refs.options.querySelector('.fine-tuning')?.replaceWith(fineTuning());
           redraw('action');
           syncMore?.();
@@ -361,8 +361,8 @@ function renderEnhanceOptions(el) {
 function fineTuning() {
   const a = state.enhance.advanced;
   const set = (k) => (v) => { if (v == null || v === 'auto') delete a[k]; else a[k] = v; };
-  const tri = (k, opts) => segmented({
-    label: k, size: 'sm', value: a[k] ?? 'auto',
+  const tri = (k, label, opts) => segmented({
+    label, size: 'sm', value: a[k] ?? 'auto',
     options: opts.map(([value, label]) => ({ value, label })), onChange: set(k),
   });
   const light = state.enhance.quality === 'light';
@@ -373,15 +373,21 @@ function fineTuning() {
       autoRange({ min: -3, max: -0.1, step: 0.1, value: a.tp_ceiling_db ?? null, unit: 'dBTP', fallback: -1, onChange: set('tp_ceiling_db') })],
     ['bass_db', 'Bass boost', 'Extra low end. 0 keeps the bass as it is.',
       autoRange({ min: 0, max: 6, step: 0.5, value: a.bass_db ?? null, unit: 'dB', fallback: 1.5, onChange: set('bass_db') })],
-    ['glue', 'Glue compression', 'Gently evens out loud and quiet moments in a mix.', tri('glue', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']])],
-    ['hf_restore', 'Restore highs', 'Rebuilds missing top end on compressed uploads. Can sound brighter than the source.', tri('hf_restore', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']])],
+    ['harmonics', 'Bass harmonics', 'Adds harmonics so deep bass is easier to hear on small speakers. Off by default.',
+      switchControl({ label: 'Bass harmonics', checked: a.harmonics === 'on', onChange: (on) => set('harmonics')(on ? 'on' : null) })],
+    ['adaptive_lowmid', 'Adaptive low-mids', 'Tames brief buildup in the low-mids while keeping steady warmth. Strong allows a deeper cut. Skipped when AI shapes the stems.',
+      tri('adaptive_lowmid', 'Adaptive low-mids', [['auto', 'Auto'], ['strong', 'Strong'], ['off', 'Off']])],
+    ['glue', 'Glue compression', 'Gently evens out loud and quiet moments in a mix.', tri('glue', 'Glue compression', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']])],
+    ['hf_restore', 'Restore highs', 'Adds new high-frequency harmonics to brighten compressed audio. Lost detail cannot be recovered.', tri('hf_restore', 'Restore highs', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']])],
     ['denoise', 'Noise reduction', 'Off by default. Choose Light or Strong only if you hear steady hiss or hum.',
       segmented({
         label: 'Noise reduction', size: 'sm', value: ['light', 'strong'].includes(a.denoise) ? a.denoise : 'off',
         options: [['off', 'Off'], ['light', 'Light'], ['strong', 'Strong']].map(([value, label]) => ({ value, label })),
         onChange: (v) => set('denoise')(v === 'off' ? null : v),
       })],
-    ['mono_bass', 'Mono bass', 'Makes deep bass mono, as club systems expect.', tri('mono_bass', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']])],
+    ['mono_bass', 'Mono bass', 'Makes deep bass mono, as club systems expect.', tri('mono_bass', 'Mono bass', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']])],
+    ['deess', 'Sharp S sounds', 'Softens S sounds and cymbal hits only where they jump out. Strong suits harsh recordings.',
+      tri('deess', 'Sharp S sounds', [['auto', 'Auto'], ['strong', 'Strong'], ['off', 'Off']])],
     ['sample_rate', 'Sample rate', 'Higher rates don’t add detail; 48 kHz is the safe choice.',
       segmented({
         label: 'Sample rate', size: 'sm', value: a.sample_rate ?? 'auto',
@@ -391,7 +397,7 @@ function fineTuning() {
   ];
   const el = optionBlock('Fine-tuning',
     h('p', { class: 'muted small adv-note' }, light
-      ? 'Light only changes the volume, so only these settings apply.'
+      ? 'Only these settings apply when you choose Volume only.'
       : 'Keep the defaults unless you know you want something else. Noise reduction is off until you choose it.'),
     advRows((light ? rows.filter(([key]) => LIGHT_KEYS.includes(key)) : rows).map(([, ...rest]) => rest)));
   el.classList.add('fine-tuning');

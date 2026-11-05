@@ -1,9 +1,9 @@
 # AudioLab for Mac
 
-**[View the release on GitHub](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b3)** · [Direct download (.dmg, 106 MB)](https://github.com/JSummerer/AudioLab/releases/download/v2.4.0b3/AudioLab-2.4.0b3-macOS-arm64.dmg) · public beta
+**[View beta 4 on GitHub](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b4)** · [Direct download (.dmg)](https://github.com/JSummerer/AudioLab/releases/download/v2.4.0b4/AudioLab-2.4.0b4-macOS-arm64.dmg) · public beta
 
 No Terminal, Python installation or AudioLab account is needed. The app contains its own audio tools.
-Save / Convert, Check, Light/Standard Enhance and the Library work without the optional AI download.
+Save / Convert, Check, the Library, and Enhance in **Volume only** or **Adaptive** mode work without the optional AI download.
 
 **On this page:** [Check your Mac](#check-your-mac) · [Install](#download-and-install) ·
 [First opening](#first-opening) · [Optional AI](#optional-ai) · [Updates](#updates) ·
@@ -28,7 +28,7 @@ See [hardware and storage](HARDWARE.md) for memory, disk, model choices and the 
 
 1. **Choose your download:** open the GitHub release page above and select the `.dmg` under **Assets**,
    or use **Direct download** to start immediately. The file is named
-   **AudioLab-2.4.0b3-macOS-arm64.dmg** and normally appears in Downloads.
+   **AudioLab-2.4.0b4-macOS-arm64.dmg** and normally appears in Downloads.
 2. **Open the downloaded file.** In its window, drag **AudioLab.app** into **Applications**.
    Wait for Finder to finish copying, then eject the AudioLab disk image in Finder's sidebar.
 3. **Open AudioLab from Applications.** If macOS blocks it, follow the next section.
@@ -63,12 +63,12 @@ local audio file and Convert or Check; AI setup is optional.
 
 ## Optional AI
 
-AI adds **Split** and **Best Enhance**. You can enable it later or remove it without removing the app.
+AI adds **Split** and the **AI stems** mode in Enhance. You can enable or remove the add-on in Settings.
 
 1. Open **Settings → AI & system** and choose **Enable AI features**.
 2. Keep AudioLab open and connected to the internet while it downloads. Settings shows the amount
    downloaded, then **Installing** and **Checking** while it unpacks and tests the add-on.
-3. Wait for **Ready**. Split and Best Enhance are now available, including both **Standard** and
+3. Wait for **Ready**. Split and AI stems are now available, including both **Standard** and
    **Fine-tuned** model choices. Local audio can then be processed offline.
 
 The download is roughly **0.6 GB**, with about **1 GB** installed. Allow extra free disk space for
@@ -88,18 +88,17 @@ separately from any Python or other tools you may already have installed.
 
 AI needs additional **working memory (RAM)** while processing; the disk figures above are not a RAM
 requirement. We provisionally prefer **16 GB or more** for early AI testing, without claiming a minimum. Begin with a
-short recording and the **Standard AI model**; Fine-tuned is slower. **Standard Enhance quality**
-is a separate choice and works without AI. See [hardware guidance](HARDWARE.md) for more detail.
+short recording and the **Standard AI model**. Fine-tuned is slower. See [hardware guidance](HARDWARE.md).
 
 ## Updates
 
-1. Quit AudioLab and download the new app from [GitHub Releases](https://github.com/JSummerer/AudioLab/releases).
-2. Open its `.dmg`, drag **AudioLab.app** into **Applications**, and choose **Replace** when Finder asks.
-3. Eject the disk image and open the new app. Check **Settings → About** for its version.
+1. Quit AudioLab and download a fresh `.dmg` using the link at the top of this guide.
+2. Open the `.dmg` and drag **AudioLab.app** into the same **Applications** folder as your existing
+   copy. Choose **Replace** when Finder asks.
+3. Eject the disk image and open the new app from that folder. Confirm **2.4.0b4** in **Settings → About**.
 
-Your Library, settings and finished audio normally stay outside the app and are reused. Read the
-release notes for any special instructions. You may need the first-opening steps again.
-The app does not update itself automatically.
+Your Library, settings and finished audio are stored outside the app and carry over when you replace
+it. App updates are manual. If macOS blocks the updated app, follow the [first-opening steps](#first-opening).
 
 For optional AI, check **Settings → AI & system** after updating the app. **Update AI add-on** appears
 when that app needs a different compatible version. Otherwise, an existing compatible installation
@@ -156,9 +155,9 @@ Older source installations have [separate cleanup notes](INSTALLATION.md#uninsta
 | macOS blocks the first opening | Follow [First opening](#first-opening). If **Open Anyway** is unavailable on a managed Mac, ask its administrator. |
 | The app still will not open, or says it is damaged | Check the chip/macOS requirement above. Keep the exact message and [report it](https://github.com/JSummerer/AudioLab/issues/new?template=bug_report.md); do not disable macOS protections. |
 | AI download or installation stops | Check your connection and free disk space. Read the message in **AI & system**, then Resume or Retry. If it fails again, include the error in a report. |
-| Split or Best is unavailable | Enable AI and wait for **Ready**. If already installed, read the reason and use **Repair**. Version 2.4.0b1 needs an app update first. |
+| Split or AI stems is unavailable | Enable AI and wait for **Ready**. If already installed, read the reason and use **Repair**. Version 2.4.0b1 needs an app update first. |
 | A link fails | Check for a newer app release, or use a local audio file. Supported sites can change. |
-| A job needs too much memory or disk | Try a shorter recording or Light/Standard Enhance. |
+| A job needs too much memory or disk | Try a shorter recording or switch to Volume only or Adaptive in Enhance. |
 
 For a failed job, choose **Copy details for a bug report**. For other problems, use
 **Settings → About → Copy system report**. If the app cannot open, just report the warning, Mac chip,
@@ -189,5 +188,5 @@ entry preserves output files; its kept original may go when no other entry uses 
 explains. Copies saved through a download dialog stay wherever you saved them.
 
 For what was tested and remaining beta limitations, see the
-[release notes](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b3).
+[release notes](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b4).
 Build contributors: see the [macOS packaging guide](../packaging/macos/README.md).

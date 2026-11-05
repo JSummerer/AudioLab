@@ -75,7 +75,7 @@ export function metricsBlock(r) {
     const row = (label, before, after) => h('div', { class: 'ba-row' },
       h('span', { class: 'ba-label' }, label),
       h('span', { class: 'ba-before' }, before), icon('arrow', 14, 'ba-arrow'), h('strong', { class: 'ba-after' }, after));
-    return detailsBlock('Before → after', h('div', { class: 'ba-rows' },
+    return detailsBlock('Original → master', h('div', { class: 'ba-rows' },
       row('Volume', loudnessWord(b.lufs), loudnessWord(a.lufs)),
       row('Peaks', peakVerdict(b.true_peak_dbtp).word, peakVerdict(a.true_peak_dbtp).word),
       row('Dynamics', dynamicsWord(b.lra), dynamicsWord(a.lra))));
@@ -85,9 +85,9 @@ export function metricsBlock(r) {
     h('td', { class: 'num' }, fmtNum(b[kb], digits)),
     h('td', { class: 'num' }, fmtNum(a[kb], digits)),
     h('td', { class: 'num muted' }, b[kb] != null && a[kb] != null ? fmtSigned(a[kb] - b[kb]) : '–'));
-  return detailsBlock('Measurements',
+  return detailsBlock('Master measurements',
     h('table', { class: 'data' },
-      h('thead', null, h('tr', null, h('th', null, ''), h('th', null, 'Before'), h('th', null, 'After'), h('th', null, 'Change'))),
+      h('thead', null, h('tr', null, h('th', null, ''), h('th', null, 'Original'), h('th', null, 'Master'), h('th', null, 'Change'))),
       h('tbody', null,
         tr('Integrated loudness', 'LUFS', 'lufs'),
         tr('True peak', 'dBTP', 'true_peak_dbtp'),
@@ -190,7 +190,8 @@ function factsBlock(a) {
   return block('Details', h('dl', { class: 'facts' },
     fact('Length', fmtDuration(a.duration_s)),
     fact('Source', sourceLine(a)),
-    fact('Measured on', a.analysis_basis)));
+    fact('Levels measured on', a.level_analysis_basis || a.analysis_basis),
+    fact('Tone, stereo and key measured on', a.analysis_basis)));
 }
 
 /** Nothing to measure: one clear state instead of a list of "–". */

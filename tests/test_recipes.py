@@ -100,6 +100,49 @@ def test_resolve_overrides_and_safety():
     assert p.denoise == 'off' and p.compressor == 'leveler' and p.target_lufs == -16.0
 
 
+def test_highs_lifted_only_where_measured():
+    """The highs are a tightrope: no clarity lift on a bright top end, air only on a dull, lossless one."""
+    base = {'integrated_lufs': -10.0, 'lra': 6.0, 'bandwidth': {'is_lossy_cutoff': False, 'cutoff_hz': 20300}}
+    p, d = resolve('music', {**base, 'top_end': 'normal', 'top_end_db': -6.0, 'source_audio_codec': 'flac'})
+    assert p.presence_db == 0.5 and p.air_db == 0.0
+    why = {x['key']: x['why'] for x in d}
+    assert 'in balance' in why['air_db'] and '3 kHz' in why['presence_db']
+    p, d = resolve('music', {**base, 'top_end': 'bright', 'top_end_db': -3.0})
+    assert p.presence_db == 0.0 and p.air_db == 0.0
+    p, _ = resolve('voice', {**base, 'top_end': 'bright', 'top_end_db': -3.0})
+    assert p.presence_db == 0.0, 'a bright voice gets no clarity lift either'
+    p, _ = resolve('club', {**base, 'top_end': 'dull', 'top_end_db': -12.0, 'source_audio_codec': 'flac'})
+    assert p.air_db == 1.0
+    p, d = resolve('club', {**base, 'top_end': 'dull', 'top_end_db': -12.0, 'source_audio_codec': 'opus'})
+    assert p.air_db == 0.0 and 'compressed audio (opus)' in {x['key']: x['why'] for x in d}['air_db']
+
+
+def test_deess_decisions():
+    prof = {'integrated_lufs': -10.0, 'lra': 6.0}
+    p, d = resolve('music', prof)
+    assert p.deess_db == 3.0 and p.stem_deess_db() == 4.0
+    assert 'jump out' in {x['key']: x['why'] for x in d}['deess']
+    assert resolve('voice', prof)[0].deess_db == 4.0
+    assert resolve('music', prof, advanced={'deess': 'off'})[0].stem_deess_db() == 0.0
+    assert resolve('music', prof, advanced={'deess': 'strong'})[0].stem_deess_db() == 6.0
+    p, d = resolve('music', prof, quality='light', advanced={'deess': 'strong'})
+    assert p.deess_db == 0.0 and 'sharp S sounds' in {x['key']: x['why'] for x in d}['ignored']
+
+
+def test_vocals_stem_lift_stays_out_of_the_s_sounds():
+    from scipy.signal import sosfreqz
+
+    from audiolab.recipes.chain import _stem_eq
+
+    def gain_db(sos_list, hz):
+        return sum(2 * 20 * np.log10(abs(sosfreqz(s, worN=[hz], fs=SR)[1][0])) for s in sos_list)
+
+    vocals = _stem_eq(0.0, True, SR)['vocals']
+    assert gain_db(vocals, 3000) > 0.6
+    assert all(gain_db(vocals, hz) < 0.25 for hz in (5000, 6000, 7000, 8000))
+    assert gain_db(_stem_eq(0.0, False, SR)['vocals'], 3000) < 0.1
+
+
 def test_render_each_recipe_hits_targets(tmp_path):
     src = make_synthetic_set(tmp_path / 'set.flac', level=0.3)
     prof, _, _ = analyze_file(src)

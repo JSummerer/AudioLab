@@ -125,6 +125,36 @@ def test_bandwidth_detects_lossy_cutoff():
     assert tone['judged'] is False and tone['cutoff_hz'] is None and not tone['is_lossy_cutoff'], tone
 
 
+def test_top_end_bright_dull_normal():
+    """8 kHz octave against 1-2 kHz: pink noise is bright, a 4 kHz low-pass dull, a -3 dB/octave tilt
+    (about where finished pop and dance masters sit) normal."""
+    rng = np.random.default_rng(3)
+    n = SR * 10
+    f = np.fft.rfftfreq(n, 1 / SR)
+    spec = rng.standard_normal((len(f), 2)) + 1j * rng.standard_normal((len(f), 2))
+    f[0] = 1.0
+
+    def shaped(gain: np.ndarray) -> np.ndarray:
+        x = np.fft.irfft(spec * gain[:, None], n=n, axis=0)
+        return (0.3 * x / np.abs(x).max()).astype(np.float32)
+
+    pink = 1 / np.sqrt(f)
+    for gain, verdict in (
+        (pink, 'bright'),
+        (pink / (1 + (f / 4000) ** 4), 'dull'),
+        (pink / np.sqrt(f / 1000) ** (3 / 3.0103), 'normal'),
+    ):
+        rep = profile(shaped(gain), SR, 10.0, 'whole file')
+        assert rep['top_end'] == verdict, (verdict, rep['top_end_db'])
+        assert any(a['title'] == 'Bright top end' for a in rep['alerts']) == (verdict == 'bright')
+    # Out-of-phase highs cancel in the mid signal; each channel is still just as bright.
+    one = np.fft.irfft(spec[:, 0] * pink, n=n)
+    flipped = np.fft.irfft(spec[:, 0] * pink * np.where(f > 3000, -1.0, 1.0), n=n)
+    wide = np.column_stack([one, flipped])
+    rep = profile((0.3 * wide / np.abs(wide).max()).astype(np.float32), SR, 10.0, 'whole file')
+    assert rep['top_end'] == 'bright', rep['top_end_db']
+
+
 def test_profile_keys_and_alerts():
     x = _club(20.0)
     rep = profile(x, SR, 20.0, 'whole file')
@@ -135,6 +165,7 @@ def test_profile_keys_and_alerts():
         'bandwidth',
         'bands_db',
         'mud_excess_db',
+        'top_end_db',
         'noise_floor_db',
         'stereo',
         'dynamics_style',

@@ -5,8 +5,8 @@
                                    (the downloaded stream or the uploaded file — never a decoded WAV)
                                    so results can be compared with it later (setting `keep_originals`)
 
-An entry is the original plus the final output files — nothing else is written for it (comparing
-streams the full files).
+An entry records the original and final output files. Enhance also keeps processing details and
+any export checks with the entry (comparing streams the full files).
 
 JobManager writes the entry when a job finishes (CLI runs are not recorded); jobs expire or get
 cleared, entries stay until the user removes them. Removing an entry never touches the output
@@ -30,6 +30,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
+from . import processing
 from .media.export import FORMATS
 from .settings import SETTINGS
 from .system import replace_file
@@ -143,6 +144,8 @@ def record(job, check_cancel: Callable[[], None] | None = None, begin_commit: Ca
         'markers_source': hints.get('markers_source'),
         'original': None,
     }
+    if job.task == 'enhance' and (details := processing.snapshot(job.options, result)) is not None:
+        entry['processing'] = details
     with ExitStack() as cleanup:
         item = _original_item(original, digest, entry, hints.get('original_codec')) if original and digest else None
         staged = None
@@ -197,6 +200,8 @@ def _file_item(f: dict[str, Any], root: Path, task: str, stem: str | None = None
     item.update({k: f[k] for k in ('track', 'start_s', 'end_s') if f.get(k) is not None})
     if stem:
         item['stem'] = stem
+    if kind == 'enhanced' and (verification := processing.verification(f.get('verification'))) is not None:
+        item['verification'] = verification
     return item
 
 

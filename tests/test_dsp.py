@@ -1,5 +1,5 @@
 """Unit tests for the DSP building blocks: biquads, mono fold, glue comp,
-true-peak limiter, dither, BS.1770 loudness (vs ffmpeg), denoise, exciter."""
+true-peak limiter, dither, BS.1770 loudness (vs ffmpeg), denoise, exciter, de-esser."""
 
 import re
 import subprocess
@@ -9,6 +9,7 @@ import pytest
 import soundfile as sf
 
 from audiolab.dsp.bus import glue_comp, mono_below
+from audiolab.dsp.deess import deess
 from audiolab.dsp.denoise import spectral_gate
 from audiolab.dsp.dither import add_24bit_tpdf, quantize_to_16bit
 from audiolab.dsp.exciter import hf_restore
@@ -62,6 +63,93 @@ def test_limiter_intersample_peaks():
     out, info = tp_limit(sig, ceiling_db=-1.25, sr=SR)
     assert true_peak_db(out) <= -1.20
     assert info['engaged'] is True
+
+
+def test_limiter_gain_does_not_scratch_the_highs():
+    """Loud kicks trip the limiter; a quiet 7 kHz tone (S sounds, cymbals) riding on them must not
+    get an audio-rate gain wobble: little energy 150-1500 Hz away from the tone (2 ms + 0.5 ms
+    timing measured -46 dB here)."""
+    t = np.arange(4 * SR) / SR
+    kick = np.zeros_like(t)
+    for s in np.arange(0, 4, 0.5):
+        m = t >= s
+        kick[m] += np.sin(2 * np.pi * 55 * (t[m] - s)) * np.exp(-(t[m] - s) / 0.08)
+    x = np.column_stack([kick + 0.03 * np.sin(2 * np.pi * 7000 * t)] * 2).astype(np.float32)
+    x *= np.float32(10 ** (1.5 / 20) / np.abs(x).max())
+    out, info = tp_limit(x, ceiling_db=-1.0, sr=SR)
+    assert info['ceiling_met'] and 0 < info['active_pct'] < 50
+    spec = np.abs(np.fft.rfft(out[:, 0].astype(np.float64) * np.hanning(len(out)))) ** 2
+    d = np.abs(np.fft.rfftfreq(len(out), 1 / SR) - 7000)
+    far = 10 * np.log10(spec[(d > 150) & (d <= 1500)].sum() / spec[d <= 10].sum())
+    assert far < -53, far
+
+
+def _voice_with_s(seconds: int = 6, s_len: float = 0.13):
+    """A voice-like tone with a little breath in the S band, then a loud S burst each second."""
+    from scipy.signal import butter, sosfiltfilt
+
+    rng = np.random.default_rng(7)
+    t = np.arange(seconds * SR) / SR
+    phase = t % 1.0
+    voiced_on, s_on = phase < 0.6, (phase > 0.62) & (phase < 0.62 + s_len)
+    voiced = sum(np.sin(2 * np.pi * h * 160 * t) / h for h in range(1, 20)) * voiced_on
+    band = sosfiltfilt(butter(4, [5000, 9000], 'bandpass', fs=SR, output='sos'), rng.standard_normal(len(t)))
+    sig = 0.2 * voiced + band * (0.01 * voiced_on + 0.25 * s_on)
+    return np.column_stack([sig, 0.5 * sig]).astype(np.float32), s_on, (phase > 0.1) & (phase < 0.5)
+
+
+def _band_db(x, mask):
+    from scipy.signal import butter, sosfiltfilt
+
+    b = sosfiltfilt(butter(4, [5000, 9000], 'bandpass', fs=SR, output='sos'), x[:, 0].astype(np.float64))
+    return 10 * np.log10((b[mask] ** 2).mean())
+
+
+def test_deess_softens_s_spikes_only():
+    x, s_on, vowel = _voice_with_s()
+    y, st = deess(x.copy(), SR, max_gr_db=3.0, mix=False)
+    assert st['engaged'] and 0 < st['active_pct'] < 30 and st['max_gr_db'] <= 3.0 and st['budget_db'] == 0
+    assert -3.1 < _band_db(y, s_on) - _band_db(x, s_on) < -2.0, 'S bursts softened by up to the cap'
+    assert abs(_band_db(y, vowel) - _band_db(x, vowel)) < 0.2, 'the breath in the vowels stays'
+    assert y.dtype == np.float32
+    assert np.allclose(y[:, 1], 0.5 * y[:, 0], atol=1e-6), 'stereo-linked: the image does not move'
+
+
+def test_deess_frequent_s_sounds_are_still_spikes():
+    """A very sibilant voice (S a third of the time) must not raise its own baseline out of reach."""
+    x, s_on, _ = _voice_with_s(s_len=0.35)
+    y, st = deess(x.copy(), SR, max_gr_db=4.0, mix=False)
+    assert st['engaged'] and _band_db(y, s_on) - _band_db(x, s_on) < -3.0
+
+
+def test_deess_safety_budget_on_a_mix():
+    """S bursts 13 % of the time are a lot for a mix: auto keeps the band's overall energy within
+    0.3 dB (the track's tone stays put) and still softens the spikes; Strong may take twice that."""
+    x, s_on, _ = _voice_with_s()
+    y, st = deess(x.copy(), SR, max_gr_db=3.0)
+    assert st['engaged'] and st['budget_db'] > 0 and -0.31 <= st['band_change_db'] < -0.1
+    assert _band_db(y, s_on) - _band_db(x, s_on) < -0.1
+    _, strong = deess(x.copy(), SR, max_gr_db=6.0)
+    assert -0.61 <= strong['band_change_db'] < st['band_change_db']
+
+
+def test_deess_leaves_steady_audio_alone_and_cancels():
+    rng = np.random.default_rng(2)
+    steady = (0.1 * rng.standard_normal((SR * 4, 2))).astype(np.float32)
+    y, st = deess(steady.copy(), SR)
+    assert not st['engaged'] and np.array_equal(y, steady)
+    _, st = deess(steady.copy(), SR, max_gr_db=0.0)
+    assert st == {'engaged': False, 'skip_reason': 'off'}
+
+    calls = []
+
+    def cancel():
+        calls.append(1)
+        if len(calls) > 2:
+            raise RuntimeError('cancelled')
+
+    with pytest.raises(RuntimeError):
+        deess(_voice_with_s()[0], SR, check_cancel=cancel)
 
 
 def test_true_peak_chunked_matches_whole_signal():

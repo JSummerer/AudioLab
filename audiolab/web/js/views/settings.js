@@ -497,7 +497,7 @@ function renderSystem() {
     aiDetail = `Ready${ai.version ? ` · ${ai.version}` : ''}${ai.device ? ` · runs on ${deviceLabel(ai.device)}` : ''}${ai.device === 'cpu' ? ' (works, but slowly)' : ''}`;
     if (outdated) aiDetail += ' · update available';
   } else {
-    aiDetail = ai.reason || 'Not installed. Needed for Split and for Enhance → Best.';
+    aiDetail = ai.reason || 'Not installed. Needed for Split and for Enhance → AI stems.';
   }
   if (!ai.installing && ai.install_ok === false) aiDetail += ' · last install did not finish';
   if (!ai.installing && canInstall && (!ai.available || outdated)) {
@@ -519,7 +519,7 @@ function renderSystem() {
     actions.append(aiButton('removeAi', 'Remove AI add-on', 'btn-ghost btn-danger-text', async () => {
       const ok = await confirmDialog({
         title: 'Remove the AI add-on?',
-        message: 'Removes AudioLab’s optional AI software, models, caches and partial downloads. Split and Best enhancement will need it again. Your recordings, Library and settings stay.',
+        message: 'Removes AudioLab’s optional AI software, models, caches and partial downloads. Split and AI stems will need it again. Your recordings, Library and settings stay.',
         confirm: 'Remove AI add-on',
       });
       if (!ok) return;
@@ -533,9 +533,9 @@ function renderSystem() {
   if (managed && ai.target_installed_bytes > 0) sizes.push(`Unpacked download: ${fmtBytes(ai.target_installed_bytes)}.`);
   if (managed && ai.installed_bytes > 0) sizes.push(`AI storage used: ${fmtBytes(ai.installed_bytes)}.`);
   const help = managed
-    ? 'Adds Split and Best enhancement. One download includes the AI software and both model choices; processing then works offline on this computer.'
-    : canInstall ? 'Adds Split and Best enhancement. Installs AI software in this source environment; models download on first use.'
-      : 'Save, Convert, Check, and Standard or Light enhancement work without the AI add-on.';
+    ? 'Adds Split and AI stems. One download includes the AI software and both model choices; processing then works offline on this computer.'
+    : canInstall ? 'Adds Split and AI stems. Installs AI software in this source environment; models download on first use.'
+      : 'Save, Convert, Check, and the Adaptive and Volume only modes work without the AI add-on.';
   fill('system',
     !ff.ok && ff.error ? callout('danger', 'Audio engine missing', ff.error) : null,
     h('div', { dataset: { spot: 'ai' } },

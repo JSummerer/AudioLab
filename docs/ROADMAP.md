@@ -1,9 +1,12 @@
 # Roadmap
 
-Possible next steps after the public source beta. These are directions, not a release schedule or
-promises. Done items move to [CHANGELOG.md](../CHANGELOG.md).
+Possible next steps after the public beta. These are directions, not a release schedule or
+promises. Completed changes belong in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Beta priorities
+- **Adaptive listening checks:** compare varied permission-cleared recordings at matched volume,
+  including intentional tonal extremes and no-preference outcomes. Generated tests establish numerical
+  safeguards, not improved sound.
 - **Installation feedback:** make first setup and repair easier using reproducible tester reports.
   Automated regression checks cover macOS, Windows and Linux; fresh-machine setup, OS security prompts
   and native audio/device behavior need broader qualification. Windows/Linux remain experimental.
@@ -33,7 +36,6 @@ promises. Done items move to [CHANGELOG.md](../CHANGELOG.md).
   (2.1 already *cuts* sets into tracks from chapters/tracklists; detecting boundaries without a tracklist
   is open).
 - **Folder batch**: pick a whole folder (several files at once already work).
-- **Measure exported files**: verify true peak of encoded MP3/AAC files, not only the master.
 - **Library, later steps** (left out of 2.3 on purpose): "Locate…" for a moved file (needs a native file
   picker in the app window); "Move to Trash" for a result's files (explicit, separate from "Remove from
   Library"); finding moved files automatically (a relocation scan); retention or a size cap for kept originals
@@ -48,7 +50,6 @@ promises. Done items move to [CHANGELOG.md](../CHANGELOG.md).
   plus a few component overrides, picked under Settings → Look.
 
 ## Small things
-- Waveform view in the compare player with a loop region.
 - "Open with…" (Music app, VLC) buttons on results.
 - Remember the last few links in the input box.
 - Windows: deleting a job while its preview is still streaming can leave files behind (Windows refuses

@@ -16,17 +16,17 @@ share app data for the same computer user; quit one before opening the other.
 The initial binary target is **macOS 14 or later on Apple silicon (arm64)**. No Python installation,
 Terminal setup or Apple developer account is required. Intel support is not yet qualified.
 
-Download the [**v2.4.0b2 Mac app**](https://github.com/JSummerer/AudioLab/releases/download/v2.4.0b2/AudioLab-2.4.0b2-macOS-arm64.dmg).
+Download the [**v2.4.0b4 Mac app**](https://github.com/JSummerer/AudioLab/releases/download/v2.4.0b4/AudioLab-2.4.0b4-macOS-arm64.dmg).
 Open it, drag **AudioLab.app** into **Applications**, eject the image and open the app from Applications.
 This is the only file testers need. **Source code (zip)** is for the separate source setup below.
 
 This beta uses ad-hoc signing and is not Apple Developer ID signed or notarized. For the expected
 first-opening warning, use the [Mac guide's graphical Open Anyway steps](MACOS.md#first-opening).
 That guide also covers updates, storage and uninstall. The
-[release notes](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b2) describe testing and beta limitations.
+[release notes](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b4) describe testing and beta limitations.
 
-The **2.4.0b2** app includes **Save / Convert**, **Check**, and **Light/Standard Enhance**, plus the
-Library. Settings offers the [optional managed AI download](#optional-ai) for Split and Best Enhance.
+The **2.4.0b4** app includes **Save / Convert**, **Check**, and **Volume only/Adaptive Enhance**, plus the
+Library. Settings offers the [optional managed AI download](#optional-ai) for Split and AI stems Enhance.
 The main app and its downloader update by replacing the app.
 
 ## Install from source
@@ -96,17 +96,17 @@ Distribution-specific setup remains unqualified.
 
 ## Optional AI
 
-AI adds **Split** and **Best Enhance**. It is optional; the other tools work without it.
-The managed packaged option is included in **2.4.0b2**, targeting macOS 14+ on Apple silicon (arm64).
+AI adds **Split** and **AI stems Enhance**. It is optional; the other tools work without it.
+The managed packaged option is available since **2.4.0b2**, targeting macOS 14+ on Apple silicon (arm64).
 The older **2.4.0b1** app has no AI installer; replace it with the newer app first.
 
-### Packaged Mac app — 2.4.0b2
+### Packaged Mac app
 
 Open **Settings → AI & system → Enable AI features**. When a compatible add-on is available for
 that app build, Settings shows its download and installed-file sizes. These describe the release
 asset, not the RAM needed to process audio. Allow additional free space for downloading, unpacking
 and audio intermediates; no fixed download-size or minimum-RAM promise applies to every release.
-The 2.4.0b2 add-on is about **570 MB to download** and **1.02 GB installed**.
+The unchanged AI 1.0.0 add-on used by b4 is about **570 MB to download** and **1.02 GB installed**.
 
 The optional download is self-contained: it includes its own AI runtime and both **Standard** and
 **Fine-tuned** model choices. AudioLab verifies the download and tests the runtime before enabling
@@ -136,12 +136,12 @@ No tested RAM minimum is claimed. Those Mac recommendations do not establish Win
 AI can consume several gigabytes of working memory and considerably more temporary audio space
 than the model files alone. Settings
 reports detected acceleration; CPU-only processing is slower and limited to recordings of 20 minutes
-by default. Try a short local recording first. Shorter recordings and Light/Standard Enhance reduce
+by default. Try a short local recording first. Shorter recordings and Volume only/Adaptive Enhance reduce
 resource demand. Fine-tuned uses several models and is slower than Standard.
 
 ## Optional AI in source installations
 
-Source installations keep the existing package installer. Enable AI in Settings for Split and Best
+Source installations keep the existing package installer. Enable AI in Settings for Split and AI stems
 Enhance, or request it during setup:
 
 ```bash

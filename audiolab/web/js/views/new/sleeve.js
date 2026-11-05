@@ -4,7 +4,7 @@
 // It follows the source and the choices: redraw() runs it after 'source' and 'action'.
 import { h, icon, clear, fmtDuration, fmtBytes } from '../../dom.js';
 import { store } from '../../store.js';
-import { state, refs, definePart, isFileLike, RECIPE_LABELS } from './state.js';
+import { state, refs, definePart, isFileLike, RECIPE_LABELS, PROCESSING_LABELS } from './state.js';
 import { shownName } from './names.js';
 import { downloadChoices, enhanceFormatsInOrder } from './options.js';
 import { embeddedCoverNote } from './cover.js';
@@ -13,7 +13,6 @@ import { TASK_ICON } from '../job/index.js';
 definePart('sleeve', renderSleeve);
 
 const TASK_WORD = { download: 'Save', enhance: 'Enhance', separate: 'Split', analyze: 'Check' };
-const QUALITY = { light: 'Light', standard: 'Standard', best: 'Best' };
 const SPLIT_MODE = { karaoke: 'Vocals + instrumental', stems4: '4 stems' };
 
 const join = (...parts) => parts.filter(Boolean).join(' · ');
@@ -65,7 +64,7 @@ function plan() {
       const keys = enhanceFormatsInOrder(e.formats);
       const selected = keys.map((k) => all.find((f) => f.key === k));
       const formats = selected.map((f, i) => f?.label || keys[i]);
-      return [join(e.recipe === 'auto' ? 'Type detected' : RECIPE_LABELS[e.recipe], `${QUALITY[e.quality]} quality`),
+      return [join(e.recipe === 'auto' ? 'Detect type' : RECIPE_LABELS[e.recipe], PROCESSING_LABELS[e.quality]),
         formats.join(', ') || null, embeddedCoverNote(selected, e.embed_cover)];
     }
     case 'separate': {

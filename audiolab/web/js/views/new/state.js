@@ -5,9 +5,11 @@ import { store } from '../../store.js';
 import { fmtBytes } from '../../dom.js';
 
 export const MAX_FILES = 50;
-// Light only sets the level, so only these fine-tuning keys apply to it.
+// Volume only sets the level, so only these fine-tuning keys apply to it.
 export const LIGHT_KEYS = ['target_lufs', 'tp_ceiling_db', 'sample_rate'];
 export const RECIPE_LABELS = { club: 'DJ set', live: 'Concert', music: 'Song', voice: 'Podcast / voice' };
+// The labels describe what runs; the API keeps the original quality keys.
+export const PROCESSING_LABELS = { light: 'Volume only', standard: 'Adaptive', best: 'AI stems' };
 
 export const TASKS = [
   { key: 'download' }, // Save or Convert: see options.js taskText()
@@ -48,7 +50,7 @@ export function redraw(...names) {
   if (names.length && !names.includes('sleeve') && (names.includes('source') || names.includes('action'))) renderers.sleeve?.();
 }
 
-/** The fine-tuning values that apply to the chosen quality (sent with the job). */
+/** The fine-tuning values that apply to the chosen processing mode (sent with the job). */
 export function appliedAdvanced() {
   const e = state.enhance;
   return Object.entries(e.advanced).filter(([k]) => e.quality !== 'light' || LIGHT_KEYS.includes(k));

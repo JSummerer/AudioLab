@@ -65,11 +65,15 @@
 .lib-play { min-width: 68px; justify-content: flex-start; }
 .lib-play.is-on { background: var(--accent-soft); }
 
-.lib-tracks { margin: var(--s-1) 0 0 30px; }
-.lib-tracks > summary { width: max-content; max-width: 100%; padding: var(--s-1) 0; color: var(--ink-2); font-size: var(--fs-small); font-weight: 600; }
-.lib-tracks[open] > summary { margin-bottom: var(--s-1); }
+.lib-tracks, .lib-processing { margin: var(--s-1) 0 0 30px; }
+:is(.lib-tracks, .lib-processing) > summary { width: max-content; max-width: 100%; padding: var(--s-1) 0; color: var(--ink-2); font-size: var(--fs-small); font-weight: 600; }
+:is(.lib-tracks, .lib-processing)[open] > summary { margin-bottom: var(--s-1); }
 .lib-tracks .files { max-height: 360px; overflow: auto; }
 .lib-tracks .file-row { background-size: 100% 1px; background-position: 0 0; }
+.lib-processing-body { display: grid; gap: var(--s-3); padding: var(--s-2) 0; overflow-wrap: anywhere; }
+.lib-processing-body h4 { margin: 0 0 var(--s-1); font: 650 var(--fs-small)/1.4 var(--font-body); }
+.lib-processing-body .plain-list { margin-top: 0; }
+.lib-processing-body .facts { grid-template-columns: minmax(0, max-content) minmax(0, 1fr); margin-top: var(--s-2); }
 
 /* The open player: under its version, a hairline above, its name and a close button. */
 .lib-stage { margin-top: var(--s-2); padding: var(--s-3) 0 var(--s-2); border-top: 1px solid var(--line); }
@@ -89,7 +93,7 @@
   .lib-actions .btn .ico { display: none; }
   .lib-entry .file-row { grid-template-columns: minmax(0, 1fr) auto; background-size: 100% 1px; background-position: 0 0; }
   .lib-entry .file-row > .file-ico, .lib-entry .file-row > .file-thumb { display: none; }
-  .lib-tracks { margin-left: 0; }
+  .lib-tracks, .lib-processing { margin-left: 0; }
   .lib-play { min-width: 0; }
 }
 
@@ -166,6 +170,11 @@
 .cmp-marker-time { color: var(--ink-3); }
 .cmp-marker[aria-current="true"] .cmp-marker-time { color: var(--ink-2); }
 .cmp-marker-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.cmp-repeat { border-top: 1px solid var(--line); padding-top: var(--s-3); }
+.cmp-repeat-summary { cursor: pointer; color: var(--ink-2); font-size: var(--fs-small); }
+.cmp-repeat-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-3); margin-top: var(--s-3); }
+.cmp-repeat-note { color: var(--ink-2); font-size: var(--fs-small); margin: var(--s-2) 0 0; }
 
 /* A hiccup while playing (Try again): a compact callout over the transport. */
 .cmp-problem .callout { padding: var(--s-2) var(--s-3); }

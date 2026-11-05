@@ -1,5 +1,44 @@
 # Changelog
 
+## Unreleased
+
+## 2.4.0b4 (2026-11-05, public beta)
+
+- Long-recording loudness, dynamics, peaks, clipping and DC checks now cover the whole file with bounded
+  reads. Spectrum, stereo and key still use excerpts, with their measurement basis shown separately.
+- Adaptive low-mid control replaces the automatic whole-recording cut: brief rises are judged against
+  nearby audio, with conservative reduction and total-change limits. Steady warmth and sustained changes
+  can pass unchanged. Auto / Strong / Off lives in More options; reports say what actually happened.
+  These guardrails have generated-signal checks; better perceived sound is not yet established.
+  Brief dips up to two analysis windows do not split a sustained rise into eligible short events.
+- Bass harmonics are independently opt-in. Processing choices now read Volume only / Adaptive / AI stems,
+  keeping existing API values and explaining that AI is a different treatment, not a quality guarantee.
+- Enhance checks loudness and estimated true peak in each saved full-length export. Missed ceilings or
+  unavailable measurements produce explicit warnings; master and encoded-file readings stay distinct.
+- Library retains processing settings, reasons, applied changes and export checks after jobs expire.
+  Failed export checks remain visible while processing details are folded.
+  Full comparisons match the selected export's measured loudness when available. Repeat a section keeps
+  both sides aligned, uses short fades at its boundaries and follows valid ranges between versions;
+  the timeline can mark the final grid point, and seeking to the end exits Repeat.
+- Preview generation checks cancellation; cancelling either previews or file verification stops the job.
+- Processing explanations name the applied filters and added harmonics without promising a better sound
+  or recovery of lost detail. Compression reports distinguish a selected stage from measurable reduction.
+  Level-percentile calculations also tolerate extremely hot finite float samples without overflow.
+- The peak limiter's gain now moves over about 10 ms instead of recovering within 2.5 ms of each peak,
+  including in Volume only mode. The report records how often it worked. These numerical changes do
+  not establish improved sound or the absence of audible artifacts.
+- The clarity lift sits narrower at 3 kHz, out of the S sounds above 5 kHz, and is skipped when the top
+  end is already bright. The lift above 11 kHz runs only on a measured dull top end and never on
+  compressed sources (MP3, AAC, YouTube's Opus). In AI stems mode, the vocals follow the same rule.
+- Check notes a bright top end that can sound sharp when played loud.
+- New de-esser in Adaptive and AI stems: softens S sounds and the hardest cymbal hits only where they jump out
+  against the track's own typical level (up to 3 dB on a mix, 4 dB on a voice). On a mix it can't change
+  the overall tone: the 4.5–9.5 kHz band drops by at most 0.3 dB in total, otherwise it keeps to the biggest
+  spikes. In AI stems mode it treats only the separated vocals, so hi-hats stay untouched. More options → Sharp S
+  sounds: Auto, Strong or Off (`--deess` in the CLI). The summary says how much it did.
+- The top-end measurement counts wide stereo highs at their real level, and Best reports the vocals'
+  actual clarity lift.
+
 ## 2.4.0b3 (2026-10-21, public beta)
 
 - Library comparisons carry position, Original/Enhanced choice and volume matching between versions

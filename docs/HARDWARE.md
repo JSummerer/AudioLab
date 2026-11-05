@@ -1,12 +1,12 @@
 # Hardware and storage
 
-For the **AudioLab 2.4.0b3 Mac beta**. [Download and install](MACOS.md) ·
+For the **AudioLab 2.4.0b4 Mac beta**. [Download and install](MACOS.md) ·
 [Memory](#memory-ram) · [Disk space](#disk-space) · [Speed and models](#speed-and-models) ·
 [Checks and limits](#what-the-app-checks)
 
 ## What do I need?
 
-| Item | Core tools: Save / Convert, Check, Light/Standard Enhance | Optional AI: Split and Best Enhance |
+| Item | Core tools: Save / Convert, Check, Volume only/Adaptive Enhance | Optional AI: Split and AI stems Enhance |
 |---|---|---|
 | Mac and system | Apple silicon, macOS 14 or later | Same; uses the built-in Apple GPU when available |
 | Memory guidance, provisional | **Already have 8 GB?** Start with short core tasks; this capacity has not been qualified | For early AI testing, we prefer existing Macs with **16 GB or more**; capacity on 8/16 GB has not yet been tested |
@@ -31,7 +31,7 @@ RAM is the memory used **while working**. The roughly 1 GB AI installation is di
 not mean AI needs only 1 GB RAM. On Apple silicon, CPU and GPU share the computer's memory pool.
 [Apple explains this architecture](https://developer.apple.com/videos/play/wwdc2020/10686/).
 
-- **Already have 8 GB?** Begin with a short file using Convert, Check or Light Enhance. Try more
+- **Already have 8 GB?** Begin with a short file using Convert, Check or Volume only Enhance. Try more
   demanding work gradually; AI and long Enhance jobs are not qualified on an 8 GB machine.
 - **16 GB or more:** our provisional preference for early AI testing with short files. It offers
   more headroom than 8 GB, but this capacity and longer Enhance jobs remain unqualified.
@@ -39,18 +39,19 @@ not mean AI needs only 1 GB RAM. On Apple silicon, CPU and GPU share the compute
   24/32 GB tier or promised maximum duration; shorter recordings remain the most direct way to
   reduce a job's working data.
 
-Standard Enhance also keeps full-length audio arrays in memory. Some filters and AI stages work in
+Adaptive Enhance also keeps full-length audio arrays in memory. Some filters and AI stages work in
 chunks, but the complete Enhance job does not use a fixed amount of RAM regardless of duration.
 The compressed MP3/FLAC file size is therefore a poor guide to processing memory.
 
 If the Mac becomes sluggish, cancel the job, close other demanding apps and retry a shorter file or
-use Light Enhance. You can inspect **Activity Monitor → Memory → Memory Pressure** if needed;
+use Volume only Enhance. You can inspect **Activity Monitor → Memory → Memory Pressure** if needed;
 [Apple's guide](https://support.apple.com/guide/activity-monitor/view-memory-usage-actmntr1004/mac)
 explains that display. This is optional troubleshooting, not an installation requirement.
 
 ## Disk space
 
-Measured payloads for this release, rounded in decimal MB/GB:
+Reference payloads measured on b3, rounded in decimal MB/GB. The b4 download has its own size
+on the release page; the unchanged AI 1.0.0 payload is reused:
 
 | Files | Download | Installed files |
 |---|---:|---:|
@@ -70,8 +71,8 @@ plus a 2 GiB allowance before processing. Rounded **current check thresholds for
 |---|---:|
 | Save / Convert | About 4.0 GB |
 | Check | About 4.6 GB |
-| Light/Standard Enhance | About 8.9 GB |
-| Best Enhance | About 16.4 GB |
+| Volume only/Adaptive Enhance | About 8.9 GB |
+| AI stems Enhance | About 16.4 GB |
 | Split | About 17.4 GB |
 
 These are calculations from the current code, **not measured peak disk use or reserved capacity**.
@@ -98,12 +99,12 @@ four times the work time. That is upstream guidance, not an AudioLab timing guar
 also loads more model weights, but its total peak RAM is not necessarily four times higher.
 Choosing vocals/instrumental instead of four stems still performs the underlying separation.
 
-**Standard AI model** and **Standard Enhance quality** are different choices: Standard Enhance
-works without AI. Best Enhance uses AI in addition to the ordinary processing chain.
+**Standard AI model** and **Adaptive processing** are different choices: Adaptive Enhance
+works without AI. AI stems Enhance uses AI in addition to the ordinary processing chain.
 
 CPU-only AI is limited to **20 minutes of input per job by default**. This is an app policy to avoid
 very long CPU jobs, not a hardware minimum or a runtime estimate. There is no reliable
-“minutes per song” promise yet. Use a shorter file or Light/Standard Enhance when resources are tight.
+“minutes per song” promise yet. Use a shorter file or Volume only/Adaptive Enhance when resources are tight.
 
 ## What the app checks
 
@@ -112,7 +113,7 @@ However, on a normal Mac its memory budget uses **85% of installed RAM**, not a 
 memory left after other apps. It does not account separately for each AI model or all GPU allocations.
 Passing that check is not a guarantee against memory pressure or an out-of-memory error.
 
-For example, the current formula estimates about **6.84 GiB** for one hour of Standard Enhance.
+For example, the current formula estimates about **6.84 GiB** for one hour of Adaptive Enhance.
 That is above the **6.8 GiB** default budget on an 8 GiB Mac, so the app refuses that job even with
 other apps closed. These are formula values, not a new measured benchmark. Closing apps can improve
 actual headroom, but does not raise this installed-RAM budget.
@@ -122,12 +123,13 @@ AI request solely because a Mac has 8 GB, and it does not certify all 16 GB jobs
 
 ## What has been tested
 
-The b3 app has passed short generated-audio core and AI checks, reuse/removal of an existing AI
+The prior b3 app passed short generated-audio core and AI checks, reuse/removal of an existing AI
 installation, and native-window checks. Both AI model choices passed helper checks. Public-download
 installation/cancel/resume was checked on b2 with this same AI pack. Native-window validation ran on
 macOS 15.7.9 arm64; local functional checks used an Apple M4 Pro with 48 GB on macOS 26.6.2.
 **That is a test configuration, not a 48 GB requirement.** macOS 14 is the build target and has not been tested natively.
-See the [release notes](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b3) for the exact scope.
+See the [b3 evidence](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b3) and
+[current release notes](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b4) for their separate test scopes.
 
 This evidence does not qualify minimum RAM, long-recording performance or every chip. A supported
 minimum needs checks on actual lower-memory Macs, including the app and AI helper together, GPU/system

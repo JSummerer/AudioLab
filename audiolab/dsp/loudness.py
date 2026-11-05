@@ -12,6 +12,7 @@ callable is called once per chunk (cancellation of long measurements).
 """
 
 import math
+from collections.abc import Iterable, Iterator
 
 import numpy as np
 from scipy.signal import lfilter
@@ -23,7 +24,6 @@ KB2 = [1.0, -2.0, 1.0]
 KA2 = [1.0, -1.99004745483398, 0.99007225036621]
 
 _SUPPORTED_SR = 48000
-_CHUNK_S = 10.0  # K-filter chunk size; transients bounded to this span
 _ABS_GATE = -70.0
 
 
@@ -42,20 +42,18 @@ def _block_loudness(xk_slice: np.ndarray) -> float:
     return -0.691 + 10.0 * math.log10(ms + 1e-24)
 
 
-def _k_filter_stream(x: np.ndarray, chunk: int, check_cancel=None) -> np.ndarray:
+def _k_filter_stream(chunks: Iterable[np.ndarray], n_ch: int, check_cancel=None) -> Iterator[np.ndarray]:
     """Yield K-weighted samples in bounded chunks, carrying filter state across
     chunk boundaries so the concatenated stream is identical to a full lfilter
     with zero initial state (matching the historical whole-signal behavior).
     """
-    n_ch = x.shape[1] if x.ndim > 1 else 1
     o1 = max(len(KA1), len(KB1)) - 1
     o2 = max(len(KA2), len(KB2)) - 1
     zi1 = np.zeros((o1, n_ch))
     zi2 = np.zeros((o2, n_ch))
-    for s0 in range(0, x.shape[0], chunk):
+    for blk in chunks:
         if check_cancel is not None:
             check_cancel()
-        blk = x[s0 : s0 + chunk]
         if blk.ndim == 1:
             blk = blk[:, None]
         y, zi1 = lfilter(KB1, KA1, blk, axis=0, zi=zi1)
@@ -71,15 +69,17 @@ def _k_blocks(x: np.ndarray, block_s: float, hop_s: float, sr: int = 48000, chec
     n = x.shape[0]
     if n == 0:
         return []
+    n_ch = x.shape[1] if x.ndim > 1 else 1
     if n < b_len:
-        return [_block_loudness(next(_k_filter_stream(x, int(_CHUNK_S * sr))))]
+        return [_block_loudness(next(_k_filter_stream([x], n_ch, check_cancel)))]
 
     chunk = max(h_len * 100, b_len + h_len)
     blocks: list[float] = []
-    buf = np.empty((0, x.shape[1] if x.ndim > 1 else 1), dtype=np.float64)
+    buf = np.empty((0, n_ch), dtype=np.float64)
     buf_start = 0  # global sample index of buf[0]
 
-    for y in _k_filter_stream(x, chunk, check_cancel):
+    chunks = (x[start : start + chunk] for start in range(0, n, chunk))
+    for y in _k_filter_stream(chunks, n_ch, check_cancel):
         buf = np.concatenate([buf, y], axis=0)
         # Emit every block whose last sample is available and within the signal
         while True:
@@ -104,11 +104,7 @@ def _lufs(mean_energy: float) -> float:
     return -0.691 + 10.0 * math.log10(mean_energy + 1e-24)
 
 
-def integrated_lufs(x: np.ndarray, sr: int = 48000, check_cancel=None) -> float:
-    """BS.1770-4 integrated loudness: 400 ms blocks (75 % overlap), absolute gate
-    at -70 LUFS, relative gate 10 LU below the energy-mean of the absolutely
-    gated blocks, result = energy-mean of the blocks passing both gates."""
-    blocks = np.array(_k_blocks(x, block_s=0.4, hop_s=0.1, sr=sr, check_cancel=check_cancel))
+def _gated_integrated(blocks: np.ndarray) -> float:
     above_abs = blocks[blocks > _ABS_GATE]
     if above_abs.size == 0:
         return _ABS_GATE
@@ -117,6 +113,13 @@ def integrated_lufs(x: np.ndarray, sr: int = 48000, check_cancel=None) -> float:
     if gated.size == 0:
         gated = above_abs
     return float(_lufs(float(_energy(gated).mean())))
+
+
+def integrated_lufs(x: np.ndarray, sr: int = 48000, check_cancel=None) -> float:
+    """BS.1770-4 integrated loudness: 400 ms blocks (75 % overlap), absolute gate
+    at -70 LUFS, relative gate 10 LU below the energy-mean of the absolutely
+    gated blocks, result = energy-mean of the blocks passing both gates."""
+    return _gated_integrated(np.array(_k_blocks(x, 0.4, 0.1, sr, check_cancel)))
 
 
 def programme_loudness(x: np.ndarray, sr: int = 48000, check_cancel=None) -> float:
@@ -132,11 +135,8 @@ def programme_loudness(x: np.ndarray, sr: int = 48000, check_cancel=None) -> flo
     return integrated_lufs(x * np.float32(k), sr=sr, check_cancel=check_cancel) - 20.0 * math.log10(k)
 
 
-def lra(x: np.ndarray, sr: int = 48000, check_cancel=None) -> float:
-    """EBU Tech 3342 Loudness Range: 3 s short-term blocks (1 s hop), absolute
-    gate -70 LUFS, relative gate 20 LU below the energy-mean of those blocks,
-    LRA = 95th - 10th percentile of the gated short-term loudness values."""
-    blocks = np.array([v for v in _k_blocks(x, 3.0, 1.0, sr, check_cancel) if v > _ABS_GATE])
+def _gated_range(blocks: np.ndarray) -> float:
+    blocks = blocks[blocks > _ABS_GATE]
     if blocks.size == 0:
         return 0.0
     rel_gate = _lufs(float(_energy(blocks).mean())) - 20.0
@@ -144,3 +144,60 @@ def lra(x: np.ndarray, sr: int = 48000, check_cancel=None) -> float:
     if g.size == 0:
         return 0.0
     return float(np.percentile(g, 95) - np.percentile(g, 10))
+
+
+def lra(x: np.ndarray, sr: int = 48000, check_cancel=None) -> float:
+    """EBU Tech 3342 Loudness Range: 3 s short-term blocks (1 s hop), absolute
+    gate -70 LUFS, relative gate 20 LU below the energy-mean of those blocks,
+    LRA = 95th - 10th percentile of the gated short-term loudness values."""
+    return _gated_range(np.array(_k_blocks(x, 3.0, 1.0, sr, check_cancel)))
+
+
+def stream_programme_levels(
+    chunks: Iterable[np.ndarray], sr: int = 48000, channels: int = 2, check_cancel=None
+) -> tuple[float, float]:
+    """Programme loudness and LRA from one continuous stream of sample chunks.
+
+    K-weight each sample once, carrying filter state, and retain just ten scalar
+    energy bins per second. Both standard measurements use 100 ms-aligned windows.
+    """
+    _require_48k(sr)
+    bin_frames = sr // 10
+    bin_parts = []
+    tail = np.empty(0, dtype=np.float64)
+    sample_peak = 0.0
+
+    def track_peak():
+        nonlocal sample_peak
+        for chunk in chunks:
+            if chunk.size:
+                sample_peak = max(sample_peak, float(chunk.max()), -float(chunk.min()))
+                yield chunk
+
+    for weighted in _k_filter_stream(track_peak(), channels, check_cancel):
+        power = np.einsum('ij,ij->i', weighted, weighted)
+        if tail.size:
+            power = np.concatenate((tail, power))
+        end = len(power) // bin_frames * bin_frames
+        bin_parts.append(power[:end].reshape(-1, bin_frames).mean(axis=1))
+        tail = power[end:].copy()
+
+    if not bin_parts:
+        return _ABS_GATE, 0.0
+    bins = np.concatenate(bin_parts)
+
+    def windows(width: int, hop: int) -> np.ndarray:
+        if bins.size < width:
+            # The array meter uses one partial window when there isn't a full one.
+            frames = bins.size * bin_frames + tail.size
+            return np.array([(bins.sum() * bin_frames + tail.sum()) / frames])
+        return np.lib.stride_tricks.sliding_window_view(bins, width)[::hop].mean(axis=1)
+
+    integrated = windows(4, 1)
+    loudness = _gated_integrated(-0.691 + 10.0 * np.log10(integrated + 1e-24))
+    if loudness <= _ABS_GATE and sample_peak >= 1e-9:
+        # Scaling these energies is equivalent to re-filtering a peak-normalized copy.
+        gain = 0.5 / sample_peak
+        normalized = _gated_integrated(-0.691 + 10.0 * np.log10(integrated * gain**2 + 1e-24))
+        loudness = normalized - 20.0 * math.log10(gain)
+    return loudness, _gated_range(-0.691 + 10.0 * np.log10(windows(30, 10) + 1e-24))

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import test from 'node:test';
+import { PROCESSING_LABELS } from '../../audiolab/web/js/views/new/state.js';
 
 class Element {
   constructor(tag, attrs = {}, children = []) {
@@ -33,7 +34,7 @@ function setup({ crlf = false } = {}) {
     download: [mp3, wav, original], enhance: [{ ...mp3, key: 'mp3_320' }, { ...wav, key: 'wav16' }],
   } } };
   const context = vm.createContext({
-    state, store, redrawn,
+    state, store, redrawn, PROCESSING_LABELS,
     h: (tag, attrs, ...children) => new Element(tag, attrs || {}, children),
     icon: () => '', fmtBytes: (size) => `${size} B`,
     localStorage: { getItem: () => null, setItem() {} },

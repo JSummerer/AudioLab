@@ -13,7 +13,7 @@ import pytest
 import soundfile as sf
 
 from audiolab.context import TaskContext
-from audiolab.errors import DownloadError
+from audiolab.errors import AudioLabError, DownloadError
 from audiolab.media import export, ffmpeg, proc, youtube
 from audiolab.media.ffmpeg import run_ffmpeg
 from audiolab.tasks import common
@@ -208,6 +208,52 @@ def test_decode_pcm_chunks_join_like_a_full_decode(name, rate, args, tmp_path, m
         for offset, frames in ((640, g), (0, 640), (0, 0), (-g, g)):
             with pytest.raises(ValueError):
                 ffmpeg.decode_pcm(src, offset, frames)
+
+
+@pytest.mark.parametrize(
+    'name,rate,args',
+    [
+        ('44.mp3', 44100, ['-b:a', '192k']),
+        ('44.m4a', 44100, ['-c:a', 'aac', '-aac_pns', '0', '-b:a', '192k']),
+        ('48.webm', 48000, ['-c:a', 'libopus', '-b:a', '128k']),
+    ],
+)
+def test_preview_reference_stays_aligned_to_full_decode(name, rate, args, tmp_path, monkeypatch):
+    monkeypatch.setattr(proc, '_POLL_S', 0.01)
+    source = tmp_path / name
+    noise = f'anoisesrc=d=44:c=white:r={rate}:a=0.25:seed=23'
+    run_ffmpeg(['-f', 'lavfi', '-i', noise, '-ac', '2', *args, str(source)])
+    full, part = tmp_path / 'full.wav', tmp_path / 'part.wav'
+    ffmpeg.decode_reference(source, full)
+    start = 17.04
+    info = ffmpeg.decode_reference(source, part, excerpt=(start, 22.0))
+    sr = ffmpeg.PCM_RATE
+    assert info['frames'] == 22 * sr
+    expected, _ = sf.read(full, start=37 * sr, frames=sr, dtype='float32', always_2d=True)
+    actual, _ = sf.read(part, start=round((37 - start) * sr), frames=sr, dtype='float32', always_2d=True)
+    # White noise exposes even a one-frame offset. Opus decoder state can round a little differently.
+    np.testing.assert_allclose(actual, expected, atol=1e-6 if source.suffix == '.webm' else 0, rtol=0)
+
+
+def test_preview_webm_alignment_stays_bounded_when_early_candidates_are_silent(tmp_path, monkeypatch):
+    monkeypatch.setattr(proc, '_POLL_S', 0.01)
+    source, part = tmp_path / 'quiet.webm', tmp_path / 'part.wav'
+    noise = r'anoisesrc=d=35:r=48000:a=0.3:seed=23,volume=0:enable=lt(t\,29)'
+    run_ffmpeg(['-f', 'lavfi', '-i', noise, '-ac', '2', '-c:a', 'libopus', str(source)])
+    decode = ffmpeg._decode
+    positions = []
+
+    def observed_decode(path, offset, frames, progress, seek=False, shift=0):
+        positions.append((offset / ffmpeg.PCM_RATE, seek))
+        return decode(path, offset, frames, progress, seek=seek, shift=shift)
+
+    monkeypatch.setattr(ffmpeg, '_decode', observed_decode)
+    with pytest.raises(AudioLabError, match='could not align a short preview'):
+        ffmpeg.decode_reference(source, part, excerpt=(30.0, 2.0))
+    assert positions == [(1, True), (10, True), (25, True)]
+    assert not part.exists()
+    # At the beginning, no calibration is needed.
+    assert ffmpeg.decode_reference(source, part, excerpt=(0.0, 1.0))['frames'] == ffmpeg.PCM_RATE
 
 
 # ------------------------------------------------------------ file tags

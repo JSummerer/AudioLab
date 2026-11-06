@@ -131,6 +131,25 @@ your position, selected side and volume-matching choice. If you were playing, pl
 after any brief buffering needed to load that version.
 Switching to another recording or an ordinary file player starts a separate listening session.
 
+For newly processed versions, **Changes timeline** shows where low-mid control, de-essing, compression
+or limiting reduced the signal. Choose a highlighted passage to repeat it in the comparison. These
+are the strongest reductions within short intervals; overall volume and fixed EQ changes are listed
+in Processing details instead. Older versions may have no timeline.
+
+**Preview changes** tries settings on 5–30 seconds from the kept original. It starts at your playhead
+or selected repeat range. Adjust low-mid control, Sharp S sounds, bass boost or bass harmonics; Volume
+only offers a loudness target. Make a preview, compare it, then choose **Apply to full recording** to
+save a new version. Editing settings invalidates the old preview, so Apply always uses the choices
+you just previewed. Closing or cancelling a preview does not create a Library version.
+
+A section preview is an estimate: it uses nearby audio for context, while the full render checks the
+whole recording again. It excludes saved-format compression artifacts. Short previews are currently
+available for Volume only and Adaptive results with saved settings and a kept original; AI stems
+needs a full render. Preview work joins the ordinary queue, so it may wait for a running job.
+If a file's timing cannot be aligned reliably for a short preview, AudioLab explains the problem;
+try a WAV or FLAC original or run Enhance on the full recording. A new full version can reuse embedded
+artwork from the kept original, but does not recover separate artwork added to the earlier job.
+
 Job pages may offer a shorter preview of the final master when a full comparison is unavailable;
 it does not include output codec artifacts. There is no Delta mode
 in the current app; listening to Original and Enhanced is the supported comparison.

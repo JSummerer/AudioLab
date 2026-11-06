@@ -21,7 +21,7 @@ from ..processing import report_details
 from ..recipes.chain import render
 from ..settings import SETTINGS
 from ..util import sanitize_filename
-from . import common
+from . import common, preview
 
 QUALITIES = ('light', 'standard', 'best')  # light = volume only (recipes.base)
 SAMPLE_RATES = (44100, 48000, 96000)
@@ -100,6 +100,8 @@ def validate(options: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
 
 
 def stages(options: dict[str, Any], source: dict[str, Any]):
+    if options.get('_preview'):
+        return preview.stages()
     quality = options.get('quality')
     return [
         ('acquire', 'Getting audio', 20 if source.get('kind') == 'url' else 4),
@@ -165,8 +167,12 @@ def _summary(kind, recipe, chosen_by_user, before, after, report, folder, files)
 
 def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
     opts = ctx.options
+    if opts.get('_preview'):
+        return preview.run(ctx, source)
     quality = opts['quality']
     acq = common.acquire(ctx, source, ctx.stage('acquire'), task='enhance', quality=quality)
+    if not opts.get('tracklist') and source.get('_markers'):
+        acq.metadata.update(tracks=source['_markers'], tracks_source=source.get('_markers_source'))
     common.decode(ctx, acq, ctx.stage('decode'))
     ref = common.reference_path(ctx)
 

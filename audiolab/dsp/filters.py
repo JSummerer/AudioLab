@@ -67,7 +67,13 @@ def highpass_fq(fc: float, sr: int = 48000, order: int = 2) -> np.ndarray:
 
 
 def filtfilt_stream(
-    sos: np.ndarray, x: np.ndarray, block: int = 1 << 22, margin: int = 1 << 16, check_cancel=None
+    sos: np.ndarray,
+    x: np.ndarray,
+    block: int = 1 << 22,
+    margin: int = 1 << 16,
+    check_cancel=None,
+    *,
+    out: np.ndarray | None = None,
 ) -> np.ndarray:
     """Zero-phase filtering in bounded blocks with float32 storage.
 
@@ -81,7 +87,8 @@ def filtfilt_stream(
     """
     x = np.asarray(x)
     n = x.shape[0]
-    out = np.empty(x.shape, dtype=np.float32)
+    if out is None:
+        out = np.empty(x.shape, dtype=np.float32)
     for s0 in range(0, n, block):
         if check_cancel is not None:
             check_cancel()

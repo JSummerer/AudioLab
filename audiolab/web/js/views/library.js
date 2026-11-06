@@ -14,6 +14,7 @@ import { store, on } from '../store.js';
 import { toast, toastError, callout, confirmDialog } from '../ui.js';
 import { jobPath, currentRoute } from '../router.js';
 import { libraryCompare, plainPlayer, libraryFileUrl, codecName } from '../compare.js';
+import { openQuickPreview, previewUnavailable } from '../quick-preview.js';
 import { PROCESSING_LABELS } from './new/state.js';
 
 const TASK_ICON = { download: 'download', enhance: 'sparkle', separate: 'layers' };
@@ -30,6 +31,7 @@ let reloadTimer = 0;
 let doneKey = '';    // finished jobs with a Library entry: the list reloads when this changes
 let target = null;   // #/library/<id> still to scroll to
 let player = null;   // the open player: { entryId, what: 'compare' | file id, fileId, title, el, stage, pause, destroy }
+let preview = null;  // the section preview, tied to the active version and this view
 let uid = 0;
 const groupEls = new Map(); // group key → { el, head, list, titleId, sig }
 const cards = new Map();    // entry id → { el, entry, sig, stage, toggles: Map(what → button) }
@@ -59,6 +61,7 @@ export const libraryView = {
 
   show(arg) {
     visible = true;
+    closePreview();
     target = arg || null;
     // A known list can be scrolled now; otherwise once it has loaded.
     if (target && !(groups && revealTarget())) {
@@ -126,6 +129,7 @@ function render() {
   for (const [id, c] of cards) {
     if (ids.has(id)) continue;
     if (player?.entryId === id) closePlayer();
+    if (preview?.entryId === id) closePreview();
     c.el.remove();
     cards.delete(id);
   }
@@ -241,6 +245,7 @@ function fillCard(c, entry) {
   // The open player stays when its files are still there (it is moved, not rebuilt).
   const keep = player?.entryId === entry.id && playerStillFits(entry);
   if (player?.entryId === entry.id && !keep) closePlayer();
+  if (preview?.entryId === entry.id && previewUnavailable(entry)) closePreview();
   const focused = c.el.contains(document.activeElement) ? document.activeElement : null;
   const focusIndex = focused ? [...c.el.querySelectorAll('a, button, summary')].indexOf(focused) : -1;
 
@@ -423,6 +428,8 @@ function entryActions(c, entry) {
     }, icon('compare', 15), 'Compare with the original');
     c.toggles.set('compare', b);
     btns.push(b);
+  } else if (entry.task === 'enhance' && !previewUnavailable(entry)) {
+    btns.push(previewButton(entry));
   }
   if (store.health?.local) {
     btns.push(h('button', { type: 'button', class: 'btn btn-ghost btn-sm', onclick: () => revealEntry(entry) }, icon('folder', 15), REVEAL_LABEL));
@@ -483,17 +490,39 @@ function attachPlayer(c) {
     },
   }, icon('close', 15));
   clear(c.stage).append(h('div', { class: 'lib-stage-head' }, h('strong', null, player.title), close), player.el);
+  if (player.what === 'compare' && c.entry.task === 'enhance') {
+    const reason = previewUnavailable(c.entry);
+    c.stage.append(h('div', { class: 'lib-preview-action' },
+      reason ? h('p', { class: 'muted small' }, reason) : previewButton(c.entry, player)));
+  }
   c.stage.hidden = false;
   player.stage = c.stage;
 }
 
 function closePlayer() {
+  closePreview();
   if (!player) return;
   const { stage } = player;
   player.destroy();
   player = null;
   if (stage) { clear(stage); stage.hidden = true; }
   updateToggles();
+}
+
+function closePreview() {
+  preview?.close();
+  preview = null;
+}
+
+function previewButton(entry, comparison) {
+  return h('button', {
+    type: 'button', class: 'btn btn-key btn-sm',
+    onclick: (e) => {
+      closePreview();
+      if (player !== comparison) player?.pause();
+      preview = { entryId: entry.id, close: openQuickPreview(entry, comparison, e.currentTarget) };
+    },
+  }, 'Preview changes');
 }
 
 function playerStillFits(entry) {

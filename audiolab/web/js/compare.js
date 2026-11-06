@@ -36,6 +36,9 @@ const BY_EXT = {
   mp3: ['audio/mpeg'], m4a: ['audio/mp4'], aac: ['audio/aac'], flac: ['audio/flac'], wav: ['audio/wav'],
   opus: ['audio/ogg', 'opus'], ogg: ['audio/ogg', 'vorbis'], webm: ['audio/webm', 'opus'], mp4: ['video/mp4'],
 };
+const REDUCTION_STAGES = {
+  adaptive_lowmid: 'Low-mid control', deess: 'Sharp S control', compressor: 'Compression', limiter: 'Peak limiting',
+};
 
 let uid = 0;
 const quietly = (fn) => { try { Promise.resolve(fn?.()).catch(() => {}); } catch { /* already closed */ } };
@@ -110,10 +113,83 @@ export function libraryCompare(entry, extra = {}) {
     length: duration,
     songDuration: duration,
     markers: entry.markers,
+    reductions: entry.processing?.applied,
     loudness,
     showMatchUnavailable: measured,
     ...extra,
   });
+}
+
+/** Compare a short render at its position in the original recording. */
+export function sectionPreviewCompare(job, songDuration = job.source?.duration_s) {
+  const r = job.result;
+  const ex = r?.excerpt;
+  if (!r?.preview || !ex || !Number.isFinite(ex.duration_s) || ex.duration_s <= 0
+    || !Number.isFinite(ex.start_s) || ex.start_s < 0) return null;
+  const side = (key, label) => ({
+    label,
+    url: (offset, frames) => url(`/api/jobs/${encodeURIComponent(job.id)}/pcm/${key}`, { offset, frames }),
+  });
+  return comparePlayer({
+    sides: [side('original', 'Original'), side('enhanced', 'Preview')],
+    songOffset: ex.start_s,
+    length: ex.duration_s,
+    songDuration,
+    loudness: { original_lufs: r.metrics?.before?.lufs, result_lufs: r.metrics?.after?.lufs },
+    reductions: r.processing?.applied,
+    reductionOffset: ex.start_s,
+    note: `Section ${fmtDuration(ex.start_s)}–${fmtDuration(ex.start_s + ex.duration_s)} · No output files saved.`,
+  });
+}
+
+/** A tick represents the peak in its time window; the gaps don't describe static processing. */
+function reductionTimeline(applied, start, end, offset, cue) {
+  const lanes = Object.entries(REDUCTION_STAGES).flatMap(([key, label]) => {
+    const t = applied?.[key]?.timeline;
+    if (!Number.isFinite(t?.duration_s) || t.duration_s <= 0 || !Array.isArray(t.bins)) return [];
+    const bins = t.bins.slice(0, 120).flatMap((bin) => {
+      if (!Number.isFinite(bin?.peak_s) || bin.peak_s < 0 || bin.peak_s > t.duration_s
+        || !Number.isFinite(bin.max_gr_db) || bin.max_gr_db < 0.1) return [];
+      const time = offset + bin.peak_s;
+      return time >= start && time < end ? [{ time, reduction: bin.max_gr_db }] : [];
+    });
+    return [{ label, bins }];
+  });
+  if (!lanes.length) return null; // Older records have no time series to display.
+  const hasHighlights = lanes.some(({ bins }) => bins.length);
+  return h('details', { class: 'cmp-repeat cmp-reductions' },
+    h('summary', { class: 'cmp-repeat-summary' }, 'Changes timeline'),
+    h('p', { class: 'cmp-reductions-note muted small' },
+      hasHighlights ? 'Each mark shows the largest reduction in a time window. Choose a highlight to repeat around its peak.'
+        : 'No dynamic reduction was reported for this audio.'),
+    h('p', { class: 'muted small' }, 'Whole-recording changes such as tone and loudness aren’t shown here.'),
+    hasHighlights ? h('div', { class: 'cmp-reduction-lanes' },
+      h('div', { class: 'cmp-reduction-scale num muted small', 'aria-hidden': 'true' }, h('span', null, fmtDuration(start)), h('span', null, fmtDuration(end))),
+      lanes.map(({ label, bins }) => {
+        // Avoid several nearly identical cues when neighboring windows peak in one short passage.
+        const highlights = [];
+        for (const bin of [...bins].sort((a, b) => b.reduction - a.reduction)) {
+          if (highlights.every((m) => Math.abs(m.time - bin.time) >= 2.5)) highlights.push(bin);
+          if (highlights.length === 3) break;
+        }
+        highlights.sort((a, b) => a.time - b.time);
+        return h('div', { class: 'cmp-reduction-lane', role: 'group', 'aria-label': label },
+          h('strong', { class: 'small' }, label),
+          bins.length ? h('div', { class: 'cmp-reduction-rail', 'aria-hidden': 'true' }, bins.map(({ time, reduction }) =>
+            h('i', { style: {
+              left: `${100 * (time - start) / (end - start)}%`,
+              height: `${Math.max(20, Math.min(100, reduction * 25))}%`,
+            } }))) : h('span', { class: 'muted small' }, 'No reduction reported'),
+          highlights.length ? h('div', { class: 'cmp-reduction-highlights' }, highlights.map(({ time, reduction }) => {
+            const when = fmtDuration(time);
+            const depth = reduction.toFixed(1);
+            return h('button', {
+              type: 'button', class: 'filter cmp-reduction-marker num',
+              'aria-label': `Repeat around ${when}: ${label}, ${depth} dB reduction`,
+              onclick: () => cue(time),
+            }, when, h('span', { class: 'cmp-marker-time' }, `−${depth} dB`));
+          })) : null);
+      })) : null);
 }
 
 /**
@@ -124,7 +200,8 @@ export function libraryCompare(entry, extra = {}) {
  * the sides are, songDuration: the whole song (for "1:52 / 4:45"), startAt: the song time to
  * start from, markers: tracks/chapters in song time, loudness: {original_lufs, result_lufs}
  * of the whole song for "Match volume" (null: no switch unless showMatchUnavailable),
- * note: one line under the player.
+ * note: one line under the player, reductions: reported processing stages, reductionOffset:
+ * the song time of the stage timelines' frame 0 (usually 0, or the start of a section render).
  */
 export function comparePlayer(opts) {
   const sides = opts.sides.map((s) => ({ ...s, gain: null }));
@@ -630,6 +707,20 @@ export function comparePlayer(opts) {
     renderTime();
   }
 
+  function cueReduction(songTime) {
+    const peak = clamp((songTime - songOffset) * RATE);
+    const last = Math.floor(Math.min(lengthF, repeatLimit) / GRID) * GRID;
+    const width = Math.min(5 * RATE, last);
+    const first = Math.floor(Math.max(0, Math.min(last - width, peak - width / 2)) / GRID) * GRID;
+    // Both boundaries must be on the PCM grid. A subsecond excerpt can still seek.
+    if (peak >= last || width < REPEAT_MIN) { seekTo(peak / RATE); return; }
+    repeatStart = first;
+    repeatEnd = first + width;
+    repeatCache.clear();
+    repeatDetails.open = true;
+    setRepeating(true, repeatStart);
+  }
+
   function pointTime(f) {
     const hundredths = Math.round((songOffset + f / RATE) * 100);
     return `${fmtDuration(Math.floor(hundredths / 100))}.${String(hundredths % 100).padStart(2, '0')}`;
@@ -751,7 +842,8 @@ export function comparePlayer(opts) {
       matchSwitch ? h('label', { class: 'details-toggle', for: `${id}-match` }, matchSwitch, 'Match volume') : null,
       matchSwitch ? h('p', { class: 'ab-matched' }, volumeNote) : null),
     repeatDetails,
-    markerList]);
+    markerList,
+    reductionTimeline(opts.reductions, songOffset, songOffset + lengthF / RATE, opts.reductionOffset || 0, cueReduction)]);
   renderKeys();
   renderPlay();
   renderVolume();

@@ -13,6 +13,19 @@ def test_memory_report_shape():
         assert isinstance(rep[key], int) and rep[key] >= 0
 
 
+def test_long_enhance_reserves_disk_for_mapped_working_buffers():
+    from audiolab.dsp.scratch import DISK_BACKED_AFTER_SECONDS, MAX_BYTES_PER_FRAME
+    from audiolab.resources import GB, estimate_disk_bytes
+
+    boundary = DISK_BACKED_AFTER_SECONDS
+    ordinary = lambda seconds: int(seconds / 3600 * 6 * GB + 0.25 * GB)
+    assert estimate_disk_bytes(boundary, 'enhance') == ordinary(boundary)
+    longer = boundary + 1
+    assert estimate_disk_bytes(longer, 'enhance') == ordinary(longer) + longer * 48000 * MAX_BYTES_PER_FRAME
+    assert estimate_disk_bytes(3600, 'enhance', 'best') >= estimate_disk_bytes(3600, 'enhance') + 7 * GB
+    assert estimate_disk_bytes(3600, 'download') == int(1.75 * GB)
+
+
 def test_k_blocks_stream_matches_reference_implementation():
     """Chunked K-weighting (bounded memory on 2 h sets) must give the same block
     loudness as filtering the whole signal at once."""

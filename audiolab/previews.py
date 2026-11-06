@@ -47,7 +47,7 @@ def _read(path: Path, start: int, n: int) -> np.ndarray:
 
 
 def make_previews(
-    source_ref: Path, master: Path, out_dir: Path, duration_s: float = 45.0, check_cancel=None
+    source_ref: Path, master: Path, out_dir: Path, duration_s: float = 45.0, check_cancel=None, *, start_frame=None
 ) -> dict[str, Any]:
     """Write the original/enhanced excerpts (16-bit WAV at the master's rate) and describe them."""
     out_dir = Path(out_dir)
@@ -57,9 +57,13 @@ def make_previews(
     info_src, info_mst = sf.info(str(source_ref)), sf.info(str(master))
     sr = info_mst.samplerate
     total = min(info_src.frames, info_mst.frames)
-    n = min(total, int(duration_s * sr))
-    start = _pick_start(Path(master), total, sr, n, check_cancel)
-    start -= start % max(1, sr // 25)
+    if start_frame is None:
+        n = min(total, int(duration_s * sr))
+        start = _pick_start(Path(master), total, sr, n, check_cancel)
+        start -= start % max(1, sr // 25)
+    else:
+        start = start_frame
+        n = min(total - start, round(duration_s * sr))
 
     src = _read(source_ref, start, n)
     mst = _read(master, start, n)

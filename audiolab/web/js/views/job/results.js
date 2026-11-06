@@ -9,7 +9,7 @@ import { store, emit, showDetails, upsertJob } from '../../store.js';
 import { callout, toast, toastError, block } from '../../ui.js';
 import { go, jobPath, settingsPath } from '../../router.js';
 import { stemRows, filePlayer, trackRows } from '../../player.js';
-import { comparePlayer, libraryCompare } from '../../compare.js';
+import { comparePlayer, libraryCompare, sectionPreviewCompare } from '../../compare.js';
 import { footer, journalBlock } from './status.js';
 import {
   summaryBlock, musicFacts, metricsBlock, sourceLine, decisionsBlock, spectrogramBlock, analyzeResult,
@@ -22,6 +22,7 @@ const REVEAL_LABEL = /Mac/i.test(navigator.platform || navigator.userAgent) ? 'S
 
 export function doneView(job, ctx) {
   const r = job.result || {};
+  if (r.preview) return previewResult(job, r, ctx);
   const out = [];
   if (job.task === 'analyze') out.push(...analyzeResult(job, r), warningsCallout(job, r));
   else out.push(listenBlock(job, r, ctx), ...filesBlocks(job, r, ctx), warningsCallout(job, r), ...aboutBlocks(job, r));
@@ -29,6 +30,17 @@ export function doneView(job, ctx) {
   out.push(footer(job));
   out.push(journalBlock(job, ctx));
   return out.filter(Boolean);
+}
+
+function previewResult(job, r, ctx) {
+  const preview = sectionPreviewCompare(job);
+  if (preview) ctx.onCleanup(() => preview.destroy());
+  return [
+    listenSection('Listen to the section preview',
+      preview?.el || h('p', { class: 'muted' }, 'This section preview is unavailable.')),
+    h('p', { class: 'muted small' }, 'Section estimate. The full recording is checked again when saved.'),
+    warningsCallout(job, r), footer(job), journalBlock(job, ctx),
+  ].filter(Boolean);
 }
 
 function warningsCallout(job, r) {
@@ -283,6 +295,7 @@ function excerptCompare(job, r, entry, missing) {
   return comparePlayer({
     sides, songOffset: ex.start_s, length: ex.duration_s, songDuration: song, startAt: ex.start_s,
     loudness: { original_lufs: r.metrics?.before?.lufs, result_lufs: r.metrics?.after?.lufs },
+    reductions: r.processing?.applied,
     note: h('span', null, `Only an excerpt (${where}): `, ...why),
   });
 }

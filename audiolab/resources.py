@@ -5,10 +5,11 @@ Docker container OOM-killed the whole VM. Since then every job estimates its
 peak RAM and disk need up front and is refused with a plain explanation and
 concrete alternatives instead of crashing the machine.
 
-The memory model is calibrated on the float32 DSP chain (measured Oct 2026:
+The conservative memory model is calibrated on the earlier in-memory float32 DSP chain (Oct 2026:
 2.07 GB peak for 10 min, 3.72 GB for 30 min): ~3.8x one full-length stereo
 float32 array (1.38 GB per hour at 48 kHz) + 1.3 GB fixed; AI stages are
-windowed and add roughly 1 GB.
+windowed and add roughly 1 GB. Long Enhance now uses disk-backed working buffers;
+keep the old RAM gate until representative long-run measurements justify lowering it.
 """
 
 import shutil
@@ -74,7 +75,7 @@ def estimate_peak_bytes(duration_s: float, task: str, quality: str = 'standard',
     if task == 'separate':
         return int(1.2 * stereo_array) + int(1.3 * GB)  # windowed model + streamed stems
     if task == 'analyze':
-        return int(1.4 * stereo_array) + GB // 2  # whole programme in memory for the profile
+        return int(1.4 * stereo_array) + GB // 2  # legacy conservative guard; current level scan is bounded
     return 256 * 1024 * 1024  # download / convert: subprocesses do the work
 
 
@@ -84,7 +85,14 @@ def estimate_disk_bytes(duration_s: float, task: str, quality: str = 'standard')
     per_hour = {'download': 1.5, 'analyze': 2.0, 'enhance': 6.0, 'separate': 14.0}.get(task, 6.0)
     if task == 'enhance' and quality == 'best':
         per_hour += 7.0  # 4 float stems + their processed copies
-    return int(hours * per_hour * GB + 0.25 * GB)
+    scratch = 0
+    if task == 'enhance':
+        from .dsp.scratch import DISK_BACKED_AFTER_SECONDS, MAX_BYTES_PER_FRAME
+
+        if duration_s > DISK_BACKED_AFTER_SECONDS:
+            # 48 kHz working reference, irrespective of the selected export rate.
+            scratch = int(duration_s * 48000) * MAX_BYTES_PER_FRAME
+    return int(hours * per_hour * GB + 0.25 * GB) + scratch
 
 
 def preflight(
@@ -150,9 +158,9 @@ def preflight(
         if mem['source'] != 'unknown':
             budget = int(int(mem['available_bytes']) * LIMITS.memory_safety_fraction)
             if peak > budget:
+                basis = 'the installed-memory safety budget' if mem['source'] == 'host' else 'safely available'
                 reasons.append(
-                    f'It needs about {human_bytes(peak)} of memory, but only about '
-                    f'{human_bytes(budget)} is safely available.'
+                    f'It needs about {human_bytes(peak)} of memory, but only about {human_bytes(budget)} is {basis}.'
                 )
                 hints.append(
                     'Close other apps, process a shorter piece, or (in Docker) give the container more memory.'

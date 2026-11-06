@@ -387,14 +387,41 @@ def resolve(
             "the AI stage shapes each part's top end itself (slightly softer above 9 kHz)",
         )
 
-    # --- expert overrides ----------------------------------------------------
+    _apply_overrides(key, prof, adv, p, d)
+
+    if 'tp_ceiling_db' not in d._items:
+        d.set(
+            'tp_ceiling_db',
+            'Peak ceiling',
+            _db(p.tp_ceiling_db, 'dBTP'),
+            'recipe',
+            'keeps peaks safe on every speaker and after MP3/AAC conversion',
+        )
+    return p, d.list()
+
+
+def preview_params(key: str, saved: ChainParams, profile: dict[str, Any], advanced: dict[str, Any]) -> ChainParams:
+    """Apply explicit edits while retaining decisions made from the full source."""
+    d = _Decisions()
+    if saved.volume_only:
+        _level_overrides(advanced, saved, d)
+    else:
+        _apply_overrides(key, profile, advanced, saved, d)
+    return saved
+
+
+def _apply_overrides(key: str, prof: dict, adv: dict, p: ChainParams, d: _Decisions) -> None:
+    bw = prof.get('bandwidth') or {}
+    lossy = bool(bw.get('is_lossy_cutoff'))
+    antiphase = bool((prof.get('stereo') or {}).get('antiphase_bass'))
     _level_overrides(adv, p, d)
     v = _num(adv.get('bass_db'))
     if v is not None:
         p.bass_db = round(max(0.0, min(6.0, v)), 2)
         d.set('bass_db', 'Bass punch', _db(p.bass_db), 'user', 'set by you')
     c = _choice(adv.get('harmonics'), ('on', 'off'))
-    p.sub_harmonics = 0.25 if c == 'on' else 0.0
+    if c:
+        p.sub_harmonics = 0.25 if c == 'on' else 0.0
     d.set(
         'sub_harmonics',
         'Bass harmonics',
@@ -405,7 +432,8 @@ def resolve(
         else 'off to preserve the original bass; adding new harmonics is optional',
     )
     c = _choice(adv.get('adaptive_lowmid'), ('auto', 'off', 'strong'))
-    p.adaptive_lowmid_db = 0.0 if c == 'off' else 3.0 if c == 'strong' else 1.5
+    if c:
+        p.adaptive_lowmid_db = 0.0 if c == 'off' else 3.0 if c == 'strong' else 1.5
     d.set(
         'adaptive_lowmid',
         'Adaptive low-mids',
@@ -421,9 +449,10 @@ def resolve(
         p.compressor = ('leveler' if key == 'voice' else 'glue') if c == 'on' else 'off'
         d.set('compressor', 'Compression', c, 'user', 'set by you')
     c = _choice(adv.get('hf_restore'), ('on', 'off'))
+    if c:
+        p.hf_restore = c == 'on' and lossy
     if c == 'on':
         if lossy:
-            p.hf_restore = True
             d.set(
                 'hf_restore',
                 'Restore highs',
@@ -450,6 +479,8 @@ def resolve(
             + (' — note: the bass is partly out of phase, mono may thin it' if c == 'on' and antiphase else ''),
         )
     c = _choice(adv.get('deess'), ('auto', 'off', 'strong'))
+    if c == 'auto':
+        p.deess_db = _DEESS_DB[key]
     if c in ('off', 'strong'):
         p.deess_db = 0.0 if c == 'off' else DEESS_STRONG_DB
         d.set(
@@ -462,16 +493,6 @@ def resolve(
     model = adv.get('model')
     if isinstance(model, str) and model in ('htdemucs', 'htdemucs_ft'):
         p.ai_model = model
-
-    if 'tp_ceiling_db' not in d._items:
-        d.set(
-            'tp_ceiling_db',
-            'Peak ceiling',
-            _db(p.tp_ceiling_db, 'dBTP'),
-            'recipe',
-            'keeps peaks safe on every speaker and after MP3/AAC conversion',
-        )
-    return p, d.list()
 
 
 _LOSSLESS_CODECS = ('pcm', 'flac', 'alac', 'wavpack', 'ape', 'tta', 'truehd', 'mlp')

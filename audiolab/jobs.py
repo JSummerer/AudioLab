@@ -75,6 +75,7 @@ class Job:
         d = asdict(self)
         d['queue_position'] = queue_position
         d['source'] = {k: v for k, v in self.source.items() if not k.startswith('_') and k != 'path'}
+        d['options'] = {k: v for k, v in d['options'].items() if not k.startswith('_')}
         if self.result is not None:
             d['result'] = _public_result(self.result)
         return d
@@ -212,6 +213,8 @@ class JobManager:
                 continue
             if job.status == RUNNING:
                 job.status = FAILED
+                if job.options.get('_preview'):
+                    self._discard_preview(job)
                 job.error = {
                     'message': 'Interrupted — AudioLab was closed while this was running.',
                     'hints': ['Click "Try again" to run it again.'],
@@ -602,6 +605,8 @@ class JobManager:
                 # Slow cleanup stays outside the manager lock, before the cancellation cutoff.
                 if not SETTINGS.get().keep_work_files:
                     shutil.rmtree(self.work_dir(job.id) / 'scratch', ignore_errors=True)
+                if status != DONE and job.options.get('_preview'):
+                    self._discard_preview(job)
                 commit.enter_context(self._lock)
                 if not self._active(job, ctx):
                     raise Cancelled()
@@ -631,6 +636,10 @@ class JobManager:
                 self.on_finished(job)
             except Exception:
                 pass
+
+    def _discard_preview(self, job: Job) -> None:
+        shutil.rmtree(self.work_dir(job.id) / 'previews', ignore_errors=True)
+        job.result = None
 
     def _add_to_library(self, job: Job, check_cancel: Callable[[], None], begin_commit: Callable[[], None]) -> None:
         """Record the result in the Library — before scratch goes: it may hold the original to keep."""

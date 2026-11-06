@@ -30,6 +30,7 @@ from scipy.ndimage import maximum_filter1d, uniform_filter1d
 from scipy.signal import butter
 
 from .filters import filtfilt_stream
+from .timeline import reduction_timeline
 
 BAND_HZ = (4500.0, 9500.0)
 _CTRL_SR = 1000  # control rate (Hz)
@@ -55,7 +56,13 @@ def _ctrl_power(a: np.ndarray, decim: int, n_ctrl: int, check) -> np.ndarray:
 
 
 def deess(
-    x: np.ndarray, sr: int = 48000, max_gr_db: float = 3.0, mix: bool = True, check_cancel=None
+    x: np.ndarray,
+    sr: int = 48000,
+    max_gr_db: float = 3.0,
+    mix: bool = True,
+    check_cancel=None,
+    *,
+    band_buffer: np.ndarray | None = None,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Soften S-sound spikes in place (x is modified and returned); `mix=False` for a voice alone.
     Stats: engaged, max_gr_db, active_pct (share of the time turned down by more than 0.5 dB),
@@ -68,7 +75,7 @@ def deess(
         return x, {'engaged': False, 'skip_reason': 'too short' if n_ctrl < 200 else 'off'}
 
     sos = butter(2, BAND_HZ, btype='bandpass', fs=sr, output='sos')
-    band = filtfilt_stream(sos, x, check_cancel=check_cancel)
+    band = filtfilt_stream(sos, x, check_cancel=check_cancel, out=band_buffer)
     k = max(1, int(0.005 * _CTRL_SR))
     # Running means can dip a hair below zero on digital silence.
     pb = np.maximum(uniform_filter1d(_ctrl_power(band, decim, n_ctrl, check), k, mode='nearest'), 0.0)
@@ -120,4 +127,5 @@ def deess(
         'band_change_db': round(band_change_db(gr), 2),
         'threshold_db': round(threshold, 1),
         'budget_db': round(threshold - base, 1),
+        'timeline': reduction_timeline(gr, len(x), sr, step_frames=decim, start_frame=decim / 2),
     }

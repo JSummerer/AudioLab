@@ -1,4 +1,4 @@
-AudioLab — Mac tester app
+AudioLab 2.4.0b5 — Mac beta
 
 For Apple silicon Macs with macOS 14 or later.
 Check Apple menu > About This Mac for your chip and macOS version.
@@ -41,9 +41,9 @@ AI installation is available from 2.4.0b2 onward; update an older 2.4.0b1 app fi
 UPDATE
 Quit AudioLab and replace AudioLab.app with the newer copy from GitHub Releases.
 Choose Replace in the same Applications folder, eject the disk image, then reopen
-and check Settings > About for the version. Your recordings, Library and settings
-remain separate from the application. Compatible AI is reused. The app does not
-update itself automatically; check Settings for any required AI add-on update.
+and confirm 2.4.0b5 in Settings > About. Your recordings, Library and settings
+carry over. Beta 5 reuses a compatible AI 1.0.0 installation. App updates
+are manual.
 
 UNINSTALL
 Quit AudioLab and move AudioLab.app to the Trash.

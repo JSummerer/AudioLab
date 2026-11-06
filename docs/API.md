@@ -126,6 +126,12 @@ The adaptive report has `engaged`, a `skip_reason` when unchanged, or `max_gr_db
 (`start_s`, `end_s`, `max_gr_db`, in recording time). Its configuration/coverage fields are
 `band_hz`, `analysis_hop_s`, `reference_window_s`, `margin_db`, `cap_db`, `windows_total`,
 `candidate_pct`, `sustained_pct`. Missing stages/fields mean unavailable, not zero processing.
+Each dynamic stage (`adaptive_lowmid`, `deess`, `compressor`, `limiter`) can also contain
+`timeline: {duration_s, bins: [{start_s, end_s, peak_s, max_gr_db}]}`. At most 120 non-overlapping
+bins summarize reductions of at least 0.1 dB. `peak_s` is the time of the strongest observed reduction
+inside the half-open bin, not its midpoint; the gain need not be constant across the bin. Empty bins
+mean no reported reduction above that threshold. These highlights exclude static EQ, overall gain
+and other stages. Old entries without a timeline do not imply no processing.
 
 Each full-length Enhance file has `verification: {status, integrated_lufs, true_peak_dbtp,
 ceiling_dbtp, ceiling_met, tolerance_db, message}`. Status is `verified` (peak within the ceiling),
@@ -311,7 +317,7 @@ detail.
 ### Health
 ```jsonc
 {
-  "app": "AudioLab", "version": "2.4.0b4", "local": true, "packaged": false,
+  "app": "AudioLab", "version": "2.4.0b5", "local": true, "packaged": false,
   "ffmpeg": {"ok": true, "version": "7.1", "source": "system" | "bundled", "error": null},
   "downloader": {"ok": true, "version": "2026.08.19", "age_days": 47, "update_supported": true},
   "ai": {"available": false, "device": null, "reason": "AI pack not installed", "install_supported": true, "installing": false,
@@ -443,13 +449,42 @@ the job (jobs expire after `AUDIOLAB_RETENTION_DAYS`, "Clear finished" removes t
 entries until they are removed with `DELETE /api/library/{id}`). Runs from the command line are not recorded.
 New Enhance entries retain `processing: {requested, resolved, applied, metrics}` after job removal.
 `requested` holds validated recipe, quality, formats, advanced settings and cover/split switches;
-`resolved` holds `{recipe, params, decisions}`. `applied` and `metrics` use the Result fields above.
+`resolved` holds `{recipe, params, decisions}` and, when available, `bandwidth`
+(`is_lossy_cutoff` and optional `cutoff_hz`) for repeating HF treatment in a short preview.
+`applied` and `metrics` use the Result fields above.
 The projection omits source paths, tracklists and raw tool errors, bounds strings/lists and rejects
 non-finite numbers. Older entries omit `processing`; no historical settings are invented.
 Enhanced `files[].verification` keeps the Result export checks except `message`. Library
 `loudness.result_lufs` remains the master measurement; the compare player uses the selected export's
 measured loudness when available. An explicitly unverified/unmeasurable export disables volume matching;
 legacy entries with no check use their original master-based estimate.
+
+`POST /api/library/{id}/preview` accepts JSON `{start_s, duration_s, advanced: {...}}` and returns a
+single queued Enhance Job. Start must be finite and nonnegative; duration is 5–30 seconds, clipped at
+the actual end only if at least one second remains. It requires a kept original and retained resolved
+settings, and supports Volume only/Adaptive, not AI stems. Unknown/invalid fields return `400`; missing
+entries return `404`, missing originals `410`. Advanced options have the Enhance meanings and numeric
+limits; preview excludes the AI model option. Retained HF restoration needs its original bandwidth
+facts (or the still-existing source job's analysis); unavailable provenance returns `400`.
+The decode preserves comparison playback's source alignment. WebM/Matroska timing checks are bounded
+to early probes at 1, 10 and 25 seconds; if these offer no matching audio, a later preview fails with a
+WAV/FLAC or full-Enhance hint. It does not fall back to decoding an arbitrarily long source prefix.
+
+Preview results have `preview: true`, `files: []`, aligned `original`/`enhanced` media and PCM keys,
+`excerpt: {start_s, duration_s}`, cropped comparison `metrics` and contextual `processing` reports.
+Timeline times in these reports are relative to the cropped excerpt. The source's global resolved
+parameters are retained, but dynamics and gain use the bounded surrounding audio and can differ from
+full-recording processing. The result summary explains that limit. Preview jobs use ordinary status,
+cancellation, retry and retention routes; internal preview options are not exposed or accepted by
+`POST /api/jobs`. Failed/cancelled previews remove their comparison media and create no Library entry.
+
+`POST /api/library/{id}/enhance` accepts `{advanced: {...}}` and returns one ordinary queued Enhance Job.
+Both routes clone the retained original into the new job input, merge overrides with saved requested
+options and preserve the earlier version. The full job reanalyzes the complete original, exports and
+verifies new files, and retains its source grouping and track markers. Neither route accepts paths or
+raw chain parameters. They work after the original job expires if the required Library data survives.
+Artwork can be reused when embedded in the retained original; separate custom/downloaded artwork is
+not retained by this workflow and is not fetched again.
 An entry is the original plus the final output files — nothing else is written for it (no excerpts: comparing
 decodes the full files in chunks, `…/pcm/…`). For Enhance the acquired original is kept as it came — the
 downloaded stream (e.g. Opus in `.webm`) or the uploaded file, never a decoded WAV — only in AudioLab's data

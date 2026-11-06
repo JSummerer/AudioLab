@@ -28,8 +28,9 @@ promises. Completed changes belong in [CHANGELOG.md](../CHANGELOG.md).
   one (`system.install_shortcut`, used by `audiolab shortcut`), plus the native window there (`[desktop]` extra).
 - **Packaged apps**: a self-contained, signed and notarized Mac app, followed by a Windows installer,
   to reduce setup steps. The current source ZIP uses setup scripts and an internet connection.
-- **Long sets on small machines**: disk-streamed two-pass mastering chain (O(block) RAM) so 3 h sets fit
-  a 16 GB laptop or a 4 GB container.
+- **Long sets on small machines**: qualify whole-app memory and disk use on longer recordings and
+  lower-memory machines. Beta 5 uses disk-backed working buffers, but does not promise constant RAM
+  or a maximum supported recording length. A fully streamed mastering chain remains a larger step.
 - **Better separation models**: RoFormer / MDX models (e.g. via `audio-separator`) for cleaner vocals,
   plus de-reverb / de-noise models for the voice recipe.
 - **Track-aware DJ processing**: snap AI windows and per-track loudness to track boundaries

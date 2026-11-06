@@ -80,6 +80,7 @@
 .lib-stage-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); margin-bottom: var(--s-2); color: var(--ink-2); font-size: var(--fs-small); }
 .lib-stage-head strong { min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lib-stage-head .icon-btn { margin-right: -6px; }
+.lib-preview-action { margin-top: var(--s-3); }
 
 @container content (max-width: 720px) {
   .lib-original { grid-template-columns: minmax(0, 1fr); }
@@ -176,9 +177,29 @@
 .cmp-repeat-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-3); margin-top: var(--s-3); }
 .cmp-repeat-note { color: var(--ink-2); font-size: var(--fs-small); margin: var(--s-2) 0 0; }
 
+/* Each lane uses the same time scale as the comparison. The pills cue the strongest moments. */
+.cmp-reductions-note { margin-top: var(--s-2); }
+.cmp-reduction-lanes { display: grid; gap: var(--s-2); margin-top: var(--s-2); }
+.cmp-reduction-scale { display: flex; justify-content: space-between; }
+.cmp-reduction-lane { display: grid; gap: var(--s-1); }
+.cmp-reduction-lane strong { font-weight: 600; }
+.cmp-reduction-rail { position: relative; height: var(--s-3); border-bottom: 1px solid var(--line-strong); }
+.cmp-reduction-rail i { position: absolute; bottom: 0; width: 2px; background: var(--accent); }
+.cmp-reduction-highlights { display: flex; flex-wrap: wrap; gap: var(--s-1); }
+
 /* A hiccup while playing (Try again): a compact callout over the transport. */
 .cmp-problem .callout { padding: var(--s-2) var(--s-3); }
 .cmp-problem .callout-body p { font-size: var(--fs-small); }
+
+/* Section preview: source range and a few settings, then the temporary comparison. */
+.quick-preview-fields { display: grid; gap: var(--s-2); min-width: 0; border: 0; margin: 0; padding: 0; }
+.quick-preview-range { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-4); }
+.quick-preview-number, .quick-preview-choice { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-2); }
+.quick-preview-number .field { width: var(--label-w); }
+.quick-preview-settings { display: grid; gap: var(--s-2); padding-top: var(--s-2); border-top: 1px solid var(--line); }
+.quick-preview-settings :is(.quick-preview-choice, .quick-preview-number) > span { min-width: var(--label-w); }
+.quick-preview-listen { padding-top: var(--s-3); border-top: 1px solid var(--line); }
+.quick-preview .dialog-actions { flex-wrap: wrap; }
 
 @container content (max-width: 480px) {
   .ab-keys { gap: var(--s-4); }

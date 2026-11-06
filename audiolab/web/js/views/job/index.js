@@ -195,6 +195,7 @@ function renderCover(job) {
 function eyebrowText(job) {
   if (job.status !== 'done') return taskLabel(job);
   const r = job.result || {};
+  if (r.preview) return 'Section preview';
   const files = r.files || [];
   const tracks = files.filter((f) => f.group === 'tracks').length;
   const main = files.find((f) => f.group !== 'tracks' && f.kind !== 'cover' && f.kind !== 'report');

@@ -252,7 +252,7 @@ _CHANNEL_WORDS = {
 }
 
 
-def probe_media(path: Path) -> dict[str, object]:
+def probe_media(path: Path, progress: Progress | None = None) -> dict[str, object]:
     """Describe a media file by parsing `ffmpeg -i` (works without ffprobe)."""
     info: dict[str, object] = {
         'duration_s': None,
@@ -274,6 +274,7 @@ def probe_media(path: Path) -> dict[str, object]:
     lines: list[str] = []  # collect everything: long chapter/tag lists overflow the stderr tail
     proc.run(
         [ffmpeg_path(), '-hide_banner', '-nostdin', '-i', str(path)],
+        progress=progress,
         timeout_s=120,
         what='media probe',
         capture_stdout=False,
@@ -361,18 +362,24 @@ def _tmp_for(dst: Path) -> Path:
 
 
 def decode_reference(
-    src: Path, dst: Path, progress: Progress | None = None, duration_s: float | None = None
+    src: Path,
+    dst: Path,
+    progress: Progress | None = None,
+    duration_s: float | None = None,
+    *,
+    excerpt: tuple[float, float] | None = None,
 ) -> dict[str, object]:
     """Decode any audio/video file once to the 48 kHz stereo working reference.
 
     The reference is 32-bit float WAV (RF64 when > 4 GB): decoded lossy audio and
     down-mixes often peak above 0 dBFS, and an integer format would hard-clip
-    those peaks before the mastering chain can handle them gracefully."""
+    those peaks before the mastering chain can handle them gracefully.
+    `excerpt`, when provided, is the start and maximum length in seconds."""
     import soundfile as sf
 
     progress = progress or Progress.null()
     src, dst = Path(src), Path(dst)
-    meta = probe_media(src)
+    meta = probe_media(src, progress=progress) if excerpt else probe_media(src)
     if not meta['has_audio']:
         raise AudioLabError(
             'This file has no audio track AudioLab can read.',
@@ -382,18 +389,28 @@ def decode_reference(
             ],
         )
     duration_s = duration_s or meta.get('duration_s')
+    window, limit = ['-i', str(src), '-map', '0:a:0', '-vn', '-sn', '-dn'], []
+    if excerpt is not None:
+        start, duration_s = excerpt
+        offset = round(start * PCM_RATE)
+        seek = offset > PCM_PREROLL
+        shift = 0
+        if seek and src.suffix.lower() in _MS_TIMESTAMPS:
+            shift = _seek_shift(src, progress.cancel_event, bounded=True)
+            if shift is None:
+                raise AudioLabError(
+                    'AudioLab could not align a short preview with this recording.',
+                    hints=['Try a WAV or FLAC original, or run Enhance on the full recording.'],
+                )
+        window = _pcm_window(src, offset, seek=seek, shift=shift)
+        limit = ['-t', f'{duration_s:.6f}']
     dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = _tmp_for(dst)
     try:
         run_ffmpeg(
             [
-                '-i',
-                str(src),
-                '-map',
-                '0:a:0',
-                '-vn',
-                '-sn',
-                '-dn',
+                *window,
+                *limit,
                 '-ar',
                 '48000',
                 '-ac',
@@ -465,20 +482,29 @@ def decode_pcm(path: Path, offset: int, frames: int, cancel_event: threading.Eve
         _PCM_SLOTS.release()
 
 
-def _decode(path: Path, offset: int, frames: int, progress: Progress, seek: bool = False, shift: int = 0) -> bytes:
-    cmd = [ffmpeg_path(), '-hide_banner', '-nostdin', '-v', 'error']
+def _pcm_window(path: Path, offset: int, *, seek: bool, shift: int) -> list[str]:
+    source = ['-i', str(path), '-map', '0:a:0', '-vn', '-sn', '-dn']
     if not seek:  # from the start, like a full decode
-        cmd += ['-i', str(path), '-map', '0:a:0', '-vn', '-sn', '-dn']
         # A chunk offset is relative to the first decoded sample, not container
         # timestamps (older FFmpeg retains a WebM/Opus start offset here).
-        cmd += ['-af', 'asetpts=PTS-STARTPTS']
-        if offset:
-            cmd += ['-ss', _seconds(offset)]
-    else:
-        # Seek 0.48 s early. Some decoders (AAC) start a little after the seek point, which would put the
-        # resampler out of phase: it only starts at the grid point halfway, and the output from `offset` on.
-        cmd += ['-ss', _seconds(offset - PCM_PREROLL), '-i', str(path), '-map', '0:a:0', '-vn', '-sn', '-dn']
-        cmd += ['-af', f'atrim=start={_seconds(PCM_PREROLL // 2)}', '-ss', _seconds(PCM_PREROLL + shift)]
+        trim = ['-ss', _seconds(offset)] if offset else []
+        return [*source, '-af', 'asetpts=PTS-STARTPTS', *trim]
+    # Seek at least 0.48 s early. Some decoders (AAC) start a little after the seek point.
+    # Begin resampling at the grid point halfway through preroll to keep its phase.
+    remainder = offset % PCM_GRID
+    return [
+        '-ss',
+        _seconds(offset - remainder - PCM_PREROLL),
+        *source,
+        '-af',
+        f'atrim=start={_seconds(PCM_PREROLL // 2)}',
+        '-ss',
+        _seconds(PCM_PREROLL + shift + remainder),
+    ]
+
+
+def _decode(path: Path, offset: int, frames: int, progress: Progress, seek: bool = False, shift: int = 0) -> bytes:
+    cmd = [ffmpeg_path(), '-hide_banner', '-nostdin', '-v', 'error', *_pcm_window(path, offset, seek=seek, shift=shift)]
     # A step longer than asked: the read below makes it exact, ffmpeg's rounding can't leave a frame out.
     cmd += ['-t', _seconds(frames + PCM_GRID), '-ac', '2', '-ar', str(PCM_RATE), '-c:a', 'pcm_f32le', '-f', 'f32le']
     fd, tmp = tempfile.mkstemp(prefix='.audiolab-pcm-', suffix='.f32')
@@ -504,24 +530,27 @@ def _decode(path: Path, offset: int, frames: int, progress: Progress, seek: bool
         Path(tmp).unlink(missing_ok=True)
 
 
-def _seek_shift(path: Path, cancel_event: threading.Event | None) -> int | None:
+def _seek_shift(path: Path, cancel_event: threading.Event | None, *, bounded: bool = False) -> int | None:
     try:
         st = path.stat()
     except OSError:
         return 0
-    return _measured_shift(str(path), st.st_size, st.st_mtime_ns, cancel_event)
+    return _measured_shift(str(path), st.st_size, st.st_mtime_ns, cancel_event, bounded)
 
 
 @lru_cache(maxsize=32)
-def _measured_shift(path: str, size: int, mtime_ns: int, cancel_event: threading.Event | None) -> int | None:
+def _measured_shift(
+    path: str, size: int, mtime_ns: int, cancel_event: threading.Event | None, bounded: bool
+) -> int | None:
     """Frames to trim later after a seek into this file, measured once. Matroska keeps timestamps in whole
     milliseconds, so ffmpeg can place the audio a little off after a seek (YouTube's WebM Opus, whose frames
     start at x.5 ms: 1 ms early). The same passage is decoded from the start and by a seek and lined up.
-    None when there is nothing to measure — the file ends first or is silent at every place tried — so
-    chunks are decoded from the start instead (exact; such files are short). 0 when a passage with sound
-    lines up with no whole-frame shift (a fractional one stays: under a millisecond)."""
+    None when the file ends first or is silent at every place tried. Bounded previews only try
+    early positions so that calibration cannot require decoding a long prefix. 0 when a passage
+    with sound lines up with no whole-frame shift (a fractional one stays: under a millisecond)."""
     n, stop = 10 * PCM_GRID, Progress.null(cancel_event)
-    for at in (25, 250, 1500, 7500, 22500):  # × PCM_GRID: at 1 s, 10 s, 1 min, 5 min, 15 min
+    positions = (25, 250, 625) if bounded else (25, 250, 1500, 7500, 22500)
+    for at in positions:  # × PCM_GRID: at 1 s and 10 s, then 25 s or longer for full comparison
         at *= PCM_GRID
         via = np.frombuffer(_decode(Path(path), at, n, stop, seek=True), np.float32)
         if len(via) < 2 * n:
@@ -534,7 +563,8 @@ def _measured_shift(path: str, size: int, mtime_ns: int, cancel_event: threading
             if len(ref) >= i + len(via) and np.abs(ref[i : i + 256] - via[:256]).max() < 1e-5:
                 if np.abs(ref[i : i + len(via)] - via).max() < 1e-5:  # (Opus decoders round at -150 dB)
                     return -lag
-        return 0
+        if not bounded:
+            return 0  # full comparison retains its existing fallback for fractional shifts
     return None
 
 

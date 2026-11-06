@@ -21,6 +21,7 @@ from scipy.ndimage import uniform_filter1d
 from scipy.signal import butter
 
 from .filters import filtfilt_stream
+from .timeline import ReductionTimeline
 
 BAND_HZ = (180.0, 480.0)
 HOP_S = 0.1
@@ -87,7 +88,12 @@ def _reference(share: np.ndarray, audible: np.ndarray, check) -> np.ndarray:
 
 
 def control_lowmids(
-    x: np.ndarray, sr: int = 48000, max_gr_db: float = 1.5, check_cancel=None
+    x: np.ndarray,
+    sr: int = 48000,
+    max_gr_db: float = 1.5,
+    check_cancel=None,
+    *,
+    band_buffer: np.ndarray | None = None,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Modify x in place; return it and a bounded, JSON-safe account of actual changes."""
     check = check_cancel or (lambda: None)
@@ -110,7 +116,9 @@ def control_lowmids(
     stats['windows_total'] = len(level)
     if audible.sum() < 40:
         return x, {**stats, 'skip_reason': 'too little audible context'}
-    band = filtfilt_stream(butter(2, BAND_HZ, btype='bandpass', fs=sr, output='sos'), x, check_cancel=check)
+    band = filtfilt_stream(
+        butter(2, BAND_HZ, btype='bandpass', fs=sr, output='sos'), x, check_cancel=check, out=band_buffer
+    )
     band_power = _powers(band, hop, check)
     share = 10.0 * np.log10((band_power + 1e-24) / (full_power + 1e-24))
     reference = _reference(share, audible, check)
@@ -177,6 +185,9 @@ def control_lowmids(
         for a, b in _runs(gr >= 0.1)
     ]
     events = sorted(sorted(events, key=lambda e: e['max_gr_db'], reverse=True)[:12], key=lambda e: e['start_s'])
+    timeline = ReductionTimeline(len(x), sr)
+    timeline.add(gr[:-1], start_frame=hop / 2, step_frames=hop)
+    timeline.add(gr[-1:], start_frame=centres[-1])
     return x, {
         **stats,
         'engaged': True,
@@ -184,4 +195,5 @@ def control_lowmids(
         'active_pct': round(100.0 * float((gr >= 0.1).mean()), 2),
         'band_change_db': round(band_change(gr), 3),
         'events': events,
+        'timeline': timeline.result(),
     }

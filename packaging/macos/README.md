@@ -58,9 +58,13 @@ wheel's runtime and Mutagen; AudioLab uses its own FFmpeg path for media tags an
 dependency notices are embedded in the app, with source provenance in the release companion.
 The source Python app retains its existing dependencies and optional AI install workflow.
 
-The core smoke check exercises the **frozen executable**, generated three-second audio, each core
-conversion format, Adaptive Enhance, Check, a localhost link, and HTTP/UI assets. It removes
-external Python from PATH and uses isolated data/output folders. It does not test real websites.
+The core smoke check exercises the **frozen executable** with short generated fixtures. It checks
+each core conversion format, Adaptive Enhance, Check, a localhost link, and HTTP/UI assets.
+The HTTP check saves an Adaptive result, checks that the Library retains its reduction timeline after
+job removal, auditions a five-second excerpt with changed settings, and applies those settings to
+the full recording. It checks the two bounded PCM streams, new exports in the same Library group,
+and the kept original's hash. The check removes external Python from PATH and uses isolated
+data/output folders and localhost requests.
 The AI check installs the real archive through the production manager with a localhost transport
 fixture, then exercises frozen Split, AI stems Enhance, removal and reinstallation. The independent
 helper check runs for both reused and new archives, exercises both offline models using the

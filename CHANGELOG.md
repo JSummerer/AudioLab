@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 2.4.0b5 (2026-11-06, public beta)
+
+- Changes timeline in comparison shows measured low-mid, de-esser, compressor and limiter reduction
+  highlights. Selecting a highlight repeats the corresponding passage. Processing details lists
+  static EQ and overall level changes. New timelines survive in Library history.
+- Library can preview changed settings on a selected 5–30 second passage of the kept original, using
+  nearby context and the existing processing chain. Apply to full recording creates and verifies a
+  new full-length version. Preview supports Volume only and Adaptive. Levels and processing can
+  differ when AudioLab uses the whole recording, and the preview audio excludes any effects of the
+  final export format.
+  Bounded decoding keeps MP3/AAC/WebM passage timing aligned with the source. AudioLab reports
+  an error if it cannot establish the seek timing.
+- Enhance beyond 10 minutes uses reusable disk-backed working buffers and bounded processing steps.
+  Scratch allocation, filtering, mixing and gain passes are cancellable, and temporary buffers
+  close on cancellation or failure. Disk preflight includes the added working space.
+  Enhance publishes the master only after its final measurements succeed. Long-run capacity and
+  listening preference still need separate evidence.
+
 ## 2.4.0b4 (2026-11-05, public beta)
 
 - Long-recording loudness, dynamics, peaks, clipping and DC checks now cover the whole file with bounded

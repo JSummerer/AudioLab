@@ -129,8 +129,9 @@ def record(job, check_cancel: Callable[[], None] | None = None, begin_commit: Ca
         'created_at': time.time(),
         'title': hints.get('title') or job.title,  # as used for names and tags
         'artist': hints.get('artist'),
-        'source': {k: v for k, v in job.source.items() if not k.startswith('_') and k != 'path'},
-        'group': source_key(job.source, check, digests),
+        'source': job.source.get('_library_source')
+        or {k: v for k, v in job.source.items() if not k.startswith('_') and k != 'path'},
+        'group': job.source.get('_library_group') or source_key(job.source, check, digests),
         'duration_s': hints.get('duration_s') or job.source.get('duration_s'),
         'headline': result.get('headline'),
         'root': str(root),

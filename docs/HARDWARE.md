@@ -1,6 +1,6 @@
 # Hardware and storage
 
-For the **AudioLab 2.4.0b4 Mac beta**. [Download and install](MACOS.md) ·
+For the **AudioLab 2.4.0b5 Mac beta**. [Download and install](MACOS.md) ·
 [Memory](#memory-ram) · [Disk space](#disk-space) · [Speed and models](#speed-and-models) ·
 [Checks and limits](#what-the-app-checks)
 
@@ -39,9 +39,10 @@ not mean AI needs only 1 GB RAM. On Apple silicon, CPU and GPU share the compute
   24/32 GB tier or promised maximum duration; shorter recordings remain the most direct way to
   reduce a job's working data.
 
-Adaptive Enhance also keeps full-length audio arrays in memory. Some filters and AI stages work in
-chunks, but the complete Enhance job does not use a fixed amount of RAM regardless of duration.
-The compressed MP3/FLAC file size is therefore a poor guide to processing memory.
+Enhance uses disk-backed working buffers beyond 10 minutes and processes more stages in blocks.
+This reduces the need to allocate full-length audio arrays in memory. Working memory still depends
+on the recording's duration, the data mapped from disk and any AI processing. Compressed MP3 or FLAC
+size is a poor guide to processing memory.
 
 If the Mac becomes sluggish, cancel the job, close other demanding apps and retry a shorter file or
 use Volume only Enhance. You can inspect **Activity Monitor → Memory → Memory Pressure** if needed;
@@ -50,8 +51,9 @@ explains that display. This is optional troubleshooting, not an installation req
 
 ## Disk space
 
-Reference payloads measured on b3, rounded in decimal MB/GB. The b4 download has its own size
-on the release page; the unchanged AI 1.0.0 payload is reused:
+Reference payloads measured on beta 3, rounded in decimal MB/GB. See the
+[beta 5 release](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b5) for its app download size.
+Beta 5 uses the same AI 1.0.0 payload.
 
 | Files | Download | Installed files |
 |---|---:|---:|
@@ -65,17 +67,21 @@ Keep the larger working-space allowance in the table above for actual use. Repai
 an existing installation while preparing its replacement.
 
 Temporary audio can be much larger than the original file. The app checks a task/duration estimate
-plus a 2 GiB allowance before processing. Rounded **current check thresholds for one 60-minute job** are:
+plus a 2 GiB allowance before processing. The table shows rounded **beta 5 check thresholds for one
+60-minute job** in decimal GB.
 
 | Task | Free-space estimate, including that allowance |
 |---|---:|
 | Save / Convert | About 4.0 GB |
 | Check | About 4.6 GB |
-| Volume only/Adaptive Enhance | About 8.9 GB |
-| AI stems Enhance | About 16.4 GB |
+| Volume only/Adaptive Enhance | About 15.1 GB |
+| AI stems Enhance | About 22.6 GB |
 | Split | About 17.4 GB |
 
-These are calculations from the current code, **not measured peak disk use or reserved capacity**.
+The Enhance estimates include up to **6.2 GB (5.8 GiB) per hour** for disk-backed working buffers
+on recordings longer than 10 minutes.
+
+These figures are the app's preflight estimates.
 The estimate does not cover every source sample rate, export format or combination of outputs; even
 the 2 GiB allowance is not guaranteed to remain free after a job. Leave additional room
 for your existing and new recordings, kept originals, other apps and macOS. If work and output folders
@@ -128,8 +134,10 @@ installation, and native-window checks. Both AI model choices passed helper chec
 installation/cancel/resume was checked on b2 with this same AI pack. Native-window validation ran on
 macOS 15.7.9 arm64; local functional checks used an Apple M4 Pro with 48 GB on macOS 26.6.2.
 **That is a test configuration, not a 48 GB requirement.** macOS 14 is the build target and has not been tested natively.
-See the [b3 evidence](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b3) and
-[current release notes](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b4) for their separate test scopes.
+See the release notes for each test scope.
+[Beta 3](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b3) ·
+[Beta 4](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b4) ·
+[Beta 5](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b5)
 
 This evidence does not qualify minimum RAM, long-recording performance or every chip. A supported
 minimum needs checks on actual lower-memory Macs, including the app and AI helper together, GPU/system

@@ -42,7 +42,7 @@ jobs:
       - name: Selected media tool
         run: python -c "from audiolab.media.ffmpeg import ffmpeg_info; print(ffmpeg_info())"
       - run: python -m pytest
-      - name: Bundled FFmpeg comparison playback
+      - name: Bundled FFmpeg comparison and preview timing
         run: |
           python - <<'PY'
           import os
@@ -54,6 +54,6 @@ jobs:
           print(ffmpeg_info(), flush=True)
           subprocess.run(
               [sys.executable, "-m", "pytest", "tests/test_pcm.py", "tests/test_media.py",
-               "-k", "decode_pcm or webm"], check=True
+               "tests/test_fast_preview.py", "-k", "decode_pcm or webm or preview or apply"], check=True
           )
           PY

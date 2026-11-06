@@ -44,17 +44,20 @@ def _istft(spec: np.ndarray, win: np.ndarray, length: int) -> np.ndarray:
 
 
 def estimate_noise_profile(
-    x: np.ndarray, chunk_s: float = 20.0, sr: int = 48000, quiet_pct: float = 15.0
+    x: np.ndarray, chunk_s: float = 20.0, sr: int = 48000, quiet_pct: float = 15.0, check_cancel=None
 ) -> np.ndarray | None:
     """Per-bin noise power (mid signal) from the quietest frames of each chunk."""
-    mono = x.mean(axis=1) if x.ndim > 1 else x
     win = np.hanning(NFFT).astype(np.float32)
     chunk = max(NFFT * 4, int(chunk_s * sr) // HOP * HOP)
     profiles = []
-    for s0 in range(0, len(mono) - NFFT, chunk):
-        seg = mono[s0 : s0 + chunk + NFFT]
+    for s0 in range(0, len(x) - NFFT, chunk):
+        if check_cancel is not None:
+            check_cancel()
+        seg = x[s0 : s0 + chunk + NFFT]
         if len(seg) < NFFT * 4:
             continue
+        if seg.ndim > 1:
+            seg = seg.mean(axis=1)
         p = np.abs(_stft(seg, win)) ** 2
         e = p.sum(axis=1)
         live = e > 1e-14  # ignore digital silence
@@ -71,7 +74,13 @@ def estimate_noise_profile(
 
 
 def spectral_gate(
-    x: np.ndarray, sr: int = 48000, mode: str = 'light', progress=None, chunk_s: float = 20.0
+    x: np.ndarray,
+    sr: int = 48000,
+    mode: str = 'light',
+    progress=None,
+    chunk_s: float = 20.0,
+    *,
+    out: np.ndarray | None = None,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Reduce stationary background noise (hiss, hum beds, room tone).
 
@@ -86,19 +95,24 @@ def spectral_gate(
     if n < NFFT * 4:
         return x, {'applied': False, 'reason': 'too short'}
 
-    noise = estimate_noise_profile(xx, chunk_s=chunk_s, sr=sr)
+    check = progress.check_cancel if progress is not None else None
+    noise = estimate_noise_profile(xx, chunk_s=chunk_s, sr=sr, check_cancel=check)
     if noise is None:
         return x, {'applied': False, 'reason': 'no usable noise estimate'}
 
     floor = np.float32(10.0 ** (-reduction_db / 20.0))
     over = np.float32(1.5)  # over-subtraction factor
     win = np.hanning(NFFT).astype(np.float32)
-    out = np.empty_like(xx)
+    if out is None:
+        out = np.empty_like(x, dtype=np.float32)
+    yy = out[:, None] if squeeze else out
     chunk = max(NFFT * 8, int(chunk_s * sr) // HOP * HOP)
     margin = 4 * NFFT  # frame-aligned (multiple of HOP)
     mean_gain = []
 
     for s0 in range(0, n, chunk):
+        if check is not None:
+            check()
         # Segment with a margin on both sides (zero-padded at the file edges).
         lo, hi = s0 - margin, min(n, s0 + chunk) + margin
         seg = np.zeros((hi - lo, n_ch), dtype=np.float32)
@@ -114,7 +128,7 @@ def spectral_gate(
         mean_gain.append(float(gain.mean()))
         for c in range(n_ch):
             y = _istft(_stft(seg[:, c], win) * gain, win, len(seg))
-            out[s0 : min(n, s0 + chunk), c] = y[margin : margin + min(n, s0 + chunk) - s0]
+            yy[s0 : min(n, s0 + chunk), c] = y[margin : margin + min(n, s0 + chunk) - s0]
         if progress is not None:
             progress(100.0 * min(n, s0 + chunk) / n)
 
@@ -128,4 +142,4 @@ def spectral_gate(
             10.0 * math.log10(2.0 * float(noise.sum()) / (NFFT**2 * float((win**2).mean())) + 1e-24), 1
         ),
     }
-    return (out[:, 0] if squeeze else out), stats
+    return out, stats

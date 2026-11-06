@@ -24,16 +24,14 @@ Quality gates are enforced, not just reported:
 - AI reconstruction gate failed (or the AI stage crashed) → the standard
   (non-AI) chain is used instead, with a warning.
 
-Memory: float32 end to end with streamed zero-phase filters, like the
-prototype (~3.5 × one full-length stereo array at peak).
-
-Cancellation: every full-length step checks for it block by block (the DSP
-helpers take `check_cancel`), so a Cancel takes effect within about a second
-whatever the programme length.
+Long renders keep full-rate float32 working arrays in private temporary files.
+The same DSP runs in blocks, checking cancellation at block boundaries.
 """
 
 import time
+from contextlib import ExitStack
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 import numpy as np
@@ -51,6 +49,7 @@ from ..dsp.exciter import hf_restore
 from ..dsp.filters import filtfilt_stream, highpass_fq, highshelf_fq, lowshelf_fq, peak_fq
 from ..dsp.limiter import tp_limit, true_peak_db
 from ..dsp.loudness import integrated_lufs, lra, programme_loudness
+from ..dsp.scratch import DISK_BACKED_AFTER_SECONDS, ScratchBuffers, blocks
 from ..errors import AudioLabError, Cancelled
 from .base import LIGHT_MAX_LIMIT_DB, STEM_PRESENCE_DB, ChainParams
 
@@ -58,12 +57,22 @@ from .base import LIGHT_MAX_LIMIT_DB, STEM_PRESENCE_DB, ChainParams
 PRESENCE_HZ, PRESENCE_Q = 3000.0, 1.4
 
 
-def _f32(x: np.ndarray) -> np.ndarray:
-    return x.astype(np.float32, copy=False)
+def _work_buffer(scratch: ScratchBuffers | None, x: np.ndarray, *keep: np.ndarray) -> np.ndarray | None:
+    return scratch.array(x.shape, keep=(x, *keep)) if scratch is not None else None
+
+
+def _filter(sos, x: np.ndarray, check_cancel, scratch: ScratchBuffers | None, *keep: np.ndarray) -> np.ndarray:
+    return filtfilt_stream(sos, x, check_cancel=check_cancel, out=_work_buffer(scratch, x, *keep))
 
 
 def subharmonic_reinforce(
-    x: np.ndarray, wet: float = 0.3, fc: float = 90.0, sr: int = 48000, check_cancel=None
+    x: np.ndarray,
+    wet: float = 0.3,
+    fc: float = 90.0,
+    sr: int = 48000,
+    check_cancel=None,
+    *,
+    scratch: ScratchBuffers | None = None,
 ) -> np.ndarray:
     """Second-order harmonic warmth from the sub band, kept in (fc, 4·fc) so it
     stays out of the mids (prototype algorithm)."""
@@ -78,15 +87,16 @@ def subharmonic_reinforce(
         ],
         axis=0,
     )
-    sub = filtfilt_stream(sos_lp, x, check_cancel=check_cancel)
-    sub *= 1.5
-    np.tanh(sub, out=sub)
-    sub *= 0.7
-    harmonics = filtfilt_stream(sos_band, sub, check_cancel=check_cancel)
-    del sub
-    harmonics *= np.float32(wet)
-    x += harmonics
-    return _f32(x)
+    sub = _filter(sos_lp, x, check_cancel, scratch)
+    for s in blocks(len(x), check_cancel):
+        segment = sub[s]
+        segment *= 1.5
+        np.tanh(segment, out=segment)
+        segment *= 0.7
+    harmonics = _filter(sos_band, sub, check_cancel, scratch, x)
+    for s in blocks(len(x), check_cancel):
+        x[s] += harmonics[s] * np.float32(wet)
+    return x.astype(np.float32, copy=False)
 
 
 def _stem_eq(bass_db: float, presence: bool, sr: int) -> dict[str, list]:
@@ -109,27 +119,27 @@ def _stem_eq(bass_db: float, presence: bool, sr: int) -> dict[str, list]:
     }
 
 
-def _read_stem(path: str, n: int) -> np.ndarray:
-    stem, _ = sf.read(path, dtype='float32', always_2d=True)
-    if stem.shape[0] > n:
-        stem = stem[:n]
-    elif stem.shape[0] < n:
-        stem = np.pad(stem, ((0, n - stem.shape[0]), (0, 0)))
+def _read_stem(path: str, n: int, check_cancel, scratch: ScratchBuffers | None, *keep: np.ndarray) -> np.ndarray:
+    with sf.SoundFile(path) as file:
+        shape = (n, file.channels)
+        stem = scratch.array(shape, keep=keep) if scratch is not None else np.empty(shape, dtype=np.float32)
+        for s in blocks(n, check_cancel):
+            file.read(dtype='float32', always_2d=True, fill_value=0.0, out=stem[s])
     return stem
 
 
-def _read_ref(ref: Path, warnings: list[str] | None = None) -> np.ndarray:
-    x, _ = sf.read(str(ref), dtype='float32', always_2d=True)
-    if x.shape[1] == 1:
-        x = np.repeat(x, 2, axis=1)
-    x = x[:, :2]
+def _read_ref(
+    ref: Path, warnings: list[str] | None = None, *, check_cancel=None, out: np.ndarray | None = None
+) -> np.ndarray:
     bad = 0
-    for s0 in range(0, len(x), 1 << 20):  # broken float files: NaN/inf samples become silence
-        blk = x[s0 : s0 + (1 << 20)]
-        mask = ~np.isfinite(blk)
-        if mask.any():
-            bad += int(mask.sum())
-            blk[mask] = 0.0
+    with sf.SoundFile(str(ref)) as file:
+        x = np.empty((file.frames, 2), dtype=np.float32) if out is None else out
+        for s in blocks(len(x), check_cancel):
+            x[s] = file.read(s.stop - s.start, dtype='float32', always_2d=True, fill_value=0.0)[:, :2]
+            mask = ~np.isfinite(x[s])  # broken float files: NaN/inf samples become silence
+            if mask.any():
+                bad += int(mask.sum())
+                x[s][mask] = 0.0
     if bad and warnings is not None:
         warnings.append(f'The file contained {bad} broken samples (not a number); they were replaced with silence.')
     return x
@@ -153,7 +163,15 @@ def _write_master(x: np.ndarray, sr: int, path: Path, check_cancel) -> None:
             f.write(x[s0 : s0 + (1 << 20)])
 
 
-def _ai_stage(ref: Path, params: ChainParams, n: int, sr: int, work_dir: Path, progress: Progress) -> dict[str, Any]:
+def _ai_stage(
+    ref: Path,
+    params: ChainParams,
+    n: int,
+    sr: int,
+    work_dir: Path,
+    progress: Progress,
+    scratch: ScratchBuffers | None = None,
+) -> dict[str, Any]:
     """Run separation; returns {'x': array or None, 'report': {...}, 'warning': str|None,
     'deess': the vocals stem's de-esser stats (stem-aware EQ only)}."""
     from ..ai.separation import separate
@@ -177,20 +195,30 @@ def _ai_stage(ref: Path, params: ChainParams, n: int, sr: int, work_dir: Path, p
             f'used the adaptive chain instead.',
         }
     if params.ai_stage == 'voice_isolate':
-        x = _read_stem(sep['stems']['vocals'], n)
+        x = _read_stem(sep['stems']['vocals'], n, progress.check_cancel, scratch)
         progress(100)
         return {'x': x, 'report': report, 'warning': None}
     eq = _stem_eq(params.bass_db, params.presence_db > 0, sr)
-    mix = np.zeros((n, 2), dtype=np.float32)
+    mix = scratch.array((n, 2)) if scratch is not None else np.empty((n, 2), dtype=np.float32)
+    for s in blocks(n, progress.check_cancel):
+        mix[s] = 0.0
     names = list(sep['stems'])
     ds: dict[str, Any] = {'engaged': False, 'skip_reason': 'off'}
     for i, name in enumerate(names):
-        stem = _read_stem(sep['stems'][name], n)
+        stem = _read_stem(sep['stems'][name], n, progress.check_cancel, scratch, mix)
         for sos in eq.get(name, []):
-            stem = filtfilt_stream(sos, stem, check_cancel=progress.check_cancel)
+            stem = _filter(sos, stem, progress.check_cancel, scratch, mix)
         if name == 'vocals' and params.deess_db > 0:
-            stem, ds = deess(stem, sr, max_gr_db=params.stem_deess_db(), mix=False, check_cancel=progress.check_cancel)
-        mix += stem
+            stem, ds = deess(
+                stem,
+                sr,
+                max_gr_db=params.stem_deess_db(),
+                mix=False,
+                check_cancel=progress.check_cancel,
+                band_buffer=_work_buffer(scratch, stem, mix),
+            )
+        for s in blocks(n, progress.check_cancel):
+            mix[s] += stem[s]
         del stem
         progress(85 + 15 * (i + 1) / len(names), f'Polishing the {name} stem...')
     return {'x': mix, 'report': report, 'warning': None, 'deess': ds}
@@ -210,16 +238,40 @@ def render(
     profile: dict[str, Any] | None,
     work_dir: Path,
     progress: Progress | None = None,
+    *,
+    disk_backed: bool | None = None,
 ) -> dict[str, Any]:
     """Render the master. Returns the report described in docs/ARCHITECTURE.md (Enhance in detail)."""
     progress = progress or Progress.null()
-    t0 = time.time()
     ref, out_master, work_dir = Path(ref), Path(out_master), Path(work_dir)
     out_master.parent.mkdir(parents=True, exist_ok=True)
     work_dir.mkdir(parents=True, exist_ok=True)
-    profile = profile or {}
     info = sf.info(str(ref))
     sr, n = info.samplerate, info.frames
+    use_scratch = disk_backed if disk_backed is not None else n > DISK_BACKED_AFTER_SECONDS * sr
+    with ExitStack() as stack:
+        scratch = ScratchBuffers(stack, work_dir, progress.check_cancel) if use_scratch and n > 0 else None
+        staging_dir = stack.enter_context(TemporaryDirectory(dir=out_master.parent, prefix='.render-'))
+        staged = Path(staging_dir) / 'master.flac'
+        report = _render(ref, staged, params, profile or {}, work_dir, progress, sr, n, scratch)
+        progress(100, 'Master ready')
+        staged.replace(out_master)
+    report['master_path'] = str(out_master)
+    return report
+
+
+def _render(
+    ref: Path,
+    staged: Path,
+    params: ChainParams,
+    profile: dict[str, Any],
+    work_dir: Path,
+    progress: Progress,
+    sr: int,
+    n: int,
+    scratch: ScratchBuffers | None,
+) -> dict[str, Any]:
+    t0 = time.time()
     steps: list[str] = []
     warnings: list[str] = []
     ai_report = None
@@ -230,7 +282,9 @@ def render(
     use_ai = params.ai_stage in ('stem_eq', 'voice_isolate')
     chain_p = progress.sub(55, 100) if use_ai else progress
     progress(1, 'Loading audio...')
-    x = _read_ref(ref, warnings)
+    out = scratch.array((n, 2)) if scratch is not None else None
+    x = _read_ref(ref, warnings, check_cancel=progress.check_cancel, out=out)
+    del out
     input_metrics = _measure(x, sr, check_cancel=progress.check_cancel)
     if n == 0 or input_metrics['true_peak_dbtp'] < SILENCE_DBFS:
         raise AudioLabError(
@@ -244,7 +298,7 @@ def render(
         del x
         x = None
         try:
-            res = _ai_stage(ref, params, n, sr, work_dir, progress.sub(2, 55))
+            res = _ai_stage(ref, params, n, sr, work_dir, progress.sub(2, 55), scratch)
             ai_report = res['report']
             if res['warning']:
                 warnings.append(res['warning'])
@@ -258,7 +312,9 @@ def render(
             )
             ai_report = {'stage': params.ai_stage, 'fallback': True, 'error': msg[:300]}
         if x is None:
-            x = _read_ref(ref)
+            out = scratch.array((n, 2)) if scratch is not None else None
+            x = _read_ref(ref, check_cancel=progress.check_cancel, out=out)
+            del out
             use_ai = False
         elif params.ai_stage == 'stem_eq':
             steps.append('Split the mix into drums, bass, vocals and the rest with AI and applied EQ to each part')
@@ -272,13 +328,13 @@ def render(
     # --- rumble filter ---------------------------------------------------------
     if params.highpass_hz > 0:
         p(5, 'Removing rumble...')
-        x = filtfilt_stream(highpass_fq(params.highpass_hz, sr=sr), x, check_cancel=p.check_cancel)
+        x = _filter(highpass_fq(params.highpass_hz, sr=sr), x, p.check_cancel, scratch)
         steps.append(f'Filtered low frequencies below {params.highpass_hz:.0f} Hz')
 
     # --- noise reduction -----------------------------------------------------
     if params.denoise in ('light', 'strong'):
         p(8, 'Reducing background noise...')
-        x, dn = spectral_gate(x, sr=sr, mode=params.denoise, progress=p.sub(8, 30))
+        x, dn = spectral_gate(x, sr=sr, mode=params.denoise, progress=p.sub(8, 30), out=_work_buffer(scratch, x))
         if dn.get('applied'):
             steps.append(
                 f'Reduced steady background noise ({params.denoise}, up to {dn["max_reduction_db"]:.0f} dB in pauses)'
@@ -288,7 +344,9 @@ def render(
     if not (use_ai and params.ai_stage == 'stem_eq' or params.volume_only):
         p(32, 'Shaping the tone...')
         if params.adaptive_lowmid_db > 0:
-            x, adaptive_stats = control_lowmids(x, sr, params.adaptive_lowmid_db, check_cancel=p.check_cancel)
+            x, adaptive_stats = control_lowmids(
+                x, sr, params.adaptive_lowmid_db, check_cancel=p.check_cancel, band_buffer=_work_buffer(scratch, x)
+            )
             if adaptive_stats['engaged']:
                 steps.append(
                     f'Controlled brief low-mid rises (at most {adaptive_stats["max_gr_db"]:.1f} dB, '
@@ -297,18 +355,16 @@ def render(
             else:
                 steps.append('Left the low-mids unchanged — no isolated rises needed control')
         elif params.mud_cut_db < 0:
-            x = filtfilt_stream(peak_fq(320.0, params.mud_cut_db, q=1.0, sr=sr), x, check_cancel=p.check_cancel)
+            x = _filter(peak_fq(320.0, params.mud_cut_db, q=1.0, sr=sr), x, p.check_cancel, scratch)
             steps.append('Reduced low-mids around 320 Hz')
         if params.bass_db > 0:
-            x = filtfilt_stream(lowshelf_fq(85.0, params.bass_db, s=1.0, sr=sr), x, check_cancel=p.check_cancel)
+            x = _filter(lowshelf_fq(85.0, params.bass_db, s=1.0, sr=sr), x, p.check_cancel, scratch)
             steps.append(f'Added a little bass weight (+{params.bass_db:.1f} dB)')
         if params.presence_db:
-            x = filtfilt_stream(
-                peak_fq(PRESENCE_HZ, params.presence_db, q=PRESENCE_Q, sr=sr), x, check_cancel=p.check_cancel
-            )
+            x = _filter(peak_fq(PRESENCE_HZ, params.presence_db, q=PRESENCE_Q, sr=sr), x, p.check_cancel, scratch)
             steps.append(f'Adjusted upper mids around 3 kHz ({params.presence_db:+.1f} dB)')
         if params.air_db:
-            x = filtfilt_stream(highshelf_fq(11000.0, params.air_db, s=1.0, sr=sr), x, check_cancel=p.check_cancel)
+            x = _filter(highshelf_fq(11000.0, params.air_db, s=1.0, sr=sr), x, p.check_cancel, scratch)
             steps.append(f'Adjusted the high frequencies ({params.air_db:+.1f} dB)')
     elif use_ai and params.ai_stage == 'stem_eq':
         adaptive_stats = {'engaged': False, 'skip_reason': 'AI stem EQ already shapes the low-mids'}
@@ -325,18 +381,24 @@ def render(
     fold_hz = params.mono_bass_hz or 90.0
     if params.sub_harmonics > 0:
         p(50, 'Reinforcing sub-bass...')
-        x = subharmonic_reinforce(x, wet=params.sub_harmonics, fc=fold_hz, sr=sr, check_cancel=p.check_cancel)
+        x = subharmonic_reinforce(
+            x, wet=params.sub_harmonics, fc=fold_hz, sr=sr, check_cancel=p.check_cancel, scratch=scratch
+        )
         steps.append('Added harmonics to the deep bass')
     if params.mono_bass_hz:
         p(56, 'Centering the bass...')
-        x = mono_below(x, fc=params.mono_bass_hz, sr=sr, check_cancel=p.check_cancel)
+        x = mono_below(
+            x, fc=params.mono_bass_hz, sr=sr, check_cancel=p.check_cancel, band_buffer=_work_buffer(scratch, x)
+        )
         steps.append(f'Made bass below {params.mono_bass_hz:.0f} Hz mono (shared between left and right)')
 
     # --- compression -----------------------------------------------------------
     comp_stats: dict[str, Any] = {'engaged': False}
     if params.compressor == 'glue':
         p(62, 'Gluing the mix...')
-        x, comp_stats = glue_comp(x, thresh_dbfs=-16.5, ratio=1.5, max_gr_db=1.5, sr=sr, check_cancel=p.check_cancel)
+        x, comp_stats = glue_comp(
+            x, thresh_dbfs=-16.5, ratio=1.5, max_gr_db=1.5, sr=sr, check_cancel=p.check_cancel, in_place=True
+        )
         comp_stats['mode'] = 'glue'
     elif params.compressor == 'leveler':
         p(62, 'Evening out the levels...')
@@ -350,6 +412,7 @@ def render(
             max_gr_db=9.0,
             sr=sr,
             check_cancel=p.check_cancel,
+            in_place=True,
         )
         comp_stats.update(mode='leveler', thresh_dbfs=round(thresh, 1))
     else:
@@ -367,7 +430,9 @@ def render(
     if params.deess_db > 0 and not params.volume_only and not (use_ai and params.ai_stage == 'stem_eq'):
         p(66, 'Softening sharp S sounds...')
         mix = params.deess_mix and params.ai_stage != 'voice_isolate'
-        x, deess_stats = deess(x, sr, max_gr_db=params.deess_db, mix=mix, check_cancel=p.check_cancel)
+        x, deess_stats = deess(
+            x, sr, max_gr_db=params.deess_db, mix=mix, check_cancel=p.check_cancel, band_buffer=_work_buffer(scratch, x)
+        )
         if deess_stats.get('engaged'):
             steps.append(_deess_step(deess_stats, 'and cymbal hits'))
 
@@ -376,9 +441,10 @@ def render(
     dc_removed = False
     if params.volume_only:
         tp_now = input_metrics['true_peak_dbtp']
-        dc = x.mean(axis=0, dtype=np.float64)
+        dc = sum(x[s].sum(axis=0, dtype=np.float64) for s in blocks(len(x), p.check_cancel)) / len(x)
         if float(np.abs(dc).max()) > DC_ALERT:
-            x -= dc.astype(np.float32)
+            for s in blocks(len(x), p.check_cancel):
+                x[s] -= dc.astype(np.float32)
             tp_now = true_peak_db(x, check_cancel=p.check_cancel)
             dc_removed = True  # the input measurement no longer describes x
             steps.append('Removed an inaudible DC offset (the waveform sat off-centre and wasted headroom)')
@@ -405,7 +471,9 @@ def render(
             f'This recording was extremely quiet — raising it by {gain_db:.0f} dB also raises its '
             f'background noise and hiss.'
         )
-    x *= np.float32(10.0 ** (gain_db / 20.0))
+    gain = np.float32(10.0 ** (gain_db / 20.0))
+    for s in blocks(len(x), p.check_cancel):
+        x[s] *= gain
     if tp_now is not None:
         tp_now += gain_db
 
@@ -421,10 +489,14 @@ def render(
         }
     else:
         p(80, f'Catching peaks (ceiling {params.tp_ceiling_db:.2f} dBTP)...')
-        x, tp_stats = tp_limit(x, ceiling_db=params.tp_ceiling_db, sr=sr, check_cancel=p.check_cancel, in_place=True)
+        x, tp_stats = tp_limit(
+            x, ceiling_db=params.tp_ceiling_db, sr=sr, check_cancel=p.check_cancel, in_place=True, scratch=scratch
+        )
     if not tp_stats.get('ceiling_met', True):
         over = float(tp_stats['tp_after']) - params.tp_ceiling_db + 0.05
-        x *= np.float32(10.0 ** (-over / 20.0))
+        gain = np.float32(10.0 ** (-over / 20.0))
+        for s in blocks(len(x), p.check_cancel):
+            x[s] *= gain
         tp_stats['corrective_gain_db'] = round(-over, 2)
         tp_stats['ceiling_met'] = true_peak_db(x, check_cancel=p.check_cancel) <= params.tp_ceiling_db + 0.01
         warnings.append(
@@ -440,9 +512,7 @@ def render(
     # --- write ----------------------------------------------------------------
     p(92, 'Writing the 24-bit master...')
     x = add_24bit_tpdf(x, check_cancel=p.check_cancel)
-    tmp = out_master.with_name(out_master.stem + '.partial.flac')
-    _write_master(x, sr, tmp, p.check_cancel)
-    tmp.replace(out_master)
+    _write_master(x, sr, staged, p.check_cancel)
 
     p(96, 'Measuring the result...')
     p.check_cancel()
@@ -472,7 +542,6 @@ def render(
             f'Ended at {final["integrated_lufs"]:.1f} LUFS instead of {params.target_lufs:.1f} '
             f'(peak limiting took some loudness).'
         )
-    p(100, 'Master ready')
     return {
         'integrated_lufs': final['integrated_lufs'],
         'true_peak_dbtp': final['true_peak_dbtp'],
@@ -489,5 +558,4 @@ def render(
         'params': params.to_dict(),
         'duration_s': round(n / sr, 2),
         'wall_time_s': round(time.time() - t0, 2),
-        'master_path': str(out_master),
     }

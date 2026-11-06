@@ -41,12 +41,12 @@ line and the Docker image.
 | `jobs.py` | Job records, FIFO queue, worker threads, cancel/retry, restart recovery, event fan-out, the one bounded `shutdown()` |
 | `library.py` | The Library: one JSON record per finished result (Save, Enhance, Split) in `<data>/library/`, independent of job retention; keeps the acquired original of Enhance jobs for comparing (hard link, or a copy where links are impossible, named by its content's SHA-1; setting `keep_originals`); groups versions of one recording (video id, link, or an upload's content); picks the result an entry is compared with (`compare_file_id`, lossless first); removing an entry never deletes output files |
 | `context.py` | `Progress` (scoped progress, journal notes, cancellation, child-process registry) and `TaskContext` (stages of one job) |
-| `tasks/` | The four user-facing tasks (`validate`, `stages`, `run`); `common.py` acquires sources and publishes outputs |
+| `tasks/` | The four user-facing tasks (`validate`, `stages`, `run`); `common.py` acquires sources and publishes outputs; `preview.py` runs bounded Library section previews through the existing Enhance queue |
 | `media/` | `proc.py` (cancellable subprocesses), `ffmpeg.py` (system or bundled ffmpeg, probing incl. embedded tags, `decode_pcm`: 48 kHz chunks on a 1/25 s grid that join like one decode; WebM/Matroska's millisecond timestamps get a seek offset measured once per file), `youtube.py` (yt-dlp + deno, the artist/title rule for links, tracks from chapters/tracklists, self-repair update, browser sign-in), `export.py` (format matrix, the file types that can be added, tags, cover art, sample-accurate track cutting) |
 | `analysis/` | `profile.py` (loudness, true peak, LRA, bandwidth, bands, alerts), `levels.py` (bounded whole-reference level scan), `classify.py` (content type + reasons), `key.py` (musical key estimate) |
 | `recipes/` | `Recipe` + `ChainParams`, `resolve()` turns recipe + measurements + user overrides into parameters *with reasons*; `chain.render()` is the single mastering chain |
 | `ai/` | Lazy source torch/demucs detection and windowed separation; `install.py` installs source packages, `managed.py` owns the catalog-pinned packaged runtime lifecycle selected by `api/state.py`, `client.py` invokes the isolated helper, `worker.py` runs/probes it and loads local offline weights |
-| `dsp/` | Float32 signal-processing blocks, with streamed filters; whole Enhance still holds full-length arrays, so total memory grows with duration |
+| `dsp/` | Float32 signal-processing blocks; `scratch.py` reuses disk-backed full-rate buffers for Enhance beyond 10 minutes; `timeline.py` collects bounded reduction highlights without retaining full-rate controls |
 | `previews.py` | The Enhance before/after excerpt (a loud 45 s passage, or the whole recording when shorter) at the true relative level, one shared headroom gain; compared when the original isn't kept |
 | `processing.py` | Bounded, path-free projection of resolved and applied Enhance processing for results and durable Library history; legacy entries remain readable |
 | `settings.py` | Data/output folders (the output folder is only resolved here, never created: whatever writes creates it), env-var limits (`AUDIOLAB_*`), persisted user preferences (checked on load/update; a new snapshot becomes active only after saving succeeds) |
@@ -64,6 +64,8 @@ use the cgroup limit minus its reported usage before applying that fraction. See
 [hardware guidance and limits](HARDWARE.md#what-the-app-checks); AI's windowed separation does not make
 the complete Enhance chain constant-memory. Disk estimates depend on task/duration/quality, not every
 source rate, export format or output count; the added free-space allowance is not reserved capacity.
+Long Enhance adds up to 36 bytes per 48 kHz frame (about 5.8 GiB/hour) for disk-backed working buffers.
+The earlier conservative RAM estimate remains in force pending representative long-run measurements.
 
 ### Platform code
 Everything that differs between macOS, Windows and Linux lives in `system.py`; other modules call its
@@ -239,6 +241,33 @@ individually checked. Master and file measurements remain distinct. The compare 
 selected export's loudness; master excerpts still use master measurements. Its optional repeat range
 uses 40 ms grid points and schedules both sides together, caching at most 8 s for short repeats.
 These checks do not qualify sonic preference or every codec implementation.
+
+Dynamic low-mid control, de-essing, compression and limiting collect up to 120 time bins per stage.
+Each reports the largest observed reduction and its actual time; a bin is a highlight, not a constant
+gain interval. `processing.py` sanitizes these into job and Library history. The comparison's Changes
+timeline can repeat a passage around a reported peak. Static EQ, overall gain and unreported stages
+are outside this timeline; missing markers do not establish that nothing changed.
+
+Library section previews reuse the kept original and saved resolved parameters. The API clones the
+original into a new job input, creates a server-owned preview specification, and submits it to the
+existing cancellable Enhance queue. `tasks/preview.py` decodes only the requested 5–30 seconds plus
+up to 20 seconds of context on each side, renders through the same chain, then crops aligned excerpts.
+The decoder shares comparison playback's preroll and resampling phase. WebM/Matroska alignment can
+add short probes at 1, 10 and 25 seconds; if these cannot establish timing, the preview fails with an
+actionable explanation instead of decoding an arbitrarily long prefix or silently shifting the passage.
+It measures the cropped comparison for volume matching. Context-dependent gain and dynamics can
+differ from a full render, so it is explicitly a section estimate. AI stems previews are excluded:
+a short reseparation would add latency and different context without establishing faithful results.
+Preview jobs write no exports or Library versions. Applying settings creates an ordinary full Enhance
+job, reanalyzes the source and checks its actual exports; the preview buffer is never promoted to a master.
+
+Above 600 seconds, `chain.render()` lazily allocates reusable float32 arrays backed by private temporary
+files: at most three stereo buffers and three mono limiter controls. Storage is written before mapping
+to avoid sparse-file allocation failures on first access. The render closes mappings before deleting
+their files, including on cancellation and errors. Filter, compressor, limiter, mix and gain operations
+work in blocks with real neighboring context; low-rate analysis/control arrays still grow with duration.
+The master is staged and published only after final measurements succeed. Disk mapping reduces large
+heap allocations; it does not qualify a RAM minimum or guarantee multi-hour capacity.
 
 Noise reduction stays off unless explicitly chosen; quiet programme levels are not evidence of noise.
 Profile and classification share the already measured LRA, and bandwidth uses the profile's existing

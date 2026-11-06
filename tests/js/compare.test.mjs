@@ -2,7 +2,8 @@
 // No browser, network, personal audio, or npm dependency is used by these regressions.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { comparePlayer, libraryCompare } from '../../audiolab/web/js/compare.js';
+import { comparePlayer, libraryCompare, sectionPreviewCompare } from '../../audiolab/web/js/compare.js';
+import { openQuickPreview } from '../../audiolab/web/js/quick-preview.js';
 
 class FakeNode {
   constructor(tag = '', text = '') {
@@ -16,6 +17,7 @@ class FakeNode {
     this.hidden = false;
     this.checked = false;
     this.disabled = false;
+    if (tag === 'input') this.value = '';
     this.dataset = {};
     this.style = { setProperty() {} };
     this.classList = {
@@ -80,6 +82,10 @@ class FakeNode {
   }
   click(values) { this.fire('click', values); }
   focus() { document.activeElement = this; }
+  get isConnected() { return document.body.contains(this); }
+  showModal() { this.open = true; }
+  close() { this.open = false; }
+  reportValidity() { return true; }
   scrollIntoView() {}
   canPlayType() { return 'probably'; }
   play() { this.played = true; return Promise.resolve(); }
@@ -495,6 +501,158 @@ const entry = (id, group = 'file:test', duration_s = 20) => ({ id, group, durati
   task: 'enhance', title: 'Generated fixture', source: { kind: 'file', name: 'fixture.wav' },
   original: { kept: true }, loudness: { original_lufs: -20, result_lufs: -14 }, compare_file_id: 'f0',
   files: [{ id: 'f0', name: 'fixture.wav', label: 'WAV', kind: 'enhanced', mime: 'audio/wav', playable: true, exists: true }] });
+
+test('a Library reduction cue keeps the selected side and repeats around the peak, not its time-window boundary', (t) => {
+  setup(t);
+  const result = entry('changes', 'file:changes', 60);
+  result.processing = { applied: { adaptive_lowmid: {
+    events: [{ start_s: 4, end_s: 5, max_gr_db: 4 }],
+    timeline: { duration_s: 60, bins: [{ start_s: 20, end_s: 30, peak_s: 27.44, max_gr_db: 1.7 }] },
+  } } };
+  const player = libraryCompare(result);
+  t.after(() => player.destroy());
+  find(player.el, (n) => n.getAttribute('role') === 'radio').click();
+  const marker = player.el.querySelector('.cmp-reduction-marker');
+  assert.match(marker.getAttribute('aria-label'), /0:27: Low-mid control, 1.7 dB reduction/);
+  marker.click();
+  assert.equal(player.snapshot().side, 'original');
+  assert.equal(player.snapshot().playing, false);
+  const repeat = player.snapshot().repeat;
+  assert.equal(repeat.enabled, true);
+  assert.ok(Math.abs((repeat.start + repeat.end) / 2 - 27.44) < 0.041);
+  assert.equal(player.el.querySelectorAll('.cmp-reduction-marker').length, 1);
+});
+
+const previewEntry = () => ({
+  ...entry('preview-source', 'file:preview-source', 60),
+  processing: { requested: { quality: 'standard', formats: ['wav'], advanced: { deess: 'off' } },
+    resolved: { params: { target_lufs: -14 } } },
+});
+const previewJob = (id = 'section') => ({
+  id, status: 'done', source: { duration_s: 60 }, result: {
+    preview: true, excerpt: { start_s: 31, duration_s: 8 },
+    processing: { applied: { limiter: {
+      timeline: { duration_s: 8, bins: [{ start_s: 0, end_s: 4, peak_s: 3, max_gr_db: 1.1 }] },
+    } } },
+  },
+});
+const jsonResponse = (data) => ({ ok: true, text: async () => JSON.stringify(data) });
+const named = (root, text) => find(root, (n) => n.tagName === 'button' && n.textContent === text);
+
+test('a preview reduction cue uses source time while requesting excerpt-relative PCM', async (t) => {
+  const env = setup(t);
+  const preview = sectionPreviewCompare(previewJob());
+  t.after(() => preview.destroy());
+  const marker = preview.el.querySelector('.cmp-reduction-marker');
+  assert.match(marker.getAttribute('aria-label'), /0:34: Peak limiting, 1.1 dB reduction/);
+  marker.click();
+  button(preview.el, 'Play').click();
+  await flush();
+  assert.deepEqual(env.requests.slice(0, 2).map((r) => r.path),
+    ['/api/jobs/section/pcm/original', '/api/jobs/section/pcm/enhanced']);
+  assert.ok(env.requests[0].offset < 48000, 'play starts roughly 2.5 seconds before the 3-second excerpt peak');
+});
+
+test('a section preview uses the repeat range and is cleared on edits before it can be applied', async (t) => {
+  const env = setup(t);
+  const current = env.create({ length: 60 });
+  current.restore({ time: 32, repeat: { start: 31, end: 39, enabled: true } });
+  const requests = [];
+  globalThis.fetch = async (path, options) => {
+    requests.push([path, options?.method, options?.body && JSON.parse(options.body)]);
+    if (path.endsWith('/preview')) return jsonResponse({ id: 'section', status: 'queued' });
+    if (path === '/api/jobs/section') return jsonResponse(previewJob());
+    assert.fail(`Unexpected request: ${path}`);
+  };
+  const dismiss = openQuickPreview(previewEntry(), current);
+  t.after(dismiss);
+  const dialog = document.body.querySelector('dialog');
+  const make = named(dialog, 'Make preview');
+  make.click();
+  make.click();
+  await flush();
+  assert.deepEqual(requests, [['/api/library/preview-source/preview', 'POST',
+    { start_s: 31, duration_s: 8, advanced: {} }]]);
+  assert.match(find(dialog, (n) => n.getAttribute('role') === 'status').textContent, /Preview queued/);
+  env.runTimers(600);
+  await flush();
+  assert.ok(dialog.querySelector('.ab'));
+  const apply = named(dialog, 'Apply to full recording');
+  assert.equal(apply.hidden, false);
+  const bass = find(dialog, (n) => n.getAttribute('placeholder') === 'Saved: Auto');
+  bass.value = '2';
+  bass.fire('input');
+  assert.equal(apply.hidden, true);
+  assert.equal(dialog.querySelector('.ab'), null);
+  apply.click();
+  assert.equal(requests.length, 2);
+  make.click();
+  await flush();
+  assert.deepEqual(requests.at(-1)[2].advanced, { bass_db: 2 });
+});
+
+test('closing a starting preview cancels its eventual job without polling or showing its result', async (t) => {
+  setup(t);
+  let submit;
+  const requests = [];
+  globalThis.fetch = (path) => {
+    requests.push(path);
+    if (path.endsWith('/preview')) return new Promise((resolve) => { submit = resolve; });
+    assert.match(path, /\/cancel$/);
+    return Promise.resolve(jsonResponse({ id: 'section', status: 'cancelled' }));
+  };
+  const dismiss = openQuickPreview(previewEntry());
+  const dialog = document.body.querySelector('dialog');
+  named(dialog, 'Make preview').click();
+  dismiss();
+  submit(jsonResponse({ id: 'section', status: 'queued' }));
+  await flush();
+  assert.deepEqual(requests, ['/api/library/preview-source/preview', '/api/jobs/section/cancel']);
+  assert.equal(document.body.querySelector('dialog'), null);
+});
+
+test('a failed preview shows its recovery hint and never offers Apply', async (t) => {
+  setup(t);
+  globalThis.fetch = async () => jsonResponse({ id: 'section', status: 'failed',
+    error: { message: 'Could not align this preview.', hints: ['Try a WAV or FLAC original.'] } });
+  const dismiss = openQuickPreview(previewEntry());
+  t.after(dismiss);
+  const dialog = document.body.querySelector('dialog');
+  named(dialog, 'Make preview').click();
+  await flush();
+  assert.match(find(dialog, (n) => n.getAttribute('role') === 'status').textContent,
+    /Could not align this preview\. Try a WAV or FLAC original\./);
+  assert.equal(named(dialog, 'Apply to full recording').hidden, true);
+  assert.equal(dialog.querySelector('.ab'), null);
+});
+
+test('cancelling a preview that finishes before cancellation does not expose Apply', async (t) => {
+  const env = setup(t);
+  let cancelCalls = 0;
+  globalThis.fetch = async (path) => {
+    if (path.endsWith('/preview')) return jsonResponse({ id: 'section', status: 'running' });
+    if (path.endsWith('/cancel')) {
+      cancelCalls++;
+      return { ok: false, status: 400, text: async () => '{}' };
+    }
+    assert.equal(path, '/api/jobs/section');
+    return jsonResponse(previewJob());
+  };
+  const dismiss = openQuickPreview(previewEntry());
+  t.after(dismiss);
+  const dialog = document.body.querySelector('dialog');
+  named(dialog, 'Make preview').click();
+  await flush();
+  const cancel = named(dialog, 'Cancel preview');
+  cancel.click();
+  cancel.click();
+  env.runTimers(600);
+  await flush();
+  assert.equal(cancelCalls, 1);
+  assert.equal(named(dialog, 'Apply to full recording').hidden, true);
+  assert.equal(dialog.querySelector('.ab'), null);
+  assert.match(find(dialog, (n) => n.getAttribute('role') === 'status').textContent, /Preview cancelled/);
+});
 
 test('Library matches volume using the chosen export, including when its peak check warns', async (t) => {
   const env = setup(t);

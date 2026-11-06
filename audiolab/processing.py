@@ -95,8 +95,42 @@ def _applied(value: Any) -> dict[str, Any]:
         ),
         'adaptive_lowmid': _adaptive(report.get('adaptive_lowmid')),
     }
+    for key in ('compressor', 'deess', 'limiter', 'adaptive_lowmid'):
+        if timeline := _timeline(_mapping(report.get(key)).get('timeline')):
+            stages[key]['timeline'] = timeline
     applied.update({k: stage for k, stage in stages.items() if stage})
     return applied
+
+
+def _timeline(value: Any) -> dict | None:
+    """Bounded, path-free interval highlights, not a full-rate gain envelope."""
+    raw = _mapping(value)
+    duration = raw.get('duration_s')
+    if not _number(duration) or duration <= 0 or not isinstance(raw.get('bins'), list):
+        return None
+    bins, previous_end = [], 0.0
+    for item in _list(raw['bins'], 120):
+        item = _fields(item, numbers='start_s end_s peak_s max_gr_db')
+        if len(item) != 4:
+            continue
+        start, end, peak, reduction = (item[k] for k in ('start_s', 'end_s', 'peak_s', 'max_gr_db'))
+        if previous_end <= start <= peak < end <= duration and 0.1 <= reduction <= 180:
+            bins.append(item)
+            previous_end = end
+    return {'duration_s': duration, 'bins': bins}
+
+
+def preview_bandwidth(value: Any) -> dict | None:
+    """Keep only the source-bandwidth facts needed to repeat an HF treatment in a preview."""
+    raw = _mapping(value)
+    lossy = raw.get('is_lossy_cutoff')
+    if not isinstance(lossy, bool):
+        return None
+    out = {'is_lossy_cutoff': lossy}
+    cutoff = raw.get('cutoff_hz')
+    if _number(cutoff) and 0 < cutoff <= 24000:
+        out['cutoff_hz'] = cutoff
+    return out
 
 
 def _adaptive(value: Any) -> dict[str, Any]:
@@ -173,12 +207,14 @@ def snapshot(options: dict, result: dict) -> dict[str, Any] | None:
         },
     )
     metrics = _mapping(result.get('metrics'))
+    bandwidth = preview_bandwidth(_mapping(result.get('analysis')).get('bandwidth'))
     return {
         'requested': {**requested, 'advanced': advanced},
         'resolved': {
             'recipe': _fields(result.get('recipe'), text='name', choices={'key': _RECIPE_KEYS}),
             'params': _params(report.get('params')),
             'decisions': _decisions(result.get('decisions')),
+            **({'bandwidth': bandwidth} if bandwidth is not None else {}),
         },
         'applied': _applied(report.get('applied')),
         'metrics': {k: _fields(metrics.get(k), numbers=_METRICS) for k in ('before', 'after')},

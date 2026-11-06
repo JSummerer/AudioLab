@@ -61,7 +61,9 @@ def _k_filter_stream(chunks: Iterable[np.ndarray], n_ch: int, check_cancel=None)
         yield y
 
 
-def _k_blocks(x: np.ndarray, block_s: float, hop_s: float, sr: int = 48000, check_cancel=None) -> list[float]:
+def _k_blocks(
+    x: np.ndarray, block_s: float, hop_s: float, sr: int = 48000, check_cancel=None, gain: np.float32 | None = None
+) -> list[float]:
     """Apply K-weighting and compute momentary/short-term block loudness."""
     _require_48k(sr)
     b_len = int(block_s * sr)
@@ -71,7 +73,7 @@ def _k_blocks(x: np.ndarray, block_s: float, hop_s: float, sr: int = 48000, chec
         return []
     n_ch = x.shape[1] if x.ndim > 1 else 1
     if n < b_len:
-        return [_block_loudness(next(_k_filter_stream([x], n_ch, check_cancel)))]
+        return [_block_loudness(next(_k_filter_stream([x if gain is None else x * gain], n_ch, check_cancel)))]
 
     chunk = max(h_len * 100, b_len + h_len)
     blocks: list[float] = []
@@ -79,6 +81,8 @@ def _k_blocks(x: np.ndarray, block_s: float, hop_s: float, sr: int = 48000, chec
     buf_start = 0  # global sample index of buf[0]
 
     chunks = (x[start : start + chunk] for start in range(0, n, chunk))
+    if gain is not None:
+        chunks = (block * gain for block in chunks)
     for y in _k_filter_stream(chunks, n_ch, check_cancel):
         buf = np.concatenate([buf, y], axis=0)
         # Emit every block whose last sample is available and within the signal
@@ -125,14 +129,22 @@ def integrated_lufs(x: np.ndarray, sr: int = 48000, check_cancel=None) -> float:
 def programme_loudness(x: np.ndarray, sr: int = 48000, check_cancel=None) -> float:
     """integrated_lufs, also for whisper-quiet programmes that sit entirely below
     the -70 LUFS absolute gate (BS.1770 has no value there; integrated_lufs then
-    reports -70): measured on a copy normalised to -6 dBFS peak and shifted back,
+    reports -70): measured with blocks normalised to -6 dBFS peak and shifted back,
     so a gain decision sees the real level instead of the gate. Silence stays -70."""
     i = integrated_lufs(x, sr=sr, check_cancel=check_cancel)
-    peak = max(float(x.max()), -float(x.min())) if x.size else 0.0  # no full-length abs() copy
-    if i > _ABS_GATE or peak < 1e-9:
+    if i > _ABS_GATE:
+        return i
+    peak = 0.0
+    for start in range(0, len(x), 1 << 20):
+        if check_cancel is not None:
+            check_cancel()
+        block = x[start : start + (1 << 20)]
+        peak = max(peak, float(block.max()), -float(block.min()))
+    if peak < 1e-9:
         return i
     k = 0.5 / peak
-    return integrated_lufs(x * np.float32(k), sr=sr, check_cancel=check_cancel) - 20.0 * math.log10(k)
+    scaled = _k_blocks(x, 0.4, 0.1, sr, check_cancel, gain=np.float32(k))
+    return _gated_integrated(np.array(scaled)) - 20.0 * math.log10(k)
 
 
 def _gated_range(blocks: np.ndarray) -> float:

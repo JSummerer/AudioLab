@@ -1,18 +1,25 @@
 """Library routes: the finished results grouped by recording (or one entry), their files (players and
-downloads, with Range; decoded chunks for the compare player), removing entries and dropping kept
-originals (one, or all) — see docs/API.md and library.py."""
+downloads, with Range; decoded chunks for the compare player), importing a file from this computer,
+removing entries (optionally moving their files to the Trash), "keep only this version" and dropping
+kept originals (one, or all) — see docs/API.md and library.py."""
 
 import math
+import os
 import shutil
+import stat
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException
+from fastapi.responses import JSONResponse
 
 from .. import library, processing, tasks
+from ..errors import AudioLabError
 from ..jobs import new_job_id
+from ..media import export, ffmpeg
+from ..settings import SETTINGS
 from ..util import link_or_copy
-from .jobs import serve_file, serve_pcm
+from .jobs import _cover_dir, serve_file, serve_pcm
 from .state import State
 
 router = APIRouter()
@@ -28,6 +35,14 @@ def list_library(state: State):
 def get_entry(state: State, entry_id: str):
     entry = _entry(entry_id)
     return library.public(entry, state.manager.get(entry.get('job_id') or '') is not None)
+
+
+@router.get('/api/library/{entry_id}/tone-timeline')
+def get_tone_timeline(entry_id: str):
+    timeline = _entry(entry_id).get('tone_timeline')
+    if not timeline:
+        raise HTTPException(404, 'This version has no tone timeline.')
+    return timeline
 
 
 def _entry(entry_id: str) -> dict:
@@ -67,6 +82,12 @@ def _overrides(body: Any, is_preview: bool) -> dict:
             valid = value in enhance.CHOICES[key]
         elif key == 'sample_rate':
             valid = _finite(value) and value in enhance.SAMPLE_RATES
+        elif key == 'eq':
+            valid = enhance.eq_bands(value) is not None
+        elif key == 'section_eq':
+            from ..recipes.base import section_eq
+
+            valid = section_eq(value) is not None
         elif key == 'model' and not is_preview:
             from ..ai import MODELS
 
@@ -114,7 +135,7 @@ def _preview_spec(state: State, entry: dict, body: dict, options: dict, override
         if bandwidth is None and old_override == 'on' and params.get('hf_restore') is False:
             bandwidth = {'is_lossy_cutoff': False}
         if bandwidth is None or (bandwidth.get('is_lossy_cutoff') and not bandwidth.get('cutoff_hz')):
-            raise HTTPException(400, 'This version has no saved bandwidth for a Restore highs preview.')
+            raise HTTPException(400, 'This version has no saved bandwidth for a Brighten muffled highs preview.')
     return {
         'start_s': start,
         'duration_s': length,
@@ -123,6 +144,28 @@ def _preview_spec(state: State, entry: dict, body: dict, options: dict, override
         'bandwidth': bandwidth or {},
         'advanced': changes,
     }
+
+
+def _entry_covers(entry: dict, folder: Path) -> dict[str, str]:
+    """The cover this version already has, as source keys for an Apply job: `_cover`, the picture
+    embedded in one of its files (so `embed_cover: false` without an own image stays without), and
+    `_cover_original`, its full-size saved cover file for `save_cover`. The kept original is bare
+    audio, so Apply would otherwise lose the cover."""
+    keys: dict[str, str] = {}
+    folder.mkdir(parents=True, exist_ok=True)
+    for f in entry.get('files') or []:
+        path = library.file_path(entry, f.get('id') or '')
+        if path is None or not path.is_file():
+            continue
+        spec = export.FORMATS.get(f.get('format') or '')
+        try:
+            if f.get('kind') == 'cover':
+                keys.setdefault('_cover_original', str(link_or_copy(path, folder / f'saved{path.suffix.lower()}')))
+            elif '_cover' not in keys and spec and spec.cover and ffmpeg.probe_media(path).get('has_cover'):
+                keys['_cover'] = str(export.cover_jpeg(path, folder / 'cover.jpg'))
+        except (AudioLabError, OSError):  # a broken picture must not cost the new version
+            continue
+    return keys
 
 
 def _enhance_original(state: State, entry_id: str, body: Any, is_preview: bool):
@@ -168,6 +211,8 @@ def _enhance_original(state: State, entry_id: str, body: Any, is_preview: bool):
         # Retain an independent link for the queued attempt and its retries. Library cleanup
         # can unlink the original before the worker gets to this job.
         source['path'] = str(link_or_copy(original, manager.input_dir(job_id) / f'original{original.suffix}'))
+        if not is_preview:
+            source.update(_entry_covers(entry, _cover_dir(manager, job_id)))
         title = f'{entry["title"]} (Preview)' if is_preview else entry['title']
         manager.submit('enhance', source, opts, title=title, job_id=job_id)
     except FileNotFoundError:
@@ -226,9 +271,87 @@ def drop_original(state: State, entry_id: str):
 
 
 @router.delete('/api/library/{entry_id}')
-def remove_entry(state: State, entry_id: str):
-    removed = library.remove(entry_id)
+def remove_entry(state: State, entry_id: str, trash_files: bool = False):
+    try:
+        removed = library.remove(entry_id, trash_files=trash_files)
+    except AudioLabError as e:  # this system has no Trash: nothing was removed
+        return _no_trash(e)
     if removed is None:
         raise HTTPException(404, 'This result is no longer in the Library.')
     state.forget('storage')
     return removed
+
+
+@router.post('/api/library/{entry_id}/keep-only')
+def keep_only(state: State, entry_id: str, body: Any = Body(None)):
+    body = {} if body is None else body
+    if not isinstance(body, dict) or body.keys() - {'trash_files'} or type(body.get('trash_files', False)) is not bool:
+        raise HTTPException(400, 'Send {"trash_files": true} or {"trash_files": false}.')
+    try:
+        kept = library.keep_only(entry_id, trash_files=body.get('trash_files', False))
+    except AudioLabError as e:
+        return _no_trash(e)
+    if kept is None:
+        raise HTTPException(404, 'This result is no longer in the Library.')
+    state.forget('storage')
+    return kept
+
+
+def _no_trash(e: AudioLabError) -> JSONResponse:
+    return JSONResponse({'detail': str(e), 'hints': e.hints, 'fix': e.fix}, status_code=409)
+
+
+@router.post('/api/library/import')
+def import_file(state: State, body: Any = Body(None)):
+    """Queue an `import` job for an audio file on this computer: it is measured where it is (no copy)
+    and becomes a Library entry (tasks/importing.py)."""
+    if not state.local:
+        raise HTTPException(403, 'Files can only be imported when AudioLab runs on this computer.')
+    if not isinstance(body, dict) or body.keys() - {'path', 'group', 'title'}:
+        raise HTTPException(400, 'Send the path of an audio file to import.')
+    raw, group, title = body.get('path'), body.get('group'), body.get('title')
+    if not isinstance(raw, str) or not raw.strip() or '\0' in raw:
+        raise HTTPException(400, 'Send the path of an audio file to import.')
+    if group is not None and (not isinstance(group, str) or not group.strip() or len(group) > 1000):
+        raise HTTPException(400, 'The recording to add this version to is not valid.')
+    if title is not None and not isinstance(title, str):
+        raise HTTPException(400, 'The title must be text.')
+    path = Path(os.path.realpath(Path(raw.strip()).expanduser()))  # resolved: Trash later refuses a changed link
+    _importable(path)
+    title = ' '.join((title or '').split())[:200]
+    source: dict[str, Any] = {
+        'kind': 'file',
+        'name': path.name,
+        'path': str(path),
+        'size_bytes': path.stat().st_size,
+        'title': title or path.stem,
+    }
+    if group:
+        source['_library_group'] = group.strip()
+    opts = tasks.validate('import', {'meta': {'title': title}} if title else {}, source)
+    job = state.manager.submit('import', source, opts, title=title or path.stem)
+    return state.manager.public(job.id)
+
+
+def _importable(path: Path) -> None:
+    """400 (AudioLabError, with hints) unless `path` is a non-empty regular file with sound, outside
+    AudioLab's own data folder (its kept originals and job files are not the user's to import)."""
+    try:
+        st = path.stat()
+    except OSError:
+        raise AudioLabError(
+            f"This file isn't there: {path}.", hints=['Check the path, or choose the file again.']
+        ) from None
+    if not stat.S_ISREG(st.st_mode):
+        raise AudioLabError(f'This is not a file: {path}.', hints=['Choose an audio file, not a folder.'])
+    if st.st_size == 0:
+        raise AudioLabError('This file is empty (0 bytes).', hints=['Choose another file.'])
+    if Path(os.path.realpath(path)).is_relative_to(os.path.realpath(SETTINGS.data_dir)):
+        raise AudioLabError(
+            "This file belongs to AudioLab's own data folder.", hints=['Choose a file from your music folders.']
+        )
+    if not ffmpeg.probe_media(path).get('has_audio'):
+        raise AudioLabError(
+            "AudioLab can't find any audio in this file — it may be damaged, or it is not an audio file.",
+            hints=['Check that it plays in a media player.'],
+        )

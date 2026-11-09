@@ -171,7 +171,7 @@ function fillOut(src) {
   append(clear(ui.out), [
     text && tl.failed ? h('p', { class: 'muted small' }, `Couldn’t check the tracklist (${tl.failed}). `,
       h('button', { type: 'button', class: 'btn btn-ghost btn-sm', onclick: () => check(src) }, icon('retry', 14), 'Check again')) : null,
-    text && tl.errors.length ? h('ul', { class: 'tl-errors', id: 'tracklistErrors' },
+    text && tl.errors.length ? h('ul', { class: 'line-errors', id: 'tracklistErrors' },
       tl.errors.map((e) => h('li', null, h('strong', null, `Line ${e.line}: `), e.message))) : null,
     text && n ? h('ol', { class: 'tl-preview', 'aria-label': 'Recognised tracks' }, tl.tracks.map((t) => h('li', null,
       h('span', { class: 'tracks-n' }, String(t.n).padStart(2, '0')),

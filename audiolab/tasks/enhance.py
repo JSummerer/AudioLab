@@ -18,6 +18,7 @@ from ..media import export
 from ..media.verification import PEAK_TOLERANCE_DB, measure_export
 from ..previews import make_previews
 from ..processing import report_details
+from ..recipes.base import eq_bands, section_eq
 from ..recipes.chain import render
 from ..settings import SETTINGS
 from ..util import sanitize_filename
@@ -40,7 +41,7 @@ RANGES = {'target_lufs': (-30.0, -5.0), 'tp_ceiling_db': (-3.0, -0.1), 'bass_db'
 def _num(v):
     try:
         f = float(v)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # OverflowError: an integer beyond any float
         return None
     return f if math.isfinite(f) else None
 
@@ -86,6 +87,12 @@ def validate(options: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
     sr = _num(adv_in.get('sample_rate'))
     if sr is not None and int(sr) in SAMPLE_RATES:
         adv['sample_rate'] = int(sr)
+    eq = eq_bands(adv_in.get('eq'))
+    if eq is not None:
+        adv['eq'] = eq
+    sections = section_eq(adv_in.get('section_eq'))
+    if sections is not None:
+        adv['section_eq'] = sections
     tracklist = common.clean_tracklist(options.get('tracklist'), source)
     return {
         'recipe': recipe,
@@ -240,6 +247,11 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
     p = ctx.stage('export', 'Saving your files…')
     title = sanitize_filename(acq.title)
     folder = common.output_folder(f'{title} (Enhanced)', parent=common.output_root(acq))
+    # Tags say which version this is ("(Enhanced 2)") and how it was made; file names stay as they are.
+    version = common.next_version(source, 'enhance')
+    tags = common.tags_for(
+        acq, f' {common.version_label("Enhanced", version)}', common.made_by(recipe.name, params.target_lufs)
+    )
     cover = common.cover_art(ctx, acq)
     rate = params.sample_rate if params.sample_rate != 48000 else None
     split = bool(opts.get('split_tracks'))
@@ -248,7 +260,7 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
         folder,
         f'{title} (Enhanced)',
         opts['formats'],
-        tags=common.tags_for(acq, ' (Enhanced)'),
+        tags=tags,
         cover=cover,
         progress=p.sub(0, 45 if split else 70),
         sample_rate=rate,
@@ -296,7 +308,7 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
             folder,
             'Tracks',
             opts['formats'][0],
-            common.tags_for(acq, ' (Enhanced)'),
+            tags,
             cover,
             p.sub(65, 100),
             start=len(files),
@@ -336,6 +348,8 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
         'analysis': analysis,
         'spectrogram': None,
         'warnings': list(report.get('warnings') or []),
+        'markers': common.chapters(acq),
+        **common.link_result(acq),
         '_media': media,
-        '_library': common.library_hints(acq, keep_original=True),
+        '_library': {**common.library_hints(acq, keep_original=True), **({'version': version} if version else {})},
     }

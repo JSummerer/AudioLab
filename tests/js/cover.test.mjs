@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import test from 'node:test';
-import { PROCESSING_LABELS } from '../../audiolab/web/js/views/new/state.js';
+import { PROCESSING_LABELS, LIGHT_KEYS } from '../../audiolab/web/js/views/new/state.js';
+import { parseEq } from '../../audiolab/web/js/eq.js';
+import { checkSections } from '../../audiolab/web/js/section-eq.js';
 
 class Element {
   constructor(tag, attrs = {}, children = []) {
@@ -28,7 +30,7 @@ function setup({ crlf = false } = {}) {
   const source = { kind: 'file', file: { name: 'plain.wav', size: 32 } };
   const state = {
     source, task: 'download', download: { format: 'mp3', embed_cover: true },
-    enhance: { formats: new Set(['mp3_320', 'wav16']), embed_cover: true, recipe: 'auto', quality: 'standard' },
+    enhance: { formats: new Set(['mp3_320', 'wav16']), embed_cover: true, recipe: 'auto', quality: 'standard', advanced: {} },
   };
   const store = { health: { formats: {
     download: [mp3, wav, original], enhance: [{ ...mp3, key: 'mp3_320' }, { ...wav, key: 'wav16' }],
@@ -41,6 +43,9 @@ function setup({ crlf = false } = {}) {
     switchControl: (attrs) => new Element('input', attrs),
     definePart() {}, redraw: (...parts) => redrawn.push(parts),
     isFileLike: () => state.source?.kind === 'file',
+    parseEq, checkSections, // state.js's appliedAdvanced, for this sandbox's state:
+    appliedAdvanced: () => Object.entries(state.enhance.advanced)
+      .filter(([k]) => state.enhance.quality !== 'light' || LIGHT_KEYS.includes(k)),
   });
   for (const name of ['cover', 'options', 'sleeve']) {
     const path = new URL(`../../audiolab/web/js/views/new/${name}.js`, import.meta.url);
@@ -102,6 +107,23 @@ test('Enhance scopes own artwork to supported outputs and respects the flag with
   assert.equal(s.run('plan()[2]'), null);
   s.state.enhance.embed_cover = true;
   assert.equal(s.run('plan()[2]'), 'Cover art inside audio when available');
+});
+
+test('the Enhance summary counts fine-tuning changes, with unreadable EQ text, and only what Volume only uses', () => {
+  const s = setup();
+  s.state.task = 'enhance';
+  const tuned = () => s.run('plan()[3]');
+  assert.equal(tuned(), null);
+  s.state.enhance.advanced = { target_lufs: -12, glue: 'on' };
+  assert.equal(tuned(), 'Fine-tuning: 2 changes');
+  s.state.enhance.eqText = '160 Hz -3 dB';
+  assert.equal(tuned(), 'Fine-tuning: 3 changes', 'unreadable EQ text counts as a change');
+  s.state.enhance.sectionRows = [{ from: '1:00', to: '1:05', fade: '', text: '' }];
+  assert.equal(tuned(), 'Fine-tuning: 4 changes', 'an unfinished section counts too');
+  assert.match(s.run('sectionProblem()'), /^Fix the section EQ first: 1 problem, listed under it\.$/);
+  s.state.enhance.quality = 'light';
+  assert.equal(tuned(), 'Fine-tuning: 1 change', 'Volume only uses the loudness target, not compression or EQ');
+  assert.equal(s.run('sectionProblem()'), null);
 });
 
 test('own-image help names supported outputs and never promises art in an unsupported output', () => {

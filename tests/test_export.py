@@ -74,3 +74,23 @@ def test_success_without_fallback_emits_no_missing_art_warning(tmp_path, monkeyp
     assert path.is_file() and len(calls) == 1
     assert ('1:v:0' in calls[0]) == (fmt == 'mp3' and cover_on)
     assert notes == []
+
+
+@pytest.mark.parametrize(('fmt', 'hours', 'rate', 'big'), [('wav16', 2.7, None, False), ('wav24', 2.7, 96000, True)])
+def test_wav_over_4_gb_is_written_as_rf64_with_a_warning(tmp_path, monkeypatch, fmt, hours, rate, big):
+    """A plain RIFF header cannot count 4 GB: a 2 h 40 min WAV at 96 kHz/24-bit (5.5 GB) needs RF64."""
+    notes, calls = [], []
+    ctx = TaskContext('wav', tmp_path / 'job', {}, [], emit_note=lambda *note: notes.append(note))
+    monkeypatch.setattr(export, '_check_encoder', lambda spec: None)
+    monkeypatch.setattr(export, 'probe_media', lambda src: {'channels': 2, 'sample_rate': 48000})
+
+    def succeed(args, **kwargs):
+        calls.append(args)
+        Path(args[-1]).write_bytes(b'fake encoded output')
+
+    monkeypatch.setattr(export, 'run_ffmpeg', succeed)
+    export.transcode(
+        tmp_path / 'source.wav', tmp_path / 'set', fmt, progress=ctx.progress, duration_s=hours * 3600, sample_rate=rate
+    )
+    assert ('-rf64' in calls[0]) == big
+    assert [n[0] for n in notes] == (['warning'] if big else [])

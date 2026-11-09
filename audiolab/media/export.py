@@ -243,7 +243,8 @@ _DOWNLOAD_CHOICES = [  # (key, label, description, facts)
         'Exactly what the site delivered, no conversion.',
         (
             "The site's own audio stream, untouched — no conversion, no loss.",
-            'YouTube: Opus ~130–160 kbps (.webm) or AAC ~128 kbps (.m4a); about 256 kbps with a Premium sign-in.',
+            'YouTube: Opus ~100–160 kbps (.webm, depends on the upload) or AAC ~128 kbps (.m4a); up to 256 kbps with Premium, '
+            'for official music videos and Art Tracks only.',
             'About 1 MB per minute.',
         ),
     ),
@@ -259,7 +260,8 @@ _DOWNLOAD_CHOICES = [  # (key, label, description, facts)
 ]
 # One line about what a link's audio really is, shown under the format picker.
 SOURCE_NOTE = (
-    "YouTube audio is already compressed (about 130–160 kbps, 256 kbps with Premium): converting can't add quality."
+    'YouTube audio is already compressed (about 100–160 kbps; up to 256 kbps with Premium on official music): '
+    "converting can't add quality."
 )
 _ENHANCE_ORDER = ['mp3_320', 'wav16', 'alac16', 'flac24', 'aac_256', 'wav24', 'flac16', 'opus_160']
 SEPARATE_FORMATS = ('wav16', 'wav24', 'flac24', 'mp3_320')
@@ -418,6 +420,19 @@ def prepare_cover(src: Path, dst: Path) -> Path:
         ) from e
 
 
+_RIFF_LIMIT = int(0.97 * 2**32)  # bytes a plain WAV header can count, with a margin for the estimate
+_PCM_BYTES = {'pcm_s16le': 2, 'pcm_s24le': 3, 'pcm_s32le': 4, 'pcm_f32le': 4}
+
+
+def _pcm_bytes(spec: FormatSpec, info: dict, rate: int | None, duration_s: float | None) -> float:
+    """Estimated size of an uncompressed export (0 when the length is unknown)."""
+    codec = next((a for a in spec.codec_args if a in _PCM_BYTES), None)
+    if not codec or not duration_s:
+        return 0.0
+    channels = info.get('channels') or 2
+    return float(duration_s) * (rate or info.get('sample_rate') or 48000) * channels * _PCM_BYTES[codec]
+
+
 @lru_cache(maxsize=4)
 def _encoders(ffmpeg: str) -> frozenset:
     try:
@@ -555,6 +570,7 @@ def transcode(
             meta += ['-metadata', f'{k}={v}']
 
     staging = _staging_for(dst)
+    big_wav = spec.ext == '.wav' and _pcm_bytes(spec, info, rate, duration_s) > _RIFF_LIMIT
 
     def build(art: bool) -> list[str]:
         args = ['-i', str(src)]
@@ -576,6 +592,8 @@ def transcode(
             args += ['-id3v2_version', '3']
         if spec.ext == '.m4a':
             args += ['-movflags', '+faststart']
+        if big_wav:  # a plain RIFF header cannot describe 4 GB or more: the file would come out broken
+            args += ['-rf64', 'auto']
         args.append(str(staging))
         return args
 
@@ -593,6 +611,12 @@ def transcode(
         if not staging.is_file() or staging.stat().st_size == 0:
             raise AudioLabError(f'{spec.label} export produced an empty file.')
         path = _commit(staging, dst)
+        if big_wav:
+            progress.note(
+                'warning',
+                f'{path.name} is larger than 4 GB, so it was saved as RF64 (long-file WAV). Some players and '
+                'USB sticks formatted FAT32 cannot take it; FLAC or a lower sample rate keeps it smaller.',
+            )
         if without_cover:
             progress.note('warning', f'Saved {path.name} without cover art. The picture could not be added.')
         return path

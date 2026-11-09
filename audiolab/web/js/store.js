@@ -3,8 +3,9 @@ import { api, url } from './api.js';
 
 // ---------------------------------------------------------------------------
 // Bus. Topics: health, settings, jobs (payload: ids | null), live,
-// use-source ({job, task, again}: start something new from an earlier job's source;
-// `again`: "Change and start again", with that job's task and options)
+// use-source ({job, task, again, file}: start something new from an earlier job's source;
+// `again`: "Change and start again", with that job's task and options; `file`: one of its
+// result files instead, as the source ("Check the result"))
 // ---------------------------------------------------------------------------
 const topics = new Map();
 
@@ -295,6 +296,7 @@ export function taskLabel(job) {
     case 'enhance': return 'Enhance';
     case 'separate': return 'Split';
     case 'analyze': return 'Check';
+    case 'import': return 'Add to Library';
     default: return job?.task || 'Job';
   }
 }

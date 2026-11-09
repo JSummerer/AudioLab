@@ -166,12 +166,17 @@ def lra(x: np.ndarray, sr: int = 48000, check_cancel=None) -> float:
 
 
 def stream_programme_levels(
-    chunks: Iterable[np.ndarray], sr: int = 48000, channels: int = 2, check_cancel=None
+    chunks: Iterable[np.ndarray],
+    sr: int = 48000,
+    channels: int = 2,
+    check_cancel=None,
+    bins_out: list[np.ndarray] | None = None,
 ) -> tuple[float, float]:
     """Programme loudness and LRA from one continuous stream of sample chunks.
 
     K-weight each sample once, carrying filter state, and retain just ten scalar
     energy bins per second. Both standard measurements use 100 ms-aligned windows.
+    `bins_out` (optional) receives those 100 ms energy bins for `programme_density`.
     """
     _require_48k(sr)
     bin_frames = sr // 10
@@ -197,6 +202,8 @@ def stream_programme_levels(
     if not bin_parts:
         return _ABS_GATE, 0.0
     bins = np.concatenate(bin_parts)
+    if bins_out is not None:
+        bins_out.append(bins)
 
     def windows(width: int, hop: int) -> np.ndarray:
         if bins.size < width:
@@ -213,3 +220,44 @@ def stream_programme_levels(
         normalized = _gated_integrated(-0.691 + 10.0 * np.log10(integrated * gain**2 + 1e-24))
         loudness = normalized - 20.0 * math.log10(gain)
     return loudness, _gated_range(-0.691 + 10.0 * np.log10(windows(30, 10) + 1e-24))
+
+
+DENSITY_WINDOW_S = 30  # peak-to-loudness windows (15 s hop)
+DENSITY_SECTION_S = 180  # loudness-range sections
+
+
+def programme_density(bins: np.ndarray, peaks: np.ndarray) -> dict[str, float] | None:
+    """How dense a long programme is where it plays, rather than across its whole length.
+
+    The whole-file LRA of a DJ set also counts slow level drift between tracks and long
+    breakdowns, which reads as concert dynamics. This returns the median sample-peak-to-loudness
+    ratio of 30 s windows (quiet windows below -40 LUFS skipped) and the median loudness range of
+    3-minute sections (EBU short-term blocks, each section gated on its own). `bins`: K-weighted
+    mean power per 100 ms (`stream_programme_levels`); `peaks`: sample peak per 100 ms, same grid.
+    None for less than two sections of material."""
+    n = min(len(bins), len(peaks))
+    if n < 2 * DENSITY_SECTION_S * 10:
+        return None
+    bins = np.asarray(bins[:n], dtype=np.float64)
+    peaks = np.asarray(peaks[:n], dtype=np.float64)
+    width = DENSITY_WINDOW_S * 10
+    view = np.lib.stride_tricks.sliding_window_view
+    loud = -0.691 + 10.0 * np.log10(view(bins, width)[:: width // 2].mean(axis=1) + 1e-24)
+    peak_db = 20.0 * np.log10(np.maximum(view(peaks, width)[:: width // 2].max(axis=1), 1e-12))
+    plr = (peak_db - loud)[loud > -40.0]
+    short = -0.691 + 10.0 * np.log10(view(bins, 30)[::10].mean(axis=1) + 1e-24)
+    ranges = []
+    for start in range(0, len(short) - DENSITY_SECTION_S + 1, DENSITY_SECTION_S):
+        blocks = short[start : start + DENSITY_SECTION_S]
+        blocks = blocks[blocks > _ABS_GATE]
+        if blocks.size:
+            blocks = blocks[blocks > _lufs(float(_energy(blocks).mean())) - 20.0]
+        if blocks.size >= DENSITY_SECTION_S // 3:  # a section that is mostly silence says nothing
+            ranges.append(float(np.percentile(blocks, 95) - np.percentile(blocks, 10)))
+    if plr.size < 4 or len(ranges) < 2:
+        return None
+    return {
+        'peak_to_loudness_db': round(float(np.median(plr)), 1),
+        'section_lra': round(float(np.median(ranges)), 1),
+        'sections': len(ranges),
+    }

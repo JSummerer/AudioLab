@@ -8,7 +8,7 @@
 // exact position; play, pause and seeks fade in and out just as briefly. Only a few seconds
 // are decoded ahead: a two-hour set costs no more memory than a song, and every format plays
 // (the server decodes it).
-import { h, icon, clear, append, fmtDuration } from './dom.js';
+import { h, icon, clear, append, fmtDuration, fmtNum } from './dom.js';
 import { url } from './api.js';
 import { switchControl, callout, toast } from './ui.js';
 
@@ -30,7 +30,9 @@ const SEEK_REST_MS = 150; // timeline keys: play from the new place once they re
 // Only containers that can hold different codecs are asked with one.
 const CODECS = { opus: 'opus', vorbis: 'vorbis', flac: 'flac', aac: 'mp4a.40.2', alac: 'alac', mp3: 'mp4a.40.34' };
 const MULTI_CODEC = /^(audio|video)\/(webm|ogg|mp4)$/;
-const CODEC_NAMES = { opus: 'Opus', vorbis: 'Vorbis', aac: 'AAC', mp3: 'MP3', flac: 'FLAC', alac: 'ALAC' };
+const CODEC_NAMES = {
+  opus: 'Opus', vorbis: 'Vorbis', aac: 'AAC', mp3: 'MP3', flac: 'FLAC', alac: 'ALAC', wmav2: 'WMA', ac3: 'AC-3', eac3: 'E-AC-3',
+};
 // A job's files carry no media type: guessed from the name (YouTube's WebM audio is Opus).
 const BY_EXT = {
   mp3: ['audio/mpeg'], m4a: ['audio/mp4'], aac: ['audio/aac'], flac: ['audio/flac'], wav: ['audio/wav'],
@@ -56,6 +58,16 @@ export function codecName(codec, format = '') {
   }
   return CODEC_NAMES[c] || c.toUpperCase();
 }
+
+/** "Opus · 99 kbps · 48 kHz · stereo"; a missing part is left out ('' when nothing is known). */
+export function audioLine({ codec, kbps, rate, channels } = {}) {
+  const ch = channels === 1 ? 'mono' : channels === 2 ? 'stereo' : channels > 0 ? `${channels} channels` : null;
+  return [codec ? codecName(codec) : null, kbps > 0 ? `${Math.round(kbps)} kbps` : null,
+    rate > 0 ? `${fmtNum(rate / 1000, 1).replace('.0', '')} kHz` : null, ch].filter(Boolean).join(' · ');
+}
+
+/** The stream a site delivered (Result / Library `stream`), as an audioLine. */
+export const streamLine = (s) => (s ? audioLine({ codec: s.codec, kbps: s.kbps, rate: s.sample_rate, channels: s.channels }) : '');
 
 /** A file's media type and codec: its own, else guessed from its name. */
 function mediaOf(file) {
@@ -116,6 +128,63 @@ export function libraryCompare(entry, extra = {}) {
     reductions: entry.processing?.applied,
     loudness,
     showMatchUnavailable: measured,
+    ...extra,
+  });
+}
+
+/**
+ * The result a Library version is compared by: the server's pick (it has one while the original
+ * is kept), else its first Enhance result still there, lossless first, or an imported file.
+ * `formats`: Health's enhance formats, which say which are lossless.
+ */
+export function versionFile(entry, formats = []) {
+  const files = (entry?.files || []).filter((f) => (f.kind === 'enhanced' || f.kind === 'imported') && f.exists);
+  const picked = entry?.compare_file_id ? files.find((f) => f.id === entry.compare_file_id) : null;
+  const lossless = (f) => (formats || []).find((x) => x.key === f.format)?.kind === 'lossless';
+  return picked || files.find(lossless) || files[0] || null;
+}
+
+/** A version's loudness for matching: its file's export check, else the entry's master measurement. */
+export function versionLoudness(entry, file) {
+  const check = file?.verification;
+  if (['verified', 'warning'].includes(check?.status) && Number.isFinite(check.integrated_lufs)) return check.integrated_lufs;
+  const lufs = entry?.loudness?.result_lufs;
+  return Number.isFinite(lufs) ? lufs : null;
+}
+
+/**
+ * The quietest and loudest of several versions' levels when they differ by more than 1 dB,
+ * enough to sway a quick A/B (the louder one tends to sound better), else null.
+ */
+export function loudnessSpread(levels) {
+  const known = levels.filter(Number.isFinite);
+  if (known.length < 2) return null;
+  const low = Math.min(...known);
+  const high = Math.max(...known);
+  return high - low > 1 ? { low, high } : null;
+}
+
+/**
+ * Two Library versions of one recording, at matched volume. Both are full-length renders of the
+ * same original, so they line up (the server decodes every file to the same PCM rate).
+ * `a`, `b`: { entry, file, label (the tab), name (in sentences: "The newer version") }.
+ */
+export function versionCompare(a, b, extra = {}) {
+  const lower = (name) => name.charAt(0).toLowerCase() + name.slice(1); // "the AudioLab…", "your file"
+  const side = ({ entry, file, label, name }) => ({
+    label, name, downloadLabel: `Download ${lower(name)}`,
+    url: (offset, frames) => url(`/api/library/${encodeURIComponent(entry.id)}/pcm/${encodeURIComponent(file.id)}`, { offset, frames }),
+    download: libraryFileUrl(entry.id, file.id, { download: true }),
+  });
+  const duration = b.entry.duration_s || b.entry.source?.duration_s || a.entry.duration_s;
+  return comparePlayer({
+    sides: [side(a), side(b)],
+    title: `Compare ${lower(a.name)} with ${lower(b.name)}`,
+    length: duration,
+    songDuration: duration,
+    markers: b.entry.markers,
+    loudness: { original_lufs: versionLoudness(a.entry, a.file), result_lufs: versionLoudness(b.entry, b.file) },
+    showMatchUnavailable: true,
     ...extra,
   });
 }
@@ -195,11 +264,13 @@ function reductionTimeline(applied, start, end, offset, cue) {
 /**
  * Original | result, sample-locked.
  *
- * opts.sides: [{ label, url(offset, frames), download? }, …] — the original first.
+ * opts.sides: [{ label, url(offset, frames), download?, name?, downloadLabel? }, …] — the original
+ * first (or two versions: `name` is a side in sentences, `title` the player's accessible name).
  * songOffset: the song time of the sides' frame 0 (an excerpt's start), length: how long
  * the sides are, songDuration: the whole song (for "1:52 / 4:45"), startAt: the song time to
  * start from, markers: tracks/chapters in song time, loudness: {original_lufs, result_lufs}
- * of the whole song for "Match volume" (null: no switch unless showMatchUnavailable),
+ * of the whole song for "Match volume", the first and the second side's (null: no switch
+ * unless showMatchUnavailable),
  * note: one line under the player, reductions: reported processing stages, reductionOffset:
  * the song time of the stage timelines' frame 0 (usually 0, or the start of a section render).
  */
@@ -214,6 +285,7 @@ export function comparePlayer(opts) {
     && m.start_s >= songOffset && m.start_s < songOffset + lengthF / RATE);
   const id = `cmp-${++uid}`;
   const label = sides[1].label;
+  const nameOf = (i) => sides[i].name || (i === 0 ? 'Original' : sides[i].label.split(' · ')[0]);
   const AC = window.AudioContext || window.webkitAudioContext;
 
   let ctx = null;
@@ -242,7 +314,7 @@ export function comparePlayer(opts) {
   let repeatLimit = Infinity; // the earliest decoded end of either side, once known
   const repeatCache = new Map(); // stable chunk pairs of a short repeat, cleared when it changes
 
-  const root = h('div', { class: 'ab cmp', tabindex: '-1', role: 'group', 'aria-label': `Compare the original with ${label}` });
+  const root = h('div', { class: 'ab cmp', tabindex: '-1', role: 'group', 'aria-label': opts.title || `Compare the original with ${label}` });
   if (!AC) {
     root.append(callout('info', null, 'This browser can’t play the comparison.', downloads()));
     return { el: root, pause() {}, destroy() {} };
@@ -263,7 +335,8 @@ export function comparePlayer(opts) {
 
   function downloads() {
     const links = sides.filter((s) => s.download)
-      .map((s) => h('a', { href: s.download, download: true }, s === sides[0] ? 'Download the original' : 'Download the result'));
+      .map((s) => h('a', { href: s.download, download: true },
+        s.downloadLabel || (s === sides[0] ? 'Download the original' : 'Download the result')));
     return links.length ? h('p', null, ...links.flatMap((a, i) => (i ? [' · ', a] : [a]))) : null;
   }
 
@@ -322,7 +395,7 @@ export function comparePlayer(opts) {
       return;
     }
     const diff = loud.result_lufs - loud.original_lufs;
-    const louder = diff > 0 ? label.split(' · ')[0] : 'Original';
+    const louder = nameOf(diff > 0 ? 1 : 0);
     const db = Math.abs(diff);
     if (db < 0.1) volumeNote.textContent = 'Both are equally loud.';
     else if (matchVolume) volumeNote.textContent = `${louder} is ${db.toFixed(1)} dB louder, turned down to match.`;

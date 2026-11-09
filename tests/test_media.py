@@ -409,16 +409,43 @@ def test_sign_in_errors():
         e = youtube._friendly_error(text, 'u')
         assert e.fix == 'use_cookies' and 'YouTube sign-in' in e.hints[0], (e, e.hints)
     s.cookies_browser = 'firefox'
-    assert youtube.ytdlp_cmd()[-2:] == ['--cookies-from-browser', 'firefox']
-    assert youtube._friendly_error(bot, 'u').fix == 'update_downloader'  # signed in, still blocked
-    assert youtube._friendly_error(age, 'u').fix is None
-    e = youtube._friendly_error('ERROR: could not find firefox cookies database in /x', 'u')
+    assert '--cookies-from-browser' not in youtube.ytdlp_cmd()  # only for a retry YouTube asked for
+    assert youtube.ytdlp_cmd(sign_in=True)[-2:] == ['--cookies-from-browser', 'firefox']
+    assert youtube._friendly_error(bot, 'u', signed_in=True).fix == 'update_downloader'  # signed in, still blocked
+    assert youtube._friendly_error(age, 'u', signed_in=True).fix is None
+    e = youtube._friendly_error('ERROR: could not find firefox cookies database in /x', 'u', signed_in=True)
     assert e.fix == 'use_cookies' and str(e).startswith(
         'Could not read the YouTube sign-in from Firefox — close Firefox'
     )
     s.cookies_browser = 'chrome'
-    e = youtube._friendly_error('WARNING: find-generic-password failed\n' + bot, 'u')
+    e = youtube._friendly_error('WARNING: find-generic-password failed\n' + bot, 'u', signed_in=True)
     assert e.fix == 'use_cookies' and 'Chrome' in str(e) and any('keychain' in h for h in e.hints)
+
+
+def test_sign_in_is_used_only_when_youtube_asks(tmp_path, monkeypatch):
+    """Ban safety: a public video never uses the account; a refused one is retried once, signed in and paced."""
+    from audiolab.media import proc
+    from audiolab.settings import SETTINGS
+
+    SETTINGS.get().cookies_browser = 'firefox'
+    runs = []
+
+    def run(cmd, **kw):
+        runs.append(cmd)
+        if '--cookies-from-browser' not in cmd and 'blocked' in cmd[-1]:
+            return proc.ProcResult(returncode=1, stdout='', stderr_tail='ERROR: Sign in to confirm you’re not a bot')
+        return proc.ProcResult(returncode=0, stdout='{"id": "x", "title": "Set", "duration": 60}', stderr_tail='')
+
+    monkeypatch.setattr(youtube.proc, 'run', run)
+    youtube.probe('https://youtu.be/public1')
+    assert len(runs) == 1 and '--cookies-from-browser' not in runs[0]
+    youtube.probe('https://youtu.be/blocked1')
+    assert len(runs) == 3 and '--cookies-from-browser' not in runs[1]
+    assert '--cookies-from-browser' in runs[2] and '--sleep-requests' in runs[2]
+    SETTINGS.get().cookies_browser = ''  # no sign-in allowed: the refusal is reported, no retry
+    with pytest.raises(DownloadError) as refused:
+        youtube.probe('https://youtu.be/blocked2')
+    assert len(runs) == 4 and refused.value.fix == 'use_cookies'
 
 
 def test_age_days():
@@ -704,7 +731,7 @@ def test_link_artist_one_rule_for_card_and_files(info, artist, tmp_path, monkeyp
 
     from audiolab.media import proc
 
-    monkeypatch.setattr(youtube, 'ytdlp_cmd', lambda: ['yt-dlp'])
+    monkeypatch.setattr(youtube, 'ytdlp_cmd', lambda sign_in=False: ['yt-dlp'])
     monkeypatch.setattr(
         youtube.proc, 'run', lambda *a, **k: proc.ProcResult(returncode=0, stdout=json.dumps(info), stderr_tail='')
     )
@@ -743,7 +770,7 @@ def test_download_errors_by_kind():
     e = youtube._friendly_error('ERROR: [vimeo] 123: Unable to download webpage: HTTP Error 401: Unauthorized', 'u')
     assert e.fix == 'use_cookies' and 'YouTube sign-in' in e.hints[0]
     SETTINGS.get().cookies_browser = 'firefox'
-    e = youtube._friendly_error('ERROR: HTTP Error 401: Unauthorized', 'u')
+    e = youtube._friendly_error('ERROR: HTTP Error 401: Unauthorized', 'u', signed_in=True)
     assert e.fix is None and 'Firefox' in str(e)
     SETTINGS.get().cookies_browser = ''
     # something unknown: plain words, yt-dlp's text only as the detail — and no automatic downloader update

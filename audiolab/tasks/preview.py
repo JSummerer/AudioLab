@@ -93,6 +93,10 @@ def run(ctx: TaskContext, source: dict) -> dict:
     profile = {'bandwidth': spec['bandwidth']}
     recipe = spec['recipe']
     params = preview_params(recipe['key'], ChainParams(**spec['params']), profile, spec['advanced'])
+    shift = context_first / sr  # section times are the recording's; this reference starts here
+    params.section_eq = [
+        {**sec, 'start_s': sec['start_s'] - shift, 'end_s': sec['end_s'] - shift} for sec in params.section_eq
+    ]
     master = common.scratch_dir(ctx) / 'preview-master.flac'
     report = render(reference, master, params, profile, common.scratch_dir(ctx), progress=ctx.stage('process'))
 

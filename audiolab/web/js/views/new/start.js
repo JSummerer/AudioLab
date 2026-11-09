@@ -10,10 +10,10 @@ import { api, upload } from '../../api.js';
 import { store, upsertJob } from '../../store.js';
 import { toast, toastError, meter, setMeter } from '../../ui.js';
 import { go, jobPath, settingsPath, currentRoute } from '../../router.js';
-import { state, refs, redraw, definePart, isFileLike, appliedAdvanced, tooBig } from './state.js';
+import { state, refs, redraw, definePart, isFileLike, appliedAdvanced, tooBig, rememberFormats } from './state.js';
 import { metaPayload } from './names.js';
 import { updateItem, clearSource } from './source.js';
-import { taskBlock, downloadChoices, enhanceFormatsInOrder } from './options.js';
+import { taskBlock, downloadChoices, enhanceFormatsInOrder, eqProblem, sectionProblem } from './options.js';
 import { tracksOptions, tracksProblem } from './tracks.js';
 import { coverUpload, coverOptions } from './cover.js';
 
@@ -59,7 +59,7 @@ function blockedReason() {
   const block = taskBlock(state.task);
   if (block) return block.reason;
   if (state.task === 'enhance' && !state.enhance.formats.size) return 'Pick at least one format to save.';
-  return tracksProblem();
+  return tracksProblem() || eqProblem() || sectionProblem();
 }
 
 function hintText() {
@@ -168,6 +168,7 @@ async function submit() {
   const src = state.source;
   const task = state.task;
   const options = buildOptions();
+  rememberFormats(task, options); // what New starts with next time
   if (src.kind === 'files') await submitFiles(src, task, options);
   else await submitOne(src, task, options, coverUpload(src, task));
 }
@@ -208,7 +209,10 @@ async function submitOne(src, task, options, cover) {
       });
     } else {
       if (src.kind === 'file') form.append('source_job', src.reuseJobId);
-      else if (src.kind === 'job' && !src.jobGone) form.append('source_job', src.job.id);
+      else if (src.kind === 'job' && !src.jobGone) {
+        form.append('source_job', src.job.id);
+        if (src.sourceFile) form.append('source_file', src.sourceFile.id); // one of its result files
+      }
       else if (src.kind === 'job') form.append('urls', JSON.stringify(jobLink(src.job)));
       else if (src.kind === 'playlist') {
         form.append('urls', JSON.stringify(playlistItems(src)));
@@ -222,6 +226,12 @@ async function submitOne(src, task, options, cover) {
         if (src.kind === 'file' && REUPLOAD_STATUS.has(e.status)) {
           delete src.reuseJobId;
           return await sendAgain(src, task, options, cover);
+        }
+        // The earlier job's result file is gone: nothing to fall back to (the link would be the original).
+        if (src.kind === 'job' && src.sourceFile && REUPLOAD_STATUS.has(e.status)) {
+          toast('That file was moved or deleted. Add it from where it is now.', { kind: 'warning', timeout: 9000 });
+          if (state.source === src) clearSource();
+          return;
         }
         // The earlier job (or its file) is gone: a link is sent as such, a file has to be added again.
         if (src.kind === 'job' && !src.jobGone && REUPLOAD_STATUS.has(e.status)) {

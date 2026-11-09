@@ -6,7 +6,7 @@
 import { h, icon } from '../../dom.js';
 import { store, on } from '../../store.js';
 import { closeInfo } from '../../ui.js';
-import { state, refs, redraw, TASKS } from './state.js';
+import { state, refs, redraw, TASKS, rememberedFormats } from './state.js';
 import { loadUrl, setFiles, useJobSource, normalizeUrl } from './source.js';
 import './options.js';
 import './start.js';
@@ -100,10 +100,12 @@ export function focusLinkField() {
 }
 
 // Settings → Defaults feed the options, but only when they change (a pick made
-// here survives unrelated settings saves).
+// here survives unrelated settings saves). On the first load the formats last started
+// here come first, while Settings → Defaults are still the ones they were chosen over.
 function applyDefaults() {
   const s = store.settings;
   if (!s) return;
+  const first = !Object.keys(lastDefaults).length;
   const next = {
     download_format: s.download_format,
     enhance_formats: (s.enhance_formats || []).join(','),
@@ -118,4 +120,17 @@ function applyDefaults() {
     state.enhance.embed_cover = !!next.embed_cover;
   }
   lastDefaults = next;
+  if (first) useLastFormats();
+}
+
+function useLastFormats() {
+  const f = store.health?.formats || {};
+  const offered = (list, key) => (list || []).some((x) => x.key === key);
+  const d = rememberedFormats('download');
+  if (offered(f.download, d)) state.download.format = d;
+  const e = rememberedFormats('enhance');
+  const keys = Array.isArray(e) ? e.filter((k) => offered(f.enhance, k)) : [];
+  if (keys.length) state.enhance.formats = new Set(keys);
+  const s = rememberedFormats('separate');
+  if (offered(f.separate, s)) state.separate.format = s;
 }

@@ -156,6 +156,16 @@ def _clone_source(state: AppState, job_id: str, new_id: str) -> dict[str, Any]:
     return src
 
 
+def _result_source(state: AppState, job_id: str, file_id: str, new_id: str) -> dict[str, Any]:
+    """`source_file`: one file of an earlier job's result as the new job's file source (e.g. "Check the
+    result"), linked into the new job's input like a re-run's upload; titled by its file name."""
+    path = _result_file(state.job_or_404(job_id), file_id)  # 404 no such file, 410 gone
+    if path.suffix.lower() not in export.UPLOAD_EXT:
+        raise HTTPException(400, 'This file has no audio to work with.')
+    dst = link_or_copy(path, state.manager.input_dir(new_id) / path.name)
+    return {'kind': 'file', 'name': path.name, 'path': str(dst), 'size_bytes': dst.stat().st_size, 'title': path.stem}
+
+
 def _cover_dir(mgr: JobManager, job_id: str) -> Path:
     """Where a job's own cover image lives: input/cover/, apart from the uploaded file (whatever its name)."""
     p = mgr.input_dir(job_id) / 'cover'
@@ -229,11 +239,14 @@ async def create_job(
     urls: str | None = Form(None),
     playlist_title: str | None = Form(None),
     source_job: str | None = Form(None),
+    source_file: str | None = Form(None),
     file: UploadFile | None = File(None),
     cover: UploadFile | None = File(None),
 ):
     mgr = state.manager
     tasks.get(task)  # unknown task → 400 before any upload is stored
+    if task == 'import':  # a file on this computer, read where it is: only POST /api/library/import
+        raise HTTPException(400, 'Add files to the Library with "Import a file" in the Library.')
     try:
         opts = json.loads(options or '{}')
         if not isinstance(opts, dict):
@@ -247,9 +260,13 @@ async def create_job(
     if file is not None and file.filename:
         jid = new_job_id()
         pending.append((jid, await _save_upload(mgr, file, jid)))
+    elif source_job and source_file:
+        jid = new_job_id()
+        # a link, or a copy across drives (a big WAV on an external disk): off the event loop
+        pending.append((jid, await run_in_threadpool(_result_source, state, source_job, source_file, jid)))
     elif source_job:
         jid = new_job_id()
-        pending.append((jid, _clone_source(state, source_job, jid)))
+        pending.append((jid, await run_in_threadpool(_clone_source, state, source_job, jid)))
     elif urls:
         items = _url_items(urls)
         if not items:
@@ -467,7 +484,7 @@ def save_job_cover(state: State, job_id: str):
     files (and its Library entry). Already there → that file."""
     job = state.job_or_404(job_id)
     result = job.result or {}
-    if job.status != 'done' or not result.get('output_dir'):
+    if job.status != 'done' or not result.get('output_dir') or job.task == 'import':  # an import's folder is the user's
         raise HTTPException(404, 'This job has no output folder.')
     folder = Path(result['output_dir'])
     if not folder.is_dir():

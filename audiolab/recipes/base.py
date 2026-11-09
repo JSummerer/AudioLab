@@ -17,19 +17,86 @@ reduction, bass or AI. The sound itself is not changed.
 """
 
 import math
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 SAMPLE_RATES = (44100, 48000, 96000)
 
 
+EQ_MAX_BANDS = 8
+EQ_LIMITS = {'hz': (20.0, 20000.0), 'db': (-6.0, 6.0), 'q': (0.3, 8.0)}
+
+
+def eq_bands(value: Any) -> list[dict[str, float]] | None:
+    """Custom EQ bands, clamped to EQ_LIMITS; bands with no gain are dropped. None when `value` is
+    not a list of at most EQ_MAX_BANDS {hz, db, q} objects with finite numbers ([] = no custom EQ)."""
+    if not isinstance(value, list) or len(value) > EQ_MAX_BANDS:
+        return None
+    bands = []
+    for band in value:
+        if not isinstance(band, dict) or band.keys() != EQ_LIMITS.keys():
+            return None
+        nums = {k: band[k] if _finite(band[k]) else None for k in EQ_LIMITS}
+        if any(v is None for v in nums.values()):
+            return None
+        hz, db, q = (min(hi, max(lo, nums[k])) for k, (lo, hi) in EQ_LIMITS.items())
+        if round(db, 2):
+            bands.append({'hz': round(hz, 1), 'db': round(db, 2), 'q': round(q, 2)})
+    return bands
+
+
+SECTION_MAX = 8
+SECTION_FADE_S = (0.5, 60.0, 5.0)  # min, max, default crossfade inside each boundary
+SECTION_MIN_S = 10.0
+
+
+def section_eq(value: Any) -> list[dict[str, Any]] | None:
+    """EQ sections in the recording's own time, sorted; sections without bands are dropped. None when
+    `value` is not a list of at most SECTION_MAX valid, non-overlapping {start_s, end_s, bands[, fade_s]}
+    ([] = no section EQ)."""
+    if not isinstance(value, list) or len(value) > SECTION_MAX:
+        return None
+    out = []
+    lo, hi, default = SECTION_FADE_S
+    for sec in value:
+        if not isinstance(sec, dict) or not {'start_s', 'end_s', 'bands'} <= sec.keys() <= {
+            'start_s',
+            'end_s',
+            'bands',
+            'fade_s',
+        }:
+            return None
+        fade = sec.get('fade_s', default)
+        if not all(_finite(v) for v in (sec['start_s'], sec['end_s'], fade)):
+            return None
+        start, end, fade = float(sec['start_s']), float(sec['end_s']), min(hi, max(lo, float(fade)))
+        bands = eq_bands(sec['bands'])
+        if bands is None or start < 0 or end - start < max(SECTION_MIN_S, 2 * fade):
+            return None
+        if bands:
+            out.append({'start_s': round(start, 3), 'end_s': round(end, 3), 'fade_s': round(fade, 2), 'bands': bands})
+    out.sort(key=lambda sec: sec['start_s'])
+    if any(b['start_s'] < a['end_s'] for a, b in zip(out, out[1:])):
+        return None
+    return out
+
+
+def _finite(value: Any) -> bool:
+    try:
+        return type(value) in (int, float) and math.isfinite(value)
+    except OverflowError:  # an integer beyond any float
+        return False
+
+
 @dataclass
 class ChainParams:
-    highpass_hz: float = 25.0
+    highpass_hz: float = 20.0  # −6 dB point of the 24 dB/octave zero-phase rumble filter
     mud_cut_db: float = 0.0  # peak cut @ 320 Hz (<= 0)
     adaptive_lowmid_db: float = 0.0  # maximum temporary 180–480 Hz reduction; 0 = bypass
     bass_db: float = 0.0  # low shelf @ 85 Hz (>= 0)
     presence_db: float = 0.0  # peak @ 3 kHz (Best: the vocals stem's own lift instead)
+    eq_bands: list[dict[str, float]] = field(default_factory=list)  # the user's peaking bands {hz, db, q}
+    section_eq: list[dict[str, Any]] = field(default_factory=list)  # section_eq(): EQ for parts of the recording
     air_db: float = 0.0  # high shelf @ 11 kHz, only for a measured dull top end
     sub_harmonics: float = 0.0  # wet amount of sub-bass harmonics, 0 = off
     mono_bass_hz: float | None = None
@@ -206,15 +273,15 @@ def resolve(
 
     # --- recipe defaults + adaptive choices --------------------------------
     if key == 'club':
-        p.highpass_hz = 25.0
+        p.highpass_hz = 20.0
         p.target_lufs = float(style.get('recommended_target_lufs', -12.5))
         d.set(
             'target_lufs',
             'Loudness target',
             _db(p.target_lufs, 'LUFS'),
             'auto',
-            f"matched to this set's energy — {style.get('name', 'club dynamics').lower()} "
-            f'(measured {lufs:.1f} LUFS, loudness range {lra_v:.1f} LU)',
+            f"matched to this set's energy — {style.get('name', 'club dynamics')} "
+            f'(measured {lufs:.1f} LUFS, ' + (style.get('measured') or f'loudness range {lra_v:.1f} LU') + ')',
         )
         p.bass_db = float(style.get('recommended_bass_punch_db', 1.5))
         d.set(
@@ -256,7 +323,7 @@ def resolve(
         p.compressor = 'off'
         d.set('compressor', 'Compression', 'off', 'recipe', 'concert dynamics are part of the music')
     elif key == 'music':
-        p.highpass_hz = 25.0
+        p.highpass_hz = 20.0
         target = min(-8.0, max(-16.0, lufs))
         p.target_lufs = round(target, 1)
         if abs(target - lufs) < 0.05:
@@ -297,7 +364,16 @@ def resolve(
     # judges temporary rises against nearby context instead of cutting the whole file.
     p.adaptive_lowmid_db = 1.5
     _highs(key, prof, p, d)
-    if p.mono_bass_hz and antiphase:
+    if p.mono_bass_hz and stereo.get('is_mono'):
+        p.mono_bass_hz = None
+        d.set(
+            'mono_bass',
+            'Mono bass',
+            'off',
+            'auto',
+            'left and right already carry the same sound (effectively mono) — there is nothing to fold',
+        )
+    elif p.mono_bass_hz and antiphase:
         p.mono_bass_hz = None
         d.set(
             'mono_bass',
@@ -455,14 +531,38 @@ def _apply_overrides(key: str, prof: dict, adv: dict, p: ChainParams, d: _Decisi
         if lossy:
             d.set(
                 'hf_restore',
-                'Restore highs',
+                'Brighten muffled highs',
                 'on',
                 'user',
                 f'synthesises plausible "air" above {bw.get("cutoff_hz", 0) / 1000:.1f} kHz (an exciter — '
                 'it does not recover the original)',
             )
         else:
-            d.set('hf_restore', 'Restore highs', 'off', 'auto', 'no lossy cutoff found — nothing to restore')
+            d.set('hf_restore', 'Brighten muffled highs', 'off', 'auto', 'no lossy cutoff found — nothing to restore')
+    if isinstance(adv.get('eq'), list):
+        p.eq_bands = [b for b in adv['eq'] if isinstance(b, dict)][:8]
+        if p.eq_bands:
+            d.set(
+                'eq',
+                'Custom EQ',
+                ' · '.join(_band_text(b) for b in p.eq_bands),
+                'user',
+                'your bands, applied after the tone shaping and before compression, loudness and peak control',
+            )
+    if isinstance(adv.get('section_eq'), list):
+        p.section_eq = section_eq(adv['section_eq']) or []
+        if p.section_eq:
+            d.set(
+                'section_eq',
+                'Section EQ',
+                ' · '.join(
+                    f'{_clock(sec["start_s"])}–{_clock(sec["end_s"])}: '
+                    + ', '.join(_band_text(b) for b in sec['bands'])
+                    for sec in p.section_eq
+                ),
+                'user',
+                'your EQ for those parts only, faded in and out at their edges, before compression and loudness',
+            )
     c = _choice(adv.get('denoise'), ('off', 'light', 'strong'))
     if c:
         p.denoise = c
@@ -493,6 +593,15 @@ def _apply_overrides(key: str, prof: dict, adv: dict, p: ChainParams, d: _Decisi
     model = adv.get('model')
     if isinstance(model, str) and model in ('htdemucs', 'htdemucs_ft'):
         p.ai_model = model
+
+
+def _clock(seconds: float) -> str:
+    s = int(round(seconds))
+    return f'{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}' if s >= 3600 else f'{s // 60}:{s % 60:02d}'
+
+
+def _band_text(b: dict[str, float]) -> str:
+    return f'{b["hz"]:g} Hz {b["db"]:+.1f} dB Q{b["q"]:g}'.replace('-', '−')
 
 
 _LOSSLESS_CODECS = ('pcm', 'flac', 'alac', 'wavpack', 'ape', 'tta', 'truehd', 'mlp')

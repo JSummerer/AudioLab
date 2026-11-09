@@ -123,16 +123,18 @@ export function setFiles(list) {
 /**
  * Start from an earlier job's source ("Do more with this"). Its own name, tracklist and
  * split choice come along; `again` ("Change and start again" on a failed or cancelled job)
- * also takes its task's options, so only what went wrong needs changing.
+ * also takes its task's options, so only what went wrong needs changing. `file`: one of the
+ * job's result files is the source instead ("Check the result", sent as `source_file`).
  */
-export function useJobSource(job, task, { again = false } = {}) {
+export function useJobSource(job, task, { again = false, file = null } = {}) {
   probeCtl?.abort();
   probeCtl = null;
-  if (refs.input) refs.input.value = job.source?.kind === 'url' ? (job.source.url || '') : '';
+  if (refs.input) refs.input.value = job.source?.kind === 'url' && !file ? (job.source.url || '') : '';
   const o = job.options || {};
   // The earlier job's own name overrides carry over (its source keeps the original name).
   const carried = o.meta && Object.keys(o.meta).length ? { ...o.meta } : null;
   const src = { kind: 'job', job, meta: carried, artistCleared: carried?.artist === '' };
+  if (file) src.sourceFile = { id: file.id, name: file.name };
   if (typeof o.split_tracks === 'boolean') src.splitTracks = o.split_tracks;
   state.source = src;
   if (task) state.task = task;
@@ -153,7 +155,12 @@ function applyOptions(task, o) {
     const e = state.enhance;
     pick(e, ['recipe', 'quality', 'embed_cover']);
     if (Array.isArray(o.formats) && o.formats.length) e.formats = new Set(o.formats);
-    if (o.advanced && typeof o.advanced === 'object') e.advanced = { ...o.advanced };
+    if (o.advanced && typeof o.advanced === 'object') {
+      e.advanced = { ...o.advanced };
+      delete e.eqText; // the custom EQ box and the section list show these
+      delete e.sectionRows;
+      for (const key of ['eq', 'section_eq']) if (Array.isArray(e.advanced[key]) && !e.advanced[key].length) delete e.advanced[key];
+    }
   }
 }
 
@@ -273,8 +280,9 @@ function renderSource() {
       const j = src.job;
       const name = shownName(src);
       el.append(sourceCard({
-        thumb: j.source?.thumbnail, iconName: j.source?.kind === 'file' ? 'music' : 'video', title: name.title,
-        meta: metaJoin(name.artist, 'From an earlier job', j.source?.kind === 'file' ? j.source?.name : null, fmtDuration(j.source?.duration_s)),
+        thumb: j.source?.thumbnail, iconName: j.source?.kind === 'file' || src.sourceFile ? 'music' : 'video', title: name.title,
+        meta: src.sourceFile ? metaJoin(name.artist, 'Result of an earlier job', src.sourceFile.name)
+          : metaJoin(name.artist, 'From an earlier job', j.source?.kind === 'file' ? j.source?.name : null, fmtDuration(j.source?.duration_s)),
         extra: guessLine(j.result?.classification), rename: src, cover: src,
       }));
       break;

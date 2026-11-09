@@ -7,6 +7,7 @@ contain source metadata, paths, and tool errors that do not belong here.
 from typing import Any
 
 from .media.export import FORMATS
+from .recipes.base import eq_bands, section_eq
 
 _RECIPE_KEYS = ('club', 'live', 'music', 'voice')
 _LEVELS = 'target_lufs tp_ceiling_db bass_db sample_rate'
@@ -171,6 +172,10 @@ def _params(value: Any) -> dict[str, Any]:
     )
     if 'mono_bass_hz' in raw and raw['mono_bass_hz'] is None:
         params['mono_bass_hz'] = None  # explicitly off, rather than missing from an older report
+    if eq := eq_bands(raw.get('eq_bands')):
+        params['eq_bands'] = eq
+    if sections := section_eq(raw.get('section_eq')):
+        params['section_eq'] = sections
     return params
 
 
@@ -206,6 +211,12 @@ def snapshot(options: dict, result: dict) -> dict[str, Any] | None:
             'harmonics': ('on', 'off'),
         },
     )
+    eq = eq_bands(_mapping(options.get('advanced')).get('eq'))
+    if eq is not None:
+        advanced['eq'] = eq  # [] stays: it clears a saved EQ when a Library version is applied again
+    sections = section_eq(_mapping(options.get('advanced')).get('section_eq'))
+    if sections is not None:
+        advanced['section_eq'] = sections
     metrics = _mapping(result.get('metrics'))
     bandwidth = preview_bandwidth(_mapping(result.get('analysis')).get('bandwidth'))
     return {

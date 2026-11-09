@@ -60,10 +60,12 @@ def highshelf_fq(fc: float, g_db: float, s: float = 1.0, sr: int = 48000) -> np.
 
 
 def highpass_fq(fc: float, sr: int = 48000, order: int = 2) -> np.ndarray:
-    """Butterworth highpass SOS for removing subsonic DC rumble."""
-    # Order is halved because sosfiltfilt applies forward-backward (doubling effective order)
-    sos_order = max(1, order // 2)
-    return butter(sos_order, fc, btype='highpass', fs=sr, output='sos')
+    """Butterworth highpass SOS for removing subsonic rumble, applied forward-backward.
+
+    The two passes square the response: order 2 gives a zero-phase 24 dB/octave slope that is
+    −6 dB at `fc` (a Linkwitz-Riley shape). At 20 Hz that leaves 45 Hz within −0.4 dB. A first-order
+    design squared has the same −6 dB point but a soft knee that still takes 2.3 dB at 1.8 × fc."""
+    return butter(max(1, order), fc, btype='highpass', fs=sr, output='sos')
 
 
 def filtfilt_stream(

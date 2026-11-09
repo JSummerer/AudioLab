@@ -444,7 +444,13 @@ function signInRow() {
   select.addEventListener('change', () => save({ cookies_browser: select.value }));
   return h('div', { dataset: { spot: 'cookies' } },
     row('YouTube sign-in',
-      'Only needed for age-restricted videos or when YouTube asks to confirm you’re not a bot. Uses your browser’s existing sign-in on this computer; nothing is sent anywhere else. Firefox works most reliably.',
+      'Used only when YouTube refuses a video without it (age check, “confirm you’re not a bot”, members only), never for ordinary videos. '
+        + 'YouTube can block accounts that download a lot, so a spare Google account is safer. Premium gives no better sound for uploads like DJ sets. '
+        + 'Uses your browser’s existing sign-in on this computer; nothing is sent anywhere else. '
+        // This row only shows for a local server, so the browser's platform is the server's.
+        + (/Mac/i.test(navigator.platform || navigator.userAgent)
+          ? 'Firefox works without extra prompts. Chrome, Edge, Brave and similar ask for your Mac’s password once; Safari needs Full Disk Access.'
+          : 'Firefox works most reliably.'),
       select, { setting: 'cookies_browser' }));
 }
 
@@ -596,7 +602,9 @@ function renderStorage() {
     row('Keep work files', 'Keeps the big in-between files (decoded audio, raw stems) after a job finishes. Only useful for troubleshooting — uses a lot of disk.',
       switchControl({ checked: s.keep_work_files, label: 'Keep work files', onChange: (v) => save({ keep_work_files: v }) }), { setting: 'keep_work_files' }),
     row('Keep originals for comparing', `Keeps the downloaded or uploaded original of Enhance results in ${appName()}’s own data, so the Library can compare them at full length (about 1 MB per minute for links). Turning it off doesn’t delete the ones already kept.`,
-      switchControl({ checked: s.keep_originals !== false, label: 'Keep originals for comparing', onChange: (v) => save({ keep_originals: v }) }), { setting: 'keep_originals' }));
+      switchControl({ checked: s.keep_originals !== false, label: 'Keep originals for comparing', onChange: (v) => save({ keep_originals: v }) }), { setting: 'keep_originals' }),
+    row('Reuse kept originals', 'Links already downloaded use the original kept in the Library instead of downloading it again. The link is still looked up for its title and chapters.',
+      switchControl({ checked: s.reuse_originals !== false, label: 'Reuse kept originals', onChange: (v) => save({ reuse_originals: v }) }), { setting: 'reuse_originals' }));
 }
 
 async function loadStorage() {
@@ -655,7 +663,7 @@ function renderStorageInfo() {
   el.hidden = false;
   clear(el).append(row(
     `${appName()}’s working data: ${fmtBytes(d.jobs_bytes)} · ${finished} finished job${finished === 1 ? '' : 's'}`,
-    ['Logs, previews and copies kept for each job. Your files in the output folder aren’t counted and are never deleted.', ...extra].join(' '),
+    ['Logs, previews and copies kept for each job. Your files in the output folder aren’t counted, and clearing jobs keeps them.', ...extra].join(' '),
     btn), originalsRow(d));
 }
 

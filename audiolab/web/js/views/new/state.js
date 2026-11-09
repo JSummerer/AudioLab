@@ -50,6 +50,30 @@ export function redraw(...names) {
   if (names.length && !names.includes('sleeve') && (names.includes('source') || names.includes('action'))) renderers.sleeve?.();
 }
 
+// The formats last started per task, kept in this browser with the Settings default they were
+// chosen over: once Settings → Defaults change, those apply again.
+const FORMATS_KEY = 'audiolab.formats';
+const DEFAULT_SETTING = { download: 'download_format', enhance: 'enhance_formats', separate: 'separate_format' };
+const settingDefault = (task) => JSON.stringify(store.settings?.[DEFAULT_SETTING[task]] ?? null);
+
+export function rememberFormats(task, options) {
+  const value = task === 'enhance' ? options.formats : options.format;
+  if (!DEFAULT_SETTING[task] || value == null) return;
+  try {
+    const all = JSON.parse(localStorage.getItem(FORMATS_KEY) || '{}') || {};
+    all[task] = { value, base: settingDefault(task) };
+    localStorage.setItem(FORMATS_KEY, JSON.stringify(all));
+  } catch { /* this page only */ }
+}
+
+/** The formats last started for `task` (a key, or keys for Enhance), unless Settings → Defaults changed since. */
+export function rememberedFormats(task) {
+  try {
+    const last = JSON.parse(localStorage.getItem(FORMATS_KEY) || '{}')?.[task];
+    return last && last.base === settingDefault(task) ? last.value : null;
+  } catch { return null; }
+}
+
 /** The fine-tuning values that apply to the chosen processing mode (sent with the job). */
 export function appliedAdvanced() {
   const e = state.enhance;
@@ -57,11 +81,11 @@ export function appliedAdvanced() {
 }
 
 export const isFileLike = () => state.source?.kind === 'file' || state.source?.kind === 'files'
-  || (state.source?.kind === 'job' && state.source.job?.source?.kind === 'file');
+  || (state.source?.kind === 'job' && (!!state.source.sourceFile || state.source.job?.source?.kind === 'file'));
 
 /** The source is a link (its audio is the site's lossy stream): one, a playlist, or an earlier job's. */
 export const isLinkSource = () => ['url', 'url-error', 'playlist'].includes(state.source?.kind)
-  || (state.source?.kind === 'job' && state.source.job?.source?.kind === 'url');
+  || (state.source?.kind === 'job' && !state.source.sourceFile && state.source.job?.source?.kind === 'url');
 
 /** A file the server accepts as audio or video: by its extension, from Health (loaded before the views mount). */
 export function isMediaFile(f) {

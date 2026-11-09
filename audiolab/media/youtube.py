@@ -31,6 +31,9 @@ _URL_RE = re.compile(r'^https?://[^\s/$.?#][^\s]*$', re.IGNORECASE)
 _BARE_DOMAIN_RE = re.compile(r'^(?:www\.|m\.|music\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+/\S*$', re.IGNORECASE)
 _PROGRESS_TAG = '[al-progress]'
 _FILE_TAG = 'AL_FILE '
+_STREAM_TAG = 'AL_STREAM '
+_STREAM_FIELDS = '%(format_id)s|%(acodec)s|%(abr)s|%(asr)s|%(audio_channels)s'
+_streams: dict[str, dict[str, Any]] = {}  # a finished download's path -> its stream, until stream_info reads it
 _PROGRESS_EVERY_S = 0.3
 _THUMBNAIL_MAX_BYTES = 15 * 1024 * 1024
 _THUMBNAIL_TIMEOUT_S = 30
@@ -337,8 +340,43 @@ def _deno_path() -> str | None:
         return shutil.which('deno')
 
 
-def ytdlp_cmd() -> list[str]:
-    """Base yt-dlp command line with AudioLab's tool locations."""
+# A signed-in run is paced like yt-dlp's guide advises (a few seconds per video, a pause between requests):
+# YouTube can block accounts that download a lot.
+_SIGNED_IN_PACING = ['--sleep-requests', '1', '--sleep-interval', '3', '--max-sleep-interval', '6']
+
+
+def sign_in_browser() -> str:
+    """The browser whose YouTube sign-in the user allowed (setting `cookies_browser`), else ''."""
+    browser = SETTINGS.get().cookies_browser
+    return browser if browser in BROWSERS else ''
+
+
+def needs_sign_in(text: str) -> bool:
+    """yt-dlp output says YouTube refused without a sign-in (bot check, age check, members only)."""
+    low = text.lower()
+    return any(
+        m in low
+        for m in (
+            'not a bot',
+            'confirm your age',
+            'age-restricted',
+            'inappropriate for some users',
+            'members-only',
+            'join this channel',
+            'members only',
+            'use --cookies',  # yt-dlp's own advice when a site wants a login
+            'http error 401',
+            'login required',
+            'only available for registered users',
+        )
+    )
+
+
+def ytdlp_cmd(sign_in: bool = False) -> list[str]:
+    """Base yt-dlp command line with AudioLab's tool locations. `sign_in`: add the allowed browser's
+    YouTube sign-in, paced. Callers pass it only for a retry after YouTube refused without one, so an
+    account is never used for ordinary public videos (it would risk a block and gives no better audio
+    there: Premium's 256 kbps is only for official music)."""
     cmd = [
         *runtime.downloader_command(),
         '--ignore-config',
@@ -354,9 +392,9 @@ def ytdlp_cmd() -> list[str]:
     deno = _deno_path()
     if deno:
         cmd += ['--js-runtimes', f'deno:{deno}']
-    browser = SETTINGS.get().cookies_browser
-    if browser in BROWSERS:
-        cmd += ['--cookies-from-browser', browser]
+    browser = sign_in_browser() if sign_in else ''
+    if browser:
+        cmd += [*_SIGNED_IN_PACING, '--cookies-from-browser', browser]
     return cmd
 
 
@@ -428,7 +466,7 @@ def _cookie_read_error(browser: str, detail: str, raw: str | None = None) -> Dow
     )
 
 
-def _friendly_error(stderr: str, url: str) -> DownloadError:
+def _friendly_error(stderr: str, url: str, signed_in: bool = False) -> DownloadError:
     """Translate yt-dlp output into a message a non-technical user understands; yt-dlp's own words
     go along as `detail` (for bug reports), never into the message."""
     text = stderr or ''
@@ -440,7 +478,7 @@ def _friendly_error(stderr: str, url: str) -> DownloadError:
     def e(msg, hints=None, fix=None):
         return DownloadError(msg, hints=hints, fix=fix, detail=raw or None)
 
-    browser = SETTINGS.get().cookies_browser if SETTINGS.get().cookies_browser in BROWSERS else ''
+    browser = sign_in_browser() if signed_in else ''  # this run used the sign-in
     name = BROWSERS.get(browser, '')
     cookie_trouble = bool(browser) and any(m in low for m in _COOKIE_READ_ERRORS)  # incl. warnings
     if cookie_trouble and any(m in ' '.join(err_lines).lower() for m in _COOKIE_READ_ERRORS):
@@ -454,16 +492,7 @@ def _friendly_error(stderr: str, url: str) -> DownloadError:
         return e(
             'This video is private, so it cannot be downloaded.', ['Ask the uploader to make it public or unlisted.']
         )
-    signed_in = (
-        'not a bot' in low
-        or 'confirm your age' in low
-        or 'age-restricted' in low
-        or 'inappropriate for some users' in low
-        or 'members-only' in low
-        or 'join this channel' in low
-        or 'members only' in low
-    )
-    if signed_in and cookie_trouble:  # the sign-in was not readable, so YouTube saw a stranger
+    if needs_sign_in(low) and cookie_trouble:  # the sign-in was not readable, so YouTube saw a stranger
         return _cookie_read_error(browser, low, raw or None)
     if _SERVER_TROUBLE.search(low):  # before the checks below: "Service Unavailable" says "unavailable"
         return e(
@@ -656,16 +685,20 @@ def probe(url: str, progress: Progress | None = None) -> dict[str, Any]:
         raise DownloadError('This does not look like a link. Paste a full web address (https://…).')
     progress(5, 'Reading link information…')
     cap = max(1, int(LIMITS.max_playlist_items))
-    cmd = ytdlp_cmd() + ['-J', '--flat-playlist', '--no-playlist', '-I', f'1:{cap + 1}', '--', norm]
-    res = proc.run(
-        cmd,
-        progress=progress,
-        timeout_s=LIMITS.ytdlp_probe_timeout_s,
-        what='link check',
-        timeout_hint='Check your internet connection and try again.',
-    )
-    if res.returncode != 0 or not res.stdout.strip():
-        raise _friendly_error(res.stderr_tail, norm)
+    for sign_in in (False, True):
+        cmd = ytdlp_cmd(sign_in) + ['-J', '--flat-playlist', '--no-playlist', '-I', f'1:{cap + 1}', '--', norm]
+        res = proc.run(
+            cmd,
+            progress=progress,
+            timeout_s=LIMITS.ytdlp_probe_timeout_s,
+            what='link check',
+            timeout_hint='Check your internet connection and try again.',
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            break
+        if sign_in or not (sign_in_browser() and needs_sign_in(res.stderr_tail)):
+            raise _friendly_error(res.stderr_tail, norm, signed_in=sign_in)
+        progress(5, f'YouTube asks for a sign-in: using your {BROWSERS[sign_in_browser()]} sign-in…')
     text = res.stdout.strip()
     try:
         d = json.loads(text[text.find('{') :])
@@ -791,7 +824,7 @@ def _download(
         f'download:{_PROGRESS_TAG} %(progress.downloaded_bytes)s|%(progress.total_bytes)s|'
         f'%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s|%(progress.status)s'
     )
-    cmd = ytdlp_cmd() + [
+    args = [
         '--no-playlist',
         '--no-mtime',
         '--newline',
@@ -800,6 +833,8 @@ def _download(
         tmpl,
         '--print',
         f'after_move:{_FILE_TAG}%(filepath)s',
+        '--print',
+        f'after_move:{_STREAM_TAG}{_STREAM_FIELDS}',
         '--max-filesize',
         f'{int(LIMITS.max_download_mb)}M',
         '-f',
@@ -810,12 +845,15 @@ def _download(
         '--',
         norm,
     ]
-    state = {'part': 0, 'last_pct': -1.0, 'last_emit': 0.0, 'files': [], 'finished_part': False}
+    state = {'part': 0, 'last_pct': -1.0, 'last_emit': 0.0, 'files': [], 'finished_part': False, 'stream': None}
     part_span = 95.0 / max(1, parts)
 
     def on_line(line: str):
         if line.startswith(_FILE_TAG):
             state['files'].append(line[len(_FILE_TAG) :].strip())
+            return
+        if line.startswith(_STREAM_TAG):
+            state['stream'] = parse_stream(line[len(_STREAM_TAG) :])
             return
         if line.startswith(_PROGRESS_TAG):
             fields = line[len(_PROGRESS_TAG) :].strip().split('|')
@@ -868,26 +906,33 @@ def _download(
             ):
                 p.unlink(missing_ok=True)
 
-    try:
-        res = proc.run(
-            cmd,
-            progress=progress,
-            timeout_s=LIMITS.ytdlp_download_timeout_s,
-            on_line=on_line,
-            what='the download',
-            timeout_hint='Check your internet connection and try again, or pick a shorter video.',
-        )
-    except BaseException:
+    for sign_in in (False, True):
+        try:
+            res = proc.run(
+                ytdlp_cmd(sign_in) + args,
+                progress=progress,
+                timeout_s=LIMITS.ytdlp_download_timeout_s,
+                on_line=on_line,
+                what='the download',
+                timeout_hint='Check your internet connection and try again, or pick a shorter video.',
+            )
+        except BaseException:
+            drop_partials()
+            raise
+        if res.returncode == 0:
+            break
         drop_partials()
-        raise
-    if res.returncode != 0:
-        drop_partials()
-        raise _friendly_error(res.stderr_tail + '\n' + res.stdout[-2000:], norm)
+        text = res.stderr_tail + '\n' + res.stdout[-2000:]
+        if sign_in or not (sign_in_browser() and needs_sign_in(text)):
+            raise _friendly_error(text, norm, signed_in=sign_in)
+        progress(0, f'YouTube asks for a sign-in: using your {BROWSERS[sign_in_browser()]} sign-in…')
 
     for f in reversed(state['files']):
         p = Path(f)
         if p.is_file():
-            progress(100)
+            progress(100)  # may raise Cancelled: register the stream only once the file is handed over
+            if state['stream']:
+                _streams[str(p)] = state['stream']
             return p
     # Fallback: whatever new non-temp file appeared in the folder.
     new = [
@@ -906,6 +951,33 @@ def _download(
     raise DownloadError(
         'The download finished but no file was produced.', hints=['Try again.', _update_hint()], fix='update_downloader'
     )
+
+
+def parse_stream(text: str) -> dict[str, Any] | None:
+    """`_STREAM_FIELDS` as printed by yt-dlp ('NA' when unknown) -> {format_id, codec (short: opus,
+    aac, …), kbps, sample_rate, channels}, unknown values None; None when nothing is known."""
+    raw = [None if v.strip() in ('', 'NA', 'none') else v.strip() for v in (text.split('|') + [''] * 5)[:5]]
+    fmt, codec, abr, asr, channels = raw
+
+    def count(v: str | None) -> int | None:
+        x = _num(v)
+        return round(x) if x is not None and 0 < x < 1e7 else None  # also drops nan and inf
+
+    codec = codec.split('.')[0].lower() if codec else None
+    stream = {
+        'format_id': fmt,
+        'codec': 'aac' if codec == 'mp4a' else codec,
+        'kbps': count(abr),
+        'sample_rate': count(asr),
+        'channels': count(channels),
+    }
+    return stream if any(v is not None for v in stream.values()) else None
+
+
+def stream_info(path: Path) -> dict[str, Any] | None:
+    """The stream the site delivered for a file download_audio/download_video just returned (read
+    once), else None."""
+    return _streams.pop(str(path), None)
 
 
 def download_audio(url: str, dest_dir: Path, progress: Progress | None = None) -> Path:

@@ -9,13 +9,15 @@ import { state, refs, redraw, definePart, isFileLike, isLinkSource, appliedAdvan
 import { tracksBlock } from './tracks.js';
 import { hasOwnCover } from './cover.js';
 import { TASK_ICON } from '../job/index.js';
+import { eqField, formatEq, parseEq } from '../../eq.js';
+import { sectionEqField, sectionRows, checkSections } from '../../section-eq.js';
 
 // Destination presets: what people own, not codec names (the format itself is the
 // chip's second line and its (i) card — all from /api/health).
 const PRESETS = [
-  ['mp3_320', 'Phone & everyday'],
-  ['wav16', 'DJ USB / car'],
-  ['alac16', 'Apple Music'],
+  ['mp3_320', 'Small files, plays anywhere'],
+  ['wav16', 'USB stick, TV & car'],
+  ['alac16', 'iPhone & Apple Music'],
   ['flac24', 'Archive'],
 ];
 
@@ -91,8 +93,8 @@ function optionBlock(label, ...content) {
 }
 
 function advRows(rows) {
-  return h('div', { class: 'adv-rows' }, rows.map(([label, help, control]) =>
-    h('div', { class: 'adv-row' },
+  return h('div', { class: 'adv-rows' }, rows.map(([label, help, control, cls]) =>
+    h('div', { class: ['adv-row', cls] },
       h('div', { class: 'adv-text' }, h('div', { class: 'adv-label' }, label), h('div', { class: 'adv-help' }, help)),
       h('div', { class: 'adv-control' }, control))));
 }
@@ -348,19 +350,25 @@ function renderEnhanceOptions(el) {
     coverRow(e, () => all.filter((f) => e.formats.has(f.key))),
     fineTuning(),
   ], {
-    changed: () => formatsChanged().length + Number(e.embed_cover !== dflt.embed_cover) + appliedAdvanced().length,
+    changed: () => formatsChanged().length + Number(e.embed_cover !== dflt.embed_cover) + fineTuningChanges(),
     reset: () => {
       formatsChanged().forEach((k) => state.enhance.formats.delete(k));
       if (!state.enhance.formats.size) state.enhance.formats = new Set(dflt.enhance_formats);
       e.embed_cover = dflt.embed_cover;
       state.enhance.advanced = {};
+      delete state.enhance.eqText;
+      delete state.enhance.sectionRows;
     },
   }));
 }
 
 function fineTuning() {
   const a = state.enhance.advanced;
-  const set = (k) => (v) => { if (v == null || v === 'auto') delete a[k]; else a[k] = v; };
+  const set = (k) => (v) => {
+    const before = fineTuningChanges();
+    if (v == null || v === 'auto') delete a[k]; else a[k] = v;
+    if (fineTuningChanges() !== before) redraw('sleeve'); // it counts them
+  };
   const tri = (k, label, opts) => segmented({
     label, size: 'sm', value: a[k] ?? 'auto',
     options: opts.map(([value, label]) => ({ value, label })), onChange: set(k),
@@ -378,7 +386,8 @@ function fineTuning() {
     ['adaptive_lowmid', 'Adaptive low-mids', 'Tames brief buildup in the low-mids while keeping steady warmth. Strong allows a deeper cut. Skipped when AI shapes the stems.',
       tri('adaptive_lowmid', 'Adaptive low-mids', [['auto', 'Auto'], ['strong', 'Strong'], ['off', 'Off']])],
     ['glue', 'Glue compression', 'Gently evens out loud and quiet moments in a mix.', tri('glue', 'Glue compression', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']])],
-    ['hf_restore', 'Restore highs', 'Adds new high-frequency harmonics to brighten compressed audio. Lost detail cannot be recovered.', tri('hf_restore', 'Restore highs', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']])],
+    ['hf_restore', 'Brighten muffled highs', 'Only for files whose highs are cut off, like old MP3s. Adds new high harmonics; it can’t bring back lost detail.',
+      tri('hf_restore', 'Brighten muffled highs', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']])],
     ['denoise', 'Noise reduction', 'Off by default. Choose Light or Strong only if you hear steady hiss or hum.',
       segmented({
         label: 'Noise reduction', size: 'sm', value: ['light', 'strong'].includes(a.denoise) ? a.denoise : 'off',
@@ -388,20 +397,104 @@ function fineTuning() {
     ['mono_bass', 'Mono bass', 'Makes deep bass mono, as club systems expect.', tri('mono_bass', 'Mono bass', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']])],
     ['deess', 'Sharp S sounds', 'Softens S sounds and cymbal hits only where they jump out. Strong suits harsh recordings.',
       tri('deess', 'Sharp S sounds', [['auto', 'Auto'], ['strong', 'Strong'], ['off', 'Off']])],
-    ['sample_rate', 'Sample rate', 'Higher rates don’t add detail; 48 kHz is the safe choice.',
+    ['sample_rate', 'Sample rate', '48 kHz suits TVs, phones and most players; 44.1 kHz is for CDs. Higher rates don’t add detail.',
       segmented({
         label: 'Sample rate', size: 'sm', value: a.sample_rate ?? 'auto',
         options: [['auto', 'Auto'], [44100, '44.1 kHz'], [48000, '48 kHz'], [96000, '96 kHz']].map(([value, label]) => ({ value, label })),
         onChange: set('sample_rate'),
       })],
+    ['eq', 'Custom EQ', 'For experts. Up to 8 bands, one per line, like 160 Hz −3.3 dB Q 2.9. Applied before compression, loudness and peak control.',
+      eqControl(), 'adv-row-stack'],
+    ['section_eq', 'Section EQ', 'For experts. EQ for parts of the recording, like a harsh stretch of a long set. Each part fades in and out (5 seconds unless you set a fade). Applied after Custom EQ.',
+      sectionControl(), 'adv-row-stack'],
   ];
   const el = optionBlock('Fine-tuning',
     h('p', { class: 'muted small adv-note' }, light
       ? 'Only these settings apply when you choose Volume only.'
-      : 'Keep the defaults unless you know you want something else. Noise reduction is off until you choose it.'),
+      : 'Keep the defaults unless you know you want something else.'),
     advRows((light ? rows.filter(([key]) => LIGHT_KEYS.includes(key)) : rows).map(([, ...rest]) => rest)));
   el.classList.add('fine-tuning');
   return el;
+}
+
+/**
+ * Custom EQ: the text is kept as typed (`eqText`, it survives redraws); only text that reads
+ * cleanly becomes `advanced.eq`. Until then Start waits (eqProblem), except in Volume only.
+ */
+function eqControl() {
+  const e = state.enhance;
+  return eqField({
+    id: 'eqText', text: e.eqText ?? formatEq(e.advanced.eq), label: 'Custom EQ',
+    onInput: ({ text, bands, errors }) => {
+      const blocked = !!eqProblem();
+      const before = fineTuningChanges();
+      e.eqText = text;
+      if (bands.length && !errors.length) e.advanced.eq = bands;
+      else delete e.advanced.eq;
+      if (blocked !== !!eqProblem()) redraw('action'); // the sleeve follows
+      else if (before !== fineTuningChanges()) redraw('sleeve');
+      syncMore?.();
+    },
+  }).el;
+}
+
+/**
+ * Section EQ: the rows are kept as typed (`sectionRows`); only sections that all check out become
+ * `advanced.section_eq`. Until then Start waits (sectionProblem), except in Volume only.
+ */
+function sectionControl() {
+  const e = state.enhance;
+  e.sectionRows ||= sectionRows(e.advanced.section_eq);
+  // The editor changes the rows before it calls back, so the state before an edit is kept here.
+  let blocked = !!sectionProblem();
+  let count = fineTuningChanges();
+  return sectionEqField({
+    rows: e.sectionRows, duration: sourceDuration(), timeline: sourceTimeline,
+    onInput: (rows, { sections, errors }) => {
+      if (sections.length && !errors.length) e.advanced.section_eq = sections;
+      else delete e.advanced.section_eq;
+      const [wasBlocked, was] = [blocked, count];
+      [blocked, count] = [!!sectionProblem(), fineTuningChanges()];
+      if (blocked !== wasBlocked) redraw('action'); // the sleeve follows
+      else if (count !== was) redraw('sleeve');
+      syncMore?.();
+    },
+  }).el;
+}
+
+/** The recording's length when the source says it (a looked-up link, an earlier job), else null. */
+function sourceDuration() {
+  const src = state.source;
+  if (src?.kind === 'url') return src.probe?.duration_s || null;
+  return src?.kind === 'job' ? src.job?.source?.duration_s || null : null;
+}
+
+/**
+ * An earlier Check or Enhance job's tone timeline ("Suggest from the chart"), else null. Not for one of its
+ * result files: the timeline is of the job's input, so it would suggest what that Enhance already did.
+ */
+const sourceTimeline = () => (state.source?.kind === 'job' && !state.source.sourceFile
+  ? state.source.job?.result?.analysis?.tone_timeline || null : null);
+
+/** Why Start waits for the section EQ, or null. Volume only doesn't use it. */
+export function sectionProblem() {
+  const e = state.enhance;
+  if (state.task !== 'enhance' || e.quality === 'light' || !e.sectionRows?.length) return null;
+  const n = checkSections(e.sectionRows, sourceDuration()).errors.length;
+  return n ? `Fix the section EQ first: ${n} problem${n === 1 ? '' : 's'}, listed under it.` : null;
+}
+
+/** Fine-tuning settings that differ from Auto for the chosen processing; unfinished EQ or sections count too. */
+export function fineTuningChanges() {
+  return appliedAdvanced().length + Number(!!eqProblem()) + Number(!!sectionProblem());
+}
+
+/** Why Start waits for the custom EQ text, or null. Volume only doesn't use it. */
+export function eqProblem() {
+  const e = state.enhance;
+  if (state.task !== 'enhance' || e.quality === 'light' || !e.eqText?.trim()) return null;
+  const n = parseEq(e.eqText).errors.length;
+  return n ? `Fix the custom EQ first: ${n} problem${n === 1 ? '' : 's'}, listed under it.` : null;
 }
 
 // --- Split ---------------------------------------------------------------------

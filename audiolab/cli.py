@@ -427,7 +427,7 @@ def main(argv=None) -> int:
             '--cookies-from-browser',
             metavar='BROWSER',
             choices=['firefox', 'chrome', 'edge', 'brave', 'safari', 'chromium', 'opera', 'vivaldi'],
-            help="use this browser's YouTube sign-in (age-restricted videos, bot checks)",
+            help="allow this browser's YouTube sign-in, used only when YouTube refuses without it (age or bot checks)",
         )
         p.add_argument('--json', action='store_true', help='print the result as JSON')
         p.add_argument('--keep', action='store_true', help='keep the working files')

@@ -6,13 +6,16 @@
     run(ctx, source)          -> Result dict (see docs/API.md); internal keys start with '_'
 
 Modules are imported lazily so e.g. a plain download never loads the DSP/AI stack.
+`import` (a file into the Library) is created only by POST /api/library/import; its module is
+`importing` (`import` is a Python keyword).
 """
 
 import importlib
 from typing import Any
 
-TASKS = ('download', 'enhance', 'separate', 'analyze')
-LABELS = {'download': 'Save', 'enhance': 'Enhance', 'separate': 'Split', 'analyze': 'Check'}
+TASKS = ('download', 'enhance', 'separate', 'analyze', 'import')
+LABELS = {'download': 'Save', 'enhance': 'Enhance', 'separate': 'Split', 'analyze': 'Check', 'import': 'Import'}
+_MODULES = {'import': 'importing'}
 
 
 def get(task: str):
@@ -20,7 +23,7 @@ def get(task: str):
         from ..errors import AudioLabError
 
         raise AudioLabError(f'Unknown task "{task}".')
-    return importlib.import_module(f'{__name__}.{task}')
+    return importlib.import_module(f'{__name__}.{_MODULES.get(task, task)}')
 
 
 def clean_meta(raw: Any) -> dict[str, str]:

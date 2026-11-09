@@ -158,10 +158,10 @@ function openNew() {
   if (currentRoute()?.name !== 'new') go('#/new', { focus: false });
 }
 
-on('use-source', ({ job, task, again = false }) => {
+on('use-source', ({ job, task, again = false, file = null }) => {
   openNew();
   scroller.scrollTop = 0;
-  useJobSource(job, task, { again });
+  useJobSource(job, task, { again, file });
 });
 
 const fileInput = document.getElementById('fileInput');

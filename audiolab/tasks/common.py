@@ -7,17 +7,21 @@ Conventions for task work folders (`ctx.work_dir`):
 
 import re
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .. import APP_NAME, __version__
 from ..context import Progress, TaskContext
 from ..errors import AudioLabError, storage_error
 from ..media import export, ffmpeg, youtube
 from ..resources import preflight
 from ..runtime import is_packaged
 from ..settings import SETTINGS, validate_output_location
-from ..util import PLAYABLE_EXT, human_bytes, human_duration, sanitize_filename, unique_path
+from ..util import PLAYABLE_EXT, human_bytes, human_duration, link_or_copy, sanitize_filename, unique_path
+
+REUSED_NOTE = 'Used the original kept in the Library instead of downloading it again.'
 
 
 @dataclass
@@ -33,6 +37,8 @@ class Acquired:
     task: str = ''  # for re-running the preflight once the duration is known
     quality: str = 'standard'
     cover: Path | None = None  # the user's own cover image (a prepared JPEG in the job's input/)
+    stream: dict[str, Any] | None = None  # a link's: the stream the site delivered (youtube.parse_stream)
+    reused_original: bool = False  # a link's: the Library's kept original stood in for the download
 
 
 def scratch_dir(ctx: TaskContext) -> Path:
@@ -366,10 +372,52 @@ def library_hints(acq: Acquired, keep_original: bool = False) -> dict[str, Any]:
     if keep_original:
         hints['original'] = str(acq.path)  # the download or the upload — never the decoded reference
         hints['original_codec'] = (acq.metadata.get('source_audio') or {}).get('audio_codec')
+        hints['original_downloaded'] = bool(acq.metadata.get('downloaded'))  # only these are reused for links
     return hints
 
 
-def tags_for(acq: Acquired, suffix: str = '') -> dict[str, str]:
+def link_result(acq: Acquired) -> dict[str, Any]:
+    """Result keys of a link job: `stream` (what the site delivered) and `reused_original`."""
+    out: dict[str, Any] = {'stream': acq.stream} if acq.stream else {}
+    if acq.reused_original:
+        out['reused_original'] = True
+    return out
+
+
+def chapters(acq: Acquired) -> list[dict[str, Any]]:
+    """Result `markers`: the source's chapters (not a tracklist from the description or pasted)."""
+    if acq.metadata.get('tracks_source') != 'chapters':
+        return []
+    return [{k: t.get(k) for k in ('n', 'title', 'start_s', 'end_s')} for t in acq.metadata.get('tracks') or []]
+
+
+def next_version(source: dict[str, Any], task: str) -> int | None:
+    """The number of this recording's next result of `task`: one more than the highest in its Library
+    group (library.next_version), stored with the entry. None when the group isn't known cheaply: an
+    upload's key would mean hashing the file (again, for the entry). Two renders of one recording at
+    the same time may get the same number; it is only a tag, so that is accepted."""
+    try:
+        from .. import library
+
+        group = source.get('_library_group') or (library.source_key(source) if source.get('kind') == 'url' else None)
+        return library.next_version(group, task) if group else None
+    except Exception:  # only a tag: never fail the job for it
+        return None
+
+
+def version_label(name: str, n: int | None) -> str:
+    """'(Enhanced)' for the first version (or an unknown one), '(Enhanced 2)', … for later ones."""
+    return f'({name})' if not n or n == 1 else f'({name} {n})'
+
+
+def made_by(recipe: str, target_lufs: float) -> str:
+    """The comment tag's line about the processing: 'AudioLab 2.4 · Club / DJ set · -12.5 LUFS · 2026-11-09'."""
+    return f'{APP_NAME} {__version__} · {recipe} · {target_lufs:g} LUFS · {time.strftime("%Y-%m-%d")}'
+
+
+def tags_for(acq: Acquired, suffix: str = '', comment: str = '') -> dict[str, str]:
+    """Tags for an output: the title (+ `suffix`), artist, the source file's album/track/date, the
+    playlist as album, and the link plus `comment` (one line each) as the comment."""
     tags = {'title': acq.title + suffix}
     if acq.artist:
         tags['artist'] = acq.artist
@@ -381,8 +429,8 @@ def tags_for(acq: Acquired, suffix: str = '') -> dict[str, str]:
             tags[key] = file_tags[key]
     if acq.playlist_title:
         tags['album'] = acq.playlist_title
-    if acq.url:
-        tags['comment'] = acq.url
+    if acq.url or comment:
+        tags['comment'] = '\n'.join(x for x in (acq.url, comment) if x)
     return tags
 
 
@@ -468,7 +516,12 @@ def _acquire_url(
     )
     dest = scratch_dir(ctx) / 'download'
     dl = progress.sub(5, 100)
-    path = (youtube.download_video if video else youtube.download_audio)(source['url'], dest, progress=dl)
+    reused = None if video else _reuse_original(ctx, source, dest, dl, task)
+    if reused:
+        path, stream = reused
+    else:
+        path = (youtube.download_video if video else youtube.download_audio)(source['url'], dest, progress=dl)
+        stream = youtube.stream_info(path)
     artist, _ = youtube.link_names(meta)  # the probe card's rule: the card and the files agree
     metadata = {
         k: meta.get(k)
@@ -486,6 +539,7 @@ def _acquire_url(
             'tracks_source',
         )
     }
+    metadata['downloaded'] = True  # kept with the original: only a link's download stands in for the link
     if 'tracks' not in meta:  # probed by an older version (cached probe, re-run job)
         metadata['tracks'], metadata['tracks_source'] = youtube.make_tracks(
             meta.get('chapters'), meta.get('description'), duration
@@ -501,7 +555,52 @@ def _acquire_url(
         playlist_title=source.get('playlist_title'),
         task=task,
         quality=quality,
+        stream=stream,
+        reused_original=bool(reused),
     )
+
+
+def _reuse_original(
+    ctx: TaskContext, source: dict[str, Any], dest: Path, progress: Progress, task: str
+) -> tuple[Path, dict[str, Any] | None] | None:
+    """Setting `reuse_originals`: the recording's original kept in the Library (the same group key the
+    entry would get, so the link must have been looked up), linked into `dest` as if downloaded —
+    the new entry then keeps that same file again. Returns (path, the stream of its download); None:
+    download — there is none (or it just went). Notes it in the journal."""
+    if not SETTINGS.get().reuse_originals:
+        return None
+    from .. import library  # not at the top: a plain conversion needs no Library
+
+    found = library.kept_original(source.get('_library_group') or library.source_key(source))
+    if found is None:
+        return None
+    kept, stream = found
+    progress(0, 'Using the original kept in the Library…')
+    target = dest / f'audio{kept.suffix.lower()}'
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+        if task == 'download' and ctx.options.get('format') == 'original':
+            # Save hands this very file to the user: a copy, so editing it never changes the kept one.
+            _copy(kept, target, progress.check_cancel)
+        else:
+            link_or_copy(kept, target, progress.check_cancel)
+    except OSError:  # removed meanwhile (Storage) or unreadable: download it after all
+        return None
+    ctx.note('info', REUSED_NOTE)
+    progress(100)
+    return target, stream
+
+
+def _copy(src: Path, dst: Path, check_cancel) -> None:
+    tmp = dst.with_name(f'.{dst.name}.copy-tmp')
+    try:
+        with src.open('rb') as source, tmp.open('wb') as target:
+            while block := source.read(1 << 20):
+                check_cancel()
+                target.write(block)
+        tmp.replace(dst)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def split_into_tracks(

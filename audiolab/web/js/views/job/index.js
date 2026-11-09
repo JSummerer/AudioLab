@@ -14,7 +14,7 @@ import { back, go } from '../../router.js';
 import { liveView, updateLive, failedView, cancelledView } from './status.js';
 import { doneView, RECIPE_SHORT } from './results.js';
 
-export const TASK_ICON = { download: 'download', enhance: 'sparkle', separate: 'layers', analyze: 'gauge' };
+export const TASK_ICON = { download: 'download', enhance: 'sparkle', separate: 'layers', analyze: 'gauge', import: 'file' };
 
 /** A job's cover: the server's own saved copy first, else the link's thumbnail; null when it has none. */
 export function coverUrl(job) {
@@ -215,6 +215,7 @@ function eyebrowText(job) {
       break;
     }
     case 'analyze': what = ['Quality check']; break;
+    case 'import': what = ['Added to the Library']; break;
     default: what = [taskLabel(job)];
   }
   if (tracks) what.push(`${tracks} tracks`);

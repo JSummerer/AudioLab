@@ -61,6 +61,7 @@ def lib_runner(job, ctx):
         'output_dir': str(out),
         'files': files,
         'metrics': {'before': {'lufs': -15.0}, 'after': {'lufs': -12.0}},
+        'excerpt': {'start_s': 112.0, 'duration_s': 45.0},
         '_media': {'original': str(excerpt)},
         '_library': {
             'artist': 'Artist',
@@ -106,6 +107,7 @@ def test_entry_written_on_finish_and_outlives_the_job(manager):
     raw = json.loads((SETTINGS.library_dir / f'{job.id}.json').read_text())
     assert raw['group'] == 'youtube:abc' and raw['files'][0]['path'] == 'Song (Enhanced)/Song (Enhanced).m4a'
     assert [f['kind'] for f in raw['files']] == ['enhanced', 'track'] and raw['markers_source'] == 'pasted'
+    assert raw.get('excerpt') == ({'start_s': 112.0, 'duration_s': 45.0} if job.task == 'enhance' else None)
     assert raw['loudness'] == {'original_lufs': -15.0, 'result_lufs': -12.0}
     kept = library.originals_dir() / raw['original']['file']
     assert kept.read_bytes() == b'webm' * 1000 and raw['original']['name'] == 'Song.webm'
@@ -246,7 +248,13 @@ def test_remove_entry_keeps_files_and_drops_unreferenced_original(manager):
     assert e1['original']['file'] == e2['original']['file']
     kept = library.originals_dir() / e1['original']['file']
     outputs = [library.file_path(e1, f['id']) for f in e1['files']]
-    assert library.remove(first.id) == {'deleted': first.id, 'original_removed': False, 'freed_bytes': 0}
+    assert library.remove(first.id) == {
+        'deleted': first.id,
+        'original_removed': False,
+        'freed_bytes': 0,
+        'trashed': [],
+        'trash_failed': [],
+    }
     assert kept.is_file() and all(p.is_file() for p in outputs)
     assert library.remove(second.id)['original_removed'] is True
     assert not kept.exists() and all(p.is_file() for p in outputs)  # the user's files are never touched
@@ -270,6 +278,7 @@ def test_library_api_files_range_and_storage(tmp_path, manager):
             'size_bytes': 4000,
             'format': 'webm',
             'codec': 'opus',
+            'key': library.get(job.id)['original']['file'].split('.')[0],
             'url': 'https://youtu.be/abc',
         }
         assert [f['id'] for f in entry['files']] == ['f0', 'f1', 'original']
@@ -594,14 +603,15 @@ def test_kept_originals_are_identified_by_content(manager):
     assert library.originals_usage() == {'count': 2, 'bytes': 10000}
 
     kept_a, kept_b = library.file_path(a, 'original'), library.file_path(b, 'original')
-    assert library.remove(a['id']) == {'deleted': a['id'], 'original_removed': False, 'freed_bytes': 0}  # c uses it
+    removed = {'trashed': [], 'trash_failed': []}  # nothing goes to the Trash unless asked
+    assert library.remove(a['id']) == {'deleted': a['id'], 'original_removed': False, 'freed_bytes': 0, **removed}
     dropped = library.drop_original(b['id'])  # only b's recording: a's file stays
     assert dropped == {'id': b['id'], 'original_removed': True, 'freed_bytes': 0}  # b's job still holds the upload
     assert not kept_b.exists() and kept_a.is_file() and Path(manager.get(b['id']).source['path']).is_file()
     assert library.public(library.get(c['id']))['original']['kept'] is True
     manager.delete(a['id'])
     manager.delete(c['id'])  # the uploads are gone: the kept file is the last link
-    assert library.remove(c['id']) == {'deleted': c['id'], 'original_removed': True, 'freed_bytes': 5000}
+    assert library.remove(c['id']) == {'deleted': c['id'], 'original_removed': True, 'freed_bytes': 5000, **removed}
     assert not kept_a.exists() and library.originals_usage()['count'] == 0
 
 
@@ -692,3 +702,37 @@ def test_own_cover_next_to_an_upload_called_cover_original(tmp_path, manager):
         src = manager.get(again.json()['jobs'][0]['id']).source
         assert Path(src['path']).name == 'cover-original.wav' and Path(src['path']).read_bytes() == _wav()
         assert Path(src['_cover']).parent.name == 'cover' and Path(src['_cover_original']).is_file()
+
+
+def test_apply_takes_the_cover_a_version_already_carries(tmp_path):
+    """The kept original is bare audio, so Apply reuses the picture embedded in an earlier export and its
+    full-size saved cover. A saved cover alone (embed_cover was off) is not embedded."""
+    from audiolab.api.library import _entry_covers
+
+    root = tmp_path / 'out'
+    root.mkdir()
+    run_ffmpeg(['-f', 'lavfi', '-i', 'sine=d=1', str(root / 'a.wav')], what='test wav')
+    run_ffmpeg(
+        [
+            *('-f', 'lavfi', '-i', 'sine=d=1', '-f', 'lavfi', '-i', 'color=c=red:s=64x64:d=1'),
+            *('-map', '0:a', '-map', '1:v', '-frames:v', '1', '-c:a', 'alac', '-c:v', 'mjpeg'),
+            *('-disposition:v:0', 'attached_pic', str(root / 'a.m4a')),
+        ],
+        what='test m4a with cover',
+    )
+    (root / 'a - cover.png').write_bytes(b'full-size picture')
+    wav = {'id': 'f0', 'path': 'a.wav', 'format': 'wav16', 'kind': 'audio'}
+    m4a = {'id': 'f1', 'path': 'a.m4a', 'format': 'alac16', 'kind': 'audio'}
+    saved = {'id': 'f2', 'path': 'a - cover.png', 'format': 'png', 'kind': 'cover'}
+    assert _entry_covers({'root': str(root), 'files': [wav]}, tmp_path / 'none') == {}
+    keys = _entry_covers({'root': str(root), 'files': [wav, saved]}, tmp_path / 'saved-only')
+    assert set(keys) == {'_cover_original'} and Path(keys['_cover_original']).read_bytes() == b'full-size picture'
+    keys = _entry_covers({'root': str(root), 'files': [wav, m4a, saved]}, tmp_path / 'both')
+    assert Path(keys['_cover']).read_bytes()[:2] == b'\xff\xd8' and Path(keys['_cover_original']).suffix == '.png'
+    assert (root / 'a - cover.png').read_bytes() == b'full-size picture'  # the user's file is untouched
+
+
+def test_library_keeps_only_a_clean_excerpt():
+    assert library._excerpt({'start_s': 12, 'duration_s': 45.5, 'x': 1}) == {'start_s': 12.0, 'duration_s': 45.5}
+    for bad in (None, {'start_s': -1, 'duration_s': 5}, {'start_s': True, 'duration_s': 5}, {'start_s': 1}):
+        assert library._excerpt(bad) is None

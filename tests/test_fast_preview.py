@@ -159,6 +159,11 @@ def test_apply_uses_original_and_saves_a_new_version_in_same_group(app, tmp_path
     assert trial.status_code == 200, trial.text
     audition = wait_result(client, trial.json()['id'])['result']
     assert audition['processing']['params']['target_lufs'] == -20
+    eq = {'advanced': {'eq': [{'hz': 160, 'db': -3.31, 'q': 2.865}]}}
+    trial = client.post(url + '/preview', json={'start_s': 1, 'duration_s': 5, **eq})
+    assert trial.status_code == 200, trial.text
+    assert manager.get(trial.json()['id']).options['advanced']['eq'] == [{'hz': 160.0, 'db': -3.31, 'q': 2.87}]
+    wait_result(client, trial.json()['id'])
     assert audition['excerpt']['duration_s'] == 5
 
     r = client.post(url + '/enhance', json=changed)
@@ -207,6 +212,10 @@ def test_invalid_missing_and_unsupported_preview_requests(app, tmp_path):
         {'start_s': 0, 'duration_s': 5, 'advanced': {'bass_db': None}},
         {'start_s': 0, 'duration_s': 5, 'advanced': {'sample_rate': 48000.5}},
         {'start_s': 0, 'duration_s': 5, 'advanced': {'other': 'value'}},
+        {'start_s': 0, 'duration_s': 5, 'advanced': {'eq': [{'hz': 160, 'db': -3}]}},
+        {'start_s': 0, 'duration_s': 5, 'advanced': {'eq': [{'hz': 160, 'db': 'x', 'q': 1}]}},
+        {'start_s': 0, 'duration_s': 5, 'advanced': {'eq': [{'hz': 100, 'db': 1, 'q': 1}] * 9}},
+        {'start_s': 0, 'duration_s': 5, 'advanced': {'eq': [{'hz': 10**400, 'db': 1, 'q': 1}]}},
     ]
     for body in invalid:
         r = client.post(url + '/preview', content=json.dumps(body), headers={'Content-Type': 'application/json'})

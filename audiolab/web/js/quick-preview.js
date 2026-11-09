@@ -1,11 +1,14 @@
 // A disposable render of one passage from a kept original. A full render is a separate,
 // explicit action using the same overrides; closing or editing this dialog never saves audio.
-import { h, clear, fmtDuration } from './dom.js';
+import { h, clear, fmtDuration, parseClock, clockText } from './dom.js';
 import { api } from './api.js';
 import { closeInfo, segmented, switchControl, toast } from './ui.js';
 import { sectionPreviewCompare } from './compare.js';
 import { upsertJob } from './store.js';
 import { go, jobPath, routeStamp } from './router.js';
+import { eqField, formatEq, sameEq } from './eq.js';
+import { sectionEqField, sectionRows, sameSections } from './section-eq.js';
+import { toneChart } from './tone-chart.js';
 
 const MIN_S = 5;
 const MAX_S = 30;
@@ -43,44 +46,77 @@ export function openQuickPreview(entry, comparison, opener) {
   const start = Number.isFinite(duration) && from > duration - 1 ? Math.max(0, duration - length) : from;
   const saved = entry.processing.requested.advanced || {};
   const light = entry.processing.requested.quality === 'light';
-  const modes = { adaptive_lowmid: saved.adaptive_lowmid || 'auto', deess: saved.deess || 'auto' };
+  const savedEq = Array.isArray(saved.eq) ? saved.eq : [];
+  const savedSections = Array.isArray(saved.section_eq) ? saved.section_eq : [];
+  // Compression only takes on/off: once a version saved one, "Auto" can't be asked for again.
+  const glueChoices = [{ value: 'on', label: 'On' }, { value: 'off', label: 'Off' }];
+  if (!saved.glue) glueChoices.unshift({ value: 'auto', label: 'Auto' });
+  const modes = { adaptive_lowmid: saved.adaptive_lowmid || 'auto', deess: saved.deess || 'auto', glue: saved.glue || 'auto' };
   let harmonics = saved.harmonics === 'on';
   let closed = false;
   let applying = false;
   let run = null;        // At most one preview submission, job or poll at a time.
   let ready = null;      // Exact settings of the last successful, still-current preview.
   let player = null;
+  let timeline = null;   // the tone timeline, fetched once the dialog is open (the list doesn't carry it)
 
-  const startField = h('input', {
-    class: 'field', type: 'number', min: 0, step: 'any', required: true, value: Math.floor(start * 1000) / 1000,
+  // Text fields, so a time can be typed as 14:00 or 1:02:03 as well as in seconds (checked in validateRange).
+  const timeField = (value) => h('input', {
+    class: 'field', type: 'text', required: true, autocomplete: 'off', spellcheck: 'false', value,
+    'aria-describedby': `${id}-range`,
   });
-  const lengthField = h('input', {
-    class: 'field', type: 'number', min: MIN_S, max: MAX_S, step: 'any', required: true, value: Number(length.toFixed(3)),
-  });
-  const levelKey = light ? 'target_lufs' : 'bass_db';
-  const levelUnit = light ? 'LUFS' : 'dB';
-  const levelField = h('input', {
-    class: 'field', type: 'number', min: light ? -30 : 0, max: light ? -5 : 6, step: 'any',
-    placeholder: Number.isFinite(saved[levelKey]) ? `Saved: ${saved[levelKey]}` : 'Saved: Auto',
+  const startField = timeField(clockText(start));
+  const lengthField = timeField(Number(length.toFixed(3)));
+  const levelField = (key, min, max, step) => h('input', {
+    class: 'field', type: 'number', min, max, step,
+    placeholder: Number.isFinite(saved[key]) ? `Saved: ${saved[key]}` : 'Saved: Auto',
     'aria-describedby': `${id}-saved`,
   });
-  const hint = h('p', { class: 'small muted' });
+  // Volume only previews keep to the loudness target.
+  const levels = [['target_lufs', 'Loudness (LUFS)', levelField('target_lufs', -30, -5, 0.5)]];
+  if (!light) levels.push(['bass_db', 'Bass boost (dB)', levelField('bass_db', 0, 6, 'any')]);
+  const hint = h('p', { class: 'small muted', id: `${id}-range` });
   const numeric = (label, input) => h('label', { class: 'quick-preview-number small' }, h('span', null, label), input);
-  const mode = (key, label) => h('div', { class: 'quick-preview-choice small' }, h('span', null, label),
-    segmented({ label, options: CHOICES, value: modes[key], size: 'sm',
+  const mode = (key, label, options = CHOICES) => h('div', { class: 'quick-preview-choice small' }, h('span', null, label),
+    segmented({ label, options, value: modes[key], size: 'sm',
       onChange: (v) => { modes[key] = v; change(); } }));
   const harmonicSwitch = switchControl({ checked: harmonics, label: 'Bass harmonics',
     onChange: (on) => { harmonics = on; change(); } });
+  const eq = light ? null : eqField({ text: formatEq(savedEq), label: 'Custom EQ', onInput: change });
+  // Sections in the recording's own time; "Use preview range" takes the Start and Length above.
+  const sections = light ? null : sectionEqField({
+    rows: sectionRows(savedSections), duration, onInput: change, timeline: () => timeline,
+    range: () => {
+      const [s, l] = validateRange();
+      return Number.isFinite(s) && l > 0 ? { start: s, end: Number.isFinite(duration) ? Math.min(duration, s + l) : s + l } : null;
+    },
+  });
+  // Where the balance moves (with the chapters); a point picked on it becomes the Start. No chart when it can't load.
+  const tone = h('div', { hidden: true });
+  if (entry.has_tone_timeline) {
+    api(`${path}/tone-timeline`).then((tl) => {
+      const chart = closed ? null : toneChart(tl, { compact: true, markers: entry.markers, onPick: pickStart });
+      if (!chart) return;
+      timeline = tl;
+      tone.append(chart);
+      tone.hidden = false;
+      sections?.sync();
+    }).catch(() => {});
+  }
   const fields = h('fieldset', { class: 'quick-preview-fields' },
     h('legend', { class: 'sr-only' }, 'Section and settings'),
     h('div', { class: 'quick-preview-range' },
-      numeric('Start (seconds)', startField), numeric('Length (seconds)', lengthField)),
+      numeric('Start', startField), numeric('Length (seconds)', lengthField)),
     hint,
+    tone,
     h('div', { class: 'quick-preview-settings' },
       !light ? mode('adaptive_lowmid', 'Low-mid control') : null,
       !light ? mode('deess', 'Sharp S sounds') : null,
-      numeric(`${light ? 'Loudness target' : 'Bass boost'} (${levelUnit})`, levelField),
-      !light ? h('label', { class: 'details-toggle', for: harmonicSwitch.id }, harmonicSwitch, 'Bass harmonics') : null),
+      !light ? mode('glue', 'Compression', glueChoices) : null,
+      levels.map(([, label, input]) => numeric(label, input)),
+      !light ? h('label', { class: 'details-toggle', for: harmonicSwitch.id }, harmonicSwitch, 'Bass harmonics') : null,
+      eq ? h('div', { class: 'quick-preview-eq small' }, h('span', null, 'Custom EQ'), eq.el) : null,
+      sections ? h('div', { class: 'quick-preview-eq small' }, h('span', null, 'Section EQ'), sections.el) : null),
     h('p', { class: 'small muted', id: `${id}-saved` }, 'A blank value keeps the saved setting.'));
   const status = h('p', { class: 'small muted', role: 'status' });
   const listen = h('div', { class: 'quick-preview-listen', hidden: true });
@@ -95,7 +131,8 @@ export function openQuickPreview(entry, comparison, opener) {
       fields, status, listen,
       h('div', { class: 'dialog-actions' }, closeBtn, cancelBtn, makeBtn, applyBtn)));
 
-  for (const input of [startField, lengthField, levelField]) input.addEventListener('input', change);
+  const inputs = [startField, lengthField, ...levels.map(([, , input]) => input)];
+  for (const input of inputs) input.addEventListener('input', change);
   dialog.addEventListener('cancel', (e) => { e.preventDefault(); if (!applying) dismiss(true); });
   dialog.addEventListener('close', () => dismiss(true));
   document.body.append(dialog);
@@ -103,11 +140,25 @@ export function openQuickPreview(entry, comparison, opener) {
   dialog.showModal();
   return () => dismiss(false);
 
+  function pickStart(t) {
+    if (run || applying) return;
+    startField.value = clockText(t);
+    change();
+  }
+
+  /** The typed start and length in seconds; marks a field invalid (reportValidity) when it can't be used. */
+  function validateRange() {
+    const start = parseClock(startField.value);
+    const length = parseClock(lengthField.value);
+    startField.setCustomValidity(Number.isFinite(start) ? '' : 'Enter a start like 14:00, 1:02:03 or in seconds.');
+    lengthField.setCustomValidity(length >= MIN_S && length <= MAX_S ? '' : `Choose ${MIN_S}–${MAX_S} seconds.`);
+    return [start, length];
+  }
+
   function updateRange() {
-    const start = Number(startField.value);
-    const length = Number(lengthField.value);
+    const [start, length] = validateRange();
     const end = Number.isFinite(duration) ? Math.min(duration, start + length) : start + length;
-    hint.textContent = startField.value !== '' && lengthField.value !== '' && start >= 0 && length >= MIN_S && length <= MAX_S && end > start
+    hint.textContent = Number.isFinite(start) && length >= MIN_S && length <= MAX_S && end > start
       ? `Section ${fmtDuration(start)}–${fmtDuration(end)}${Number.isFinite(duration) ? ` of ${fmtDuration(duration)}` : ''}.`
       : 'Choose a start and length within this recording.';
   }
@@ -142,21 +193,35 @@ export function openQuickPreview(entry, comparison, opener) {
   }
 
   function request() {
-    if (![startField, lengthField, levelField].every((el) => el.reportValidity())) return null;
-    const start_s = Number(startField.value);
-    const duration_s = Number(lengthField.value);
+    const [start_s, duration_s] = validateRange();
+    if (!inputs.every((el) => el.reportValidity())) return null;
     if (Number.isFinite(duration) && start_s + 1 > duration + 1e-6) {
       status.textContent = 'Leave at least one second before the end of the original.';
       startField.focus();
       return null;
     }
+    const custom = eq?.read();
+    if (custom?.errors.length) {
+      status.textContent = 'Fix the custom EQ first. The problems are listed under it.';
+      eq.textarea.focus();
+      return null;
+    }
+    const parts = sections?.read();
+    if (parts?.errors.length) {
+      status.textContent = 'Fix the section EQ first. The problems are listed under it.';
+      return null;
+    }
     const advanced = {};
-    if (levelField.value !== '') advanced[levelKey] = Number(levelField.value);
+    for (const [key, , input] of levels) if (input.value !== '') advanced[key] = Number(input.value);
     if (!light) {
+      // Only what differs from the saved version; "Auto" for compression keeps it.
       for (const [key, value] of Object.entries(modes)) {
         if (value !== (saved[key] || 'auto')) advanced[key] = value;
       }
       if (harmonics !== (saved.harmonics === 'on')) advanced.harmonics = harmonics ? 'on' : 'off';
+      // [] clears a saved EQ or saved sections.
+      if (!sameEq(custom.bands, savedEq)) advanced.eq = custom.bands;
+      if (!sameSections(parts.sections, savedSections)) advanced.section_eq = parts.sections;
     }
     return { start_s, duration_s, advanced };
   }

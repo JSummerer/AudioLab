@@ -259,7 +259,16 @@ def stereo_info(x: np.ndarray, sr: int) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Dynamics style (the validated ClubReady anchor rules, used by the club recipe)
 # ---------------------------------------------------------------------------
-def dynamics_style(lufs: float, lra_val: float) -> dict[str, Any]:
+LONG_PROGRAMME_S = 20 * 60  # from here on, judge density per window and section (DJ sets, concerts)
+
+
+def dynamics_style(lufs: float, lra_val: float, density: dict[str, float] | None = None) -> dict[str, Any]:
+    """`density` (programme_density, recordings of LONG_PROGRAMME_S or more): a long set's whole-file
+    LRA and its absolute loudness also count drift between tracks and the upload's level, so there
+    the typical 30 s peak-to-loudness and 3-minute range decide. Calibrated on two DJ sets
+    (10.3 / 10.9 dB, 4.7 / 6.1 LU) and a concert (13.0 dB, 7.2 LU)."""
+    if density is not None:
+        return _long_dynamics_style(lufs, density)
     if lra_val >= 6.5 or lufs <= -14.8:
         return {
             'type': 'concert',
@@ -282,6 +291,40 @@ def dynamics_style(lufs: float, lra_val: float) -> dict[str, Any]:
         'type': 'club',
         'name': 'Club / DJ mix dynamics',
         'rule': f'LRA between 3.2 and 6.5 (measured LRA {lra_val:.1f}, {lufs:.1f} LUFS)',
+        'recommended_target_lufs': round(max(-13.5, min(-11.8, lufs + 0.2)), 1),
+        'recommended_glue_comp': True,
+        'recommended_bass_punch_db': 1.5,
+    }
+
+
+def _long_dynamics_style(lufs: float, density: dict[str, float]) -> dict[str, Any]:
+    plr, section = density['peak_to_loudness_db'], density['section_lra']
+    measured = f'typical 30 s peak-to-loudness {plr:.1f} dB, typical 3-minute range {section:.1f} LU'
+    if plr >= 12.0 and section >= 6.0:
+        return {
+            'type': 'concert',
+            'name': 'Wide dynamics (live / orchestral)',
+            'rule': f'long recording: peak-to-loudness ≥ 12 dB and 3-minute range ≥ 6 LU ({measured})',
+            'measured': measured,
+            'recommended_target_lufs': round(max(-17.0, min(-14.2, lufs + 0.5)), 1),
+            'recommended_glue_comp': False,
+            'recommended_bass_punch_db': 0.5,
+        }
+    if (plr <= 8.0 and section <= 3.0) or lufs >= -11.2:
+        return {
+            'type': 'festival',
+            'name': 'Dense peak-time / festival',
+            'rule': f'long recording: peak-to-loudness ≤ 8 dB and 3-minute range ≤ 3 LU, or ≥ −11.2 LUFS ({measured})',
+            'measured': measured,
+            'recommended_target_lufs': round(max(-11.5, min(-9.8, lufs)), 1),
+            'recommended_glue_comp': False,
+            'recommended_bass_punch_db': 1.5,
+        }
+    return {
+        'type': 'club',
+        'name': 'Club / DJ mix dynamics',
+        'rule': f'long recording between dense and wide ({measured})',
+        'measured': measured,
         'recommended_target_lufs': round(max(-13.5, min(-11.8, lufs + 0.2)), 1),
         'recommended_glue_comp': True,
         'recommended_bass_punch_db': 1.5,
@@ -374,7 +417,8 @@ def profile(
     top_end = 'bright' if top_end_db > TOP_END_BRIGHT_DB else 'dull' if top_end_db < TOP_END_DULL_DB else 'normal'
     check()
     stereo = stereo_info(x, sr)
-    style = dynamics_style(lufs, lra_val)
+    density = levels.density if levels is not None and duration_s >= LONG_PROGRAMME_S else None
+    style = dynamics_style(lufs, lra_val, density)
     check()
     key = estimate_key(x, sr, lufs)
 
@@ -460,7 +504,14 @@ def profile(
             }
         )
     if stereo['is_mono']:
-        alerts.append({'level': 'info', 'title': 'Mono recording', 'message': 'Left and right are identical (mono).'})
+        alerts.append(
+            {
+                'level': 'info',
+                'title': 'Effectively mono',
+                'message': 'The file has two channels, but left and right carry the same sound. '
+                'Enhance keeps it that way; it cannot recover a stereo image.',
+            }
+        )
 
     return {
         'duration_s': round(float(duration_s), 2),
@@ -472,6 +523,8 @@ def profile(
         'integrated_lufs': round(lufs, 2),
         'true_peak_dbtp': round(tp, 2),
         'lra': round(lra_val, 2),
+        **({'dynamics_density': density} if density is not None else {}),
+        **({'tone_timeline': levels.tone_timeline} if levels is not None and levels.tone_timeline else {}),
         'is_clipping': bool(clip_pct > 0.01),
         'clipped_samples_pct': clip_pct,
         'dc_offset': round(dc, 4),

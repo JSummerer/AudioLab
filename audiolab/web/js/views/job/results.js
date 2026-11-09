@@ -12,7 +12,7 @@ import { stemRows, filePlayer, trackRows } from '../../player.js';
 import { comparePlayer, libraryCompare, sectionPreviewCompare } from '../../compare.js';
 import { footer, journalBlock } from './status.js';
 import {
-  summaryBlock, musicFacts, metricsBlock, sourceLine, decisionsBlock, spectrogramBlock, analyzeResult,
+  summaryBlock, musicFacts, metricsBlock, sourceLine, decisionsBlock, spectrogramBlock, analyzeResult, toneBlock, streamNote,
 } from './readings.js';
 
 export const RECIPE_SHORT = { club: 'DJ set', live: 'Concert', music: 'Song', voice: 'Podcast / voice' };
@@ -61,9 +61,14 @@ function listenSection(title, ...children) {
 }
 
 function aboutBlocks(job, r) {
-  if (job.task === 'enhance') return enhanceAbout(job, r);
   // A Save's first line ("Saved as MP3 · 320 kbps — 10.9 MB.") is what the sleeve and the files say already.
-  return [summaryBlock(r, 'What we did', { skip: job.task === 'download' ? 1 : 0 })];
+  const out = job.task === 'enhance' ? enhanceAbout(job, r) : [summaryBlock(r, 'What we did', { skip: job.task === 'download' ? 1 : 0 })];
+  if (r.reused_original) {
+    // Settings → Reuse kept originals: this link was not downloaded again.
+    const note = h('p', { class: 'muted small' }, 'Used the original kept in the Library, no new download.');
+    if (out[0]) out[0].append(note); else out[0] = block('What we did', note);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -191,17 +196,27 @@ function coverButton(job, r, list) {
   return b;
 }
 
+/** The file "Check the result" checks: a lossless one first, as the Library compares. */
+function resultFile(r) {
+  const files = (r.files || []).filter((f) => f.kind === 'audio' && exists(f) && !isTrack(f));
+  const lossless = (f) => store.health?.formats?.enhance?.find((x) => x.key === f.format)?.kind === 'lossless';
+  return files.find(lossless) || files[0] || null;
+}
+
 function nextBlock(job) {
+  // After Enhance, the result itself can be checked; the other tasks start from the job's source.
+  const result = job.task === 'enhance' ? resultFile(job.result || {}) : null;
   const choices = [
+    result ? ['analyze', 'gauge', 'Check the result', result] : null,
+    ['analyze', 'gauge', result ? 'Check the original' : 'Check it'],
     ['enhance', 'sparkle', 'Enhance it'],
     ['separate', 'layers', 'Split it'],
-    ['analyze', 'gauge', 'Check it'],
     ['download', 'download', job.source?.kind === 'file' ? 'Convert it' : 'Save it'],
-  ].filter(([t]) => t !== job.task);
+  ].filter((c) => c && c[0] !== job.task);
   // After a Check, enhancing is the one obvious next step.
-  return block('Do more with this', h('div', { class: 'next-actions' }, choices.map(([task, ico, label]) => h('button', {
+  return block('Do more with this', h('div', { class: 'next-actions' }, choices.map(([task, ico, label, file = null]) => h('button', {
     type: 'button', class: ['btn', job.task === 'analyze' && task === 'enhance' ? 'btn-primary' : 'btn-key', 'btn-sm'],
-    onclick: () => emit('use-source', { job, task }),
+    onclick: () => emit('use-source', { job, task, file }),
   }, icon(ico, 15), label))));
 }
 
@@ -220,10 +235,13 @@ function enhanceAbout(job, r) {
   const out = [summaryBlock(r), classificationBlock(job, r)];
   const m = metricsBlock(r);
   if (m) {
-    const src = showDetails() ? sourceLine(r.analysis) : '';
-    if (src) m.append(h('p', { class: 'muted small metrics-note' }, `Source: ${src}`));
+    // What the site delivered, else (with details) what the source file is.
+    const src = streamNote(r) || (showDetails() && sourceLine(r.analysis)
+      ? h('p', { class: 'muted small metrics-note' }, `Source: ${sourceLine(r.analysis)}`) : null);
+    if (src) m.append(src);
     out.push(m);
   }
+  out.push(toneBlock(r));
   if (showDetails() && (r.decisions || []).length) out.push(decisionsBlock(r));
   const adaptive = r.processing?.applied?.adaptive_lowmid;
   if (showDetails() && adaptive) {

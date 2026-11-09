@@ -6,7 +6,7 @@ import { h, icon, clear, fmtDuration, fmtBytes } from '../../dom.js';
 import { store } from '../../store.js';
 import { state, refs, definePart, isFileLike, RECIPE_LABELS, PROCESSING_LABELS } from './state.js';
 import { shownName } from './names.js';
-import { downloadChoices, enhanceFormatsInOrder } from './options.js';
+import { downloadChoices, enhanceFormatsInOrder, fineTuningChanges } from './options.js';
 import { embeddedCoverNote } from './cover.js';
 import { TASK_ICON } from '../job/index.js';
 
@@ -43,7 +43,7 @@ function loaded() {
     case 'job': {
       const name = shownName(src);
       const j = src.job;
-      return { title: name.title, meta: join(name.artist, fmtDuration(j.source?.duration_s)), art: own || j.source?.thumbnail, iconName: 'music' };
+      return { title: name.title, meta: join(name.artist, src.sourceFile?.name, fmtDuration(j.source?.duration_s)), art: own || j.source?.thumbnail, iconName: 'music' };
     }
     default: return { empty: true };
   }
@@ -64,8 +64,10 @@ function plan() {
       const keys = enhanceFormatsInOrder(e.formats);
       const selected = keys.map((k) => all.find((f) => f.key === k));
       const formats = selected.map((f, i) => f?.label || keys[i]);
+      const tuned = fineTuningChanges();
       return [join(e.recipe === 'auto' ? 'Detect type' : RECIPE_LABELS[e.recipe], PROCESSING_LABELS[e.quality]),
-        formats.join(', ') || null, embeddedCoverNote(selected, e.embed_cover)];
+        formats.join(', ') || null, embeddedCoverNote(selected, e.embed_cover),
+        tuned ? `Fine-tuning: ${tuned} change${tuned === 1 ? '' : 's'}` : null];
     }
     case 'separate': {
       const s = state.separate;

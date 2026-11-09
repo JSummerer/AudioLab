@@ -123,7 +123,7 @@ def test_downloader_command_uses_the_selected_runtime_and_app_cache(tmp_path, mo
     monkeypatch.setattr(youtube, 'ffmpeg_dir', lambda: '/selected ffmpeg')
     monkeypatch.setattr(youtube, '_deno_path', lambda: '/selected deno')
     SETTINGS.get().cookies_browser = 'firefox'
-    command = youtube.ytdlp_cmd()
+    command = youtube.ytdlp_cmd(sign_in=True)
     prefix = runtime.downloader_command()
     assert command[: len(prefix)] == prefix
     assert command[command.index('--cache-dir') + 1] == str(tmp_path / 'data' / 'cache' / 'yt-dlp')

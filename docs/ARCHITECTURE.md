@@ -16,7 +16,7 @@ line and the Docker image.
               └──────┬───────┘                                │
                      └──────────────┬─────────────────────────┘
                              ┌──────▼──────┐
-                             │   tasks/    │ download · enhance · separate · analyze
+                             │   tasks/    │ download · enhance · separate · analyze · import
                              └──────┬──────┘
      ┌────────────┬─────────────────┼──────────────┬──────────────┐
 ┌────▼────┐ ┌─────▼─────┐   ┌───────▼──────┐ ┌─────▼─────┐ ┌──────▼─────┐
@@ -39,11 +39,11 @@ line and the Docker image.
 | `cli.py` | `audiolab [app\|serve\|download\|enhance\|separate\|analyze\|doctor\|update\|install-ai\|shortcut]` |
 | `api/` | FastAPI app (`app.py`: `create_app`, lifespan, error format, static UI), `security.py` (local-mode Host/Origin checks, token, upload cap), `state.py` (per-app runtime state: manager, live-event hub, caches, health), `jobs.py` (probe + job routes, files, ZIP, excerpt PCM), `status.py` (health, settings, storage, diagnostics, maintenance), `events.py` (SSE), `library.py` (Library list and entries, files, PCM chunks for comparing, removal) |
 | `jobs.py` | Job records, FIFO queue, worker threads, cancel/retry, restart recovery, event fan-out, the one bounded `shutdown()` |
-| `library.py` | The Library: one JSON record per finished result (Save, Enhance, Split) in `<data>/library/`, independent of job retention; keeps the acquired original of Enhance jobs for comparing (hard link, or a copy where links are impossible, named by its content's SHA-1; setting `keep_originals`); groups versions of one recording (video id, link, or an upload's content); picks the result an entry is compared with (`compare_file_id`, lossless first); removing an entry never deletes output files |
+| `library.py` | The Library: one JSON record per finished result (Save, Enhance, Split) in `<data>/library/`, independent of job retention; keeps the acquired original of Enhance jobs for comparing (hard link, or a copy where links are impossible, named by its content's SHA-1; setting `keep_originals`); groups versions of one recording (video id, link, or an upload's content); picks the result an entry is compared with (`compare_file_id`, lossless first); removing an entry keeps output files unless the user opts in to the Trash |
 | `context.py` | `Progress` (scoped progress, journal notes, cancellation, child-process registry) and `TaskContext` (stages of one job) |
-| `tasks/` | The four user-facing tasks (`validate`, `stages`, `run`); `common.py` acquires sources and publishes outputs; `preview.py` runs bounded Library section previews through the existing Enhance queue |
+| `tasks/` | The four user-facing tasks (`validate`, `stages`, `run`) and `importing.py`, the `import` task behind Library "Add a file" (`import` is a Python keyword, so `tasks/__init__.py` maps task names to modules); `common.py` acquires sources (reusing a kept original for a link when allowed) and publishes outputs; `preview.py` runs bounded Library section previews through the existing Enhance queue |
 | `media/` | `proc.py` (cancellable subprocesses), `ffmpeg.py` (system or bundled ffmpeg, probing incl. embedded tags, `decode_pcm`: 48 kHz chunks on a 1/25 s grid that join like one decode; WebM/Matroska's millisecond timestamps get a seek offset measured once per file), `youtube.py` (yt-dlp + deno, the artist/title rule for links, tracks from chapters/tracklists, self-repair update, browser sign-in), `export.py` (format matrix, the file types that can be added, tags, cover art, sample-accurate track cutting) |
-| `analysis/` | `profile.py` (loudness, true peak, LRA, bandwidth, bands, alerts), `levels.py` (bounded whole-reference level scan), `classify.py` (content type + reasons), `key.py` (musical key estimate) |
+| `analysis/` | `profile.py` (loudness, true peak, LRA, bandwidth, bands, alerts), `levels.py` (bounded whole-reference level scan), `tone.py` (how the tonal balance moves, chart data from the same scan), `classify.py` (content type + reasons), `key.py` (musical key estimate) |
 | `recipes/` | `Recipe` + `ChainParams`, `resolve()` turns recipe + measurements + user overrides into parameters *with reasons*; `chain.render()` is the single mastering chain |
 | `ai/` | Lazy source torch/demucs detection and windowed separation; `install.py` installs source packages, `managed.py` owns the catalog-pinned packaged runtime lifecycle selected by `api/state.py`, `client.py` invokes the isolated helper, `worker.py` runs/probes it and loads local offline weights |
 | `dsp/` | Float32 signal-processing blocks; `scratch.py` reuses disk-backed full-rate buffers for Enhance beyond 10 minutes; `timeline.py` collects bounded reduction highlights without retaining full-rate controls |
@@ -54,7 +54,7 @@ line and the Docker image.
 | `diagnostics.py` | Log file setup and the plain-text system/job report for bug reports (`/api/diagnostics`, `audiolab doctor --report`) |
 | `errors.py` | `AudioLabError(message, hints, fix, detail)` — every user-visible failure carries plain-language hints, an optional one-click fix and the raw text behind it (`detail`, for bug reports only); `storage_error()` words a full disk or a folder AudioLab may not write to. Anything else unexpected becomes a JSON 500 with hints (`api/app.py`) or "Something went wrong while …" on the job (`jobs.py`) |
 | `util.py` | File-name safety, unique paths, hard links, media types, and human-readable sizes and durations |
-| `system.py` | **The OS layer** — data/log folders, whether a folder is writable, reveal in Finder/Explorer, notifications, keep-awake, single-instance lock, process groups, memory size, file-name limits, app identity and shortcut. A leaf module with no third-party dependencies |
+| `system.py` | **The OS layer** — data/log folders, whether a folder is writable, reveal in Finder/Explorer, move to the Trash (only on the user's opt-in), notifications, keep-awake, single-instance lock, process groups, memory size, file-name limits, app identity and shortcut. A leaf module with no third-party dependencies |
 | `assets/` | App icon |
 | `web/` | The UI (see below) |
 
@@ -139,11 +139,15 @@ fonts/                the bundled title serif (Source Serif 4, OFL) for browsers
 js/main.js            boot, global wiring (paste or drop a link anywhere, drop files, deep links ?url=&task=, notice banner)
 js/router.js          hash routes #/new · #/activity · #/job/<id> · #/library[/<entry id>] · #/settings[/<section>]
 js/api.js store.js    HTTP client + token · app state, event bus, live updates (SSE, polling fallback)
-js/dom.js ui.js       tiny DOM helpers and icons · shared controls (toasts, dialogs, meters, segmented…)
+js/dom.js ui.js       tiny DOM helpers and icons · shared controls (toasts, dialogs, menus, meters, segmented…)
 js/player.js          job page players: stems, tracks, one file (says when this browser can't play its format)
 js/compare.js         the compare player (job page and Library): original | result sample-locked on one Web Audio clock from
                       server-decoded PCM chunks, crossfaded switch, whole-song volume match · plain Library file player
 js/actions.js         job actions shared by views (cancel, retry, remove, clear finished…)
+js/quick-preview.js   Library "Preview changes": a 5–30 s passage of the kept original with changed settings, then Apply
+js/eq.js              custom EQ as text (parse/format bands, the two presets, the shared editor in Fine-tuning and previews)
+js/section-eq.js      section EQ: the same checks as the server, the section editor (Fine-tuning, previews)
+js/tone-chart.js      the tone timeline chart (Check, Enhance, Library previews; a click picks a preview start)
 js/views/new/         the "New" view: source (link/files/playlist), names, cover, task + options, tracks, start, and the
                       sleeve beside them (what is being made + the start row; a bottom bar when narrow)
 js/views/activity.js  the job list (in progress, then finished by day; filters)
@@ -305,7 +309,8 @@ audio array to the chain rather than retaining a second obsolete buffer through 
 | Native WebKit website data | macOS-managed default Cocoa website store under the app identity; separate from app data (see [Mac cleanup](MACOS.md#uninstall)) |
 | Source-mode AI models | Hugging Face cache (`HF_HOME` / `HF_HUB_CACHE`) and/or Torch hub (`~/.cache/torch`, `TORCH_HOME`); can be shared with other software |
 
-Output is user-owned and is never deleted by removing jobs, Library records or the app. App data also
+Output is user-owned and is never deleted automatically: removing jobs or Library records keeps it, unless
+the user opts in to moving a result's files to the system Trash (Remove from Library, Keep only this version). App data also
 contains user audio copies: do not treat the whole folder as a disposable cache. Settings → About
 opens the actual app data/log folders for optional manual cleanup. The app has no recursive uninstall
 endpoint; a chosen output folder can overlap a custom data path, so automatic root deletion would be

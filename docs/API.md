@@ -27,7 +27,7 @@ local AudioLab. With a token these checks are off (the token already blocks both
 ```jsonc
 {
   "id": "j_20261005_192501_ab12cd",
-  "task": "download",              // download | enhance | separate | analyze
+  "task": "download",              // download | enhance | separate | analyze | import (only POST /api/library/import)
   "status": "running",             // queued | running | done | failed | cancelled
   "title": "Artist - Song",        // best known title (probe → filename → id). A link started without a known
                                    // title shows the link until the job has looked it up; then this changes (a `job` event)
@@ -73,7 +73,14 @@ local AudioLab. With a token these checks are off (the token already blocks both
                                    // what "Save cover to folder" (POST /api/jobs/{id}/cover) saves (Save,
                                    // Enhance, Split; older results lack the key)
   "library_id": "j_…",             // set when the result was recorded in the Library (= the job id; Save,
-                                   // Enhance and Split results with files) — see Library below
+                                   // Enhance and Split results with files, imports) — see Library below
+  "reused_original": true,         // a link job that used the recording's kept original instead of
+                                   // downloading it again (setting `reuse_originals`), else absent
+  "stream": {"format_id": "251", "codec": "opus", "kbps": 99, "sample_rate": 48000, "channels": 2},
+                                   // link jobs: the stream the site delivered (from the downloader; a reused
+                                   // original carries the stream of its download; any value may be null), else absent
+  "markers": [{"n": 1, "title": "Intro", "start_s": 0.0, "end_s": 312.4}],  // Check and Enhance: the source's
+                                   // chapters (as Library `markers`), [] or absent when it has none
   "tracks_dir": "/Users/me/Music/AudioLab/Set (Tracks)",               // split_tracks only, else absent
   "previews": [                                                       // things the UI can play inline
     {"key": "original", "label": "Original"},                         // enhance: the before/after excerpt
@@ -112,6 +119,13 @@ and they may still list a `difference` preview ("Only the changes", gone in 2.4)
 `is_silent`, `dc_offset`, and the source's own format: `samplerate`, `channels`, `source_audio_codec`,
 `source_bitrate_kbps` (the analysis itself runs on a 48 kHz stereo copy),
 `alerts` (`[{"level": "ok|info|warning|danger", "title", "message"}]`).
+`tone_timeline` (recordings longer than 3 minutes, from the whole-file level scan; else absent):
+`{"step_s": 60, "bands": [{"key": "deep_bass", "label": "Deep bass", "hz": [30, 80]}, …], "values": [[0.4, -0.2, …], null, …],
+"basis": "…"}` — seven bands (deep bass 30–80 Hz, bass 80–200, low mids 200–500, mids 0.5–2k, upper mids 2–6k,
+highs 6–12k, top end 12–20k). `values[i]` belongs to `i * step_s`: each band's share of that stretch minus its
+median share over the recording, in dB (0 = the recording's typical balance; 0.1 dB steps); `null` for stretches
+more than 20 dB below the typical level (pauses, fades). `step_s` grows past 60 s so there are at most 600 points.
+It shows how the balance moves; it does not judge it (a change is often the music).
 Loudness, LRA, true peak, clipping, DC and programme-level percentiles cover the whole reference
 (`level_analysis_basis`). Long recordings still use bounded excerpts for spectrum, stereo, key and
 classifier features (`analysis_basis` describes these). If those excerpts are silent, the whole-file
@@ -162,7 +176,17 @@ not proof that a file has not been edited later or that every decoder will produ
 `adaptive_lowmid` (`"auto"|"off"|"strong"`: whole-recording relative low-mid control, at most 1.5 dB
 in Auto or 3 dB in Strong; bypassed while AI stem EQ runs), `harmonics` (`"on"|"off"`, default off;
 independent of `bass_db`),
-`sample_rate` (44100 | 48000 | 96000), `model` (an `ai_models` key, used with `quality: "best"`).
+`sample_rate` (44100 | 48000 | 96000), `model` (an `ai_models` key, used with `quality: "best"`),
+`eq` (custom EQ: up to 8 peaking bands `[{"hz": 160, "db": -3.3, "q": 2.9}, …]`; clamped to 20–20000 Hz,
+−6…+6 dB and Q 0.3–8, bands without gain dropped; `[]` = none, so a Library preview or apply can clear a
+saved EQ; a band's Q means what it means in a DAW bell; applied after the tone shaping, before compression,
+loudness and peak control; ignored by Volume only).
+`section_eq` (EQ for parts of the recording: up to 8 sections `[{"start_s": 0, "end_s": 2400, "fade_s": 5,
+"bands": [{"hz": 14000, "db": -2, "q": 0.7}, …]}, …]` in the recording's own time; bands as in `eq`; `fade_s` 0.5–60
+(default 5) is the crossfade inside each boundary; a section is at least 10 s and longer than two fades;
+sections are sorted and must not overlap, else the whole option is invalid; sections without bands are dropped;
+`[]` = none, so a Library preview or apply can clear saved sections; applied after `eq`, before compression,
+loudness and peak control; ignored by Volume only).
 `quality: "best"` uses the AI stage of the recipe (stem-aware EQ for music, voice isolation for speech)
 and requires the AI pack.
 The UI calls these modes **Volume only**, **Adaptive**, and **AI stems**; the API values remain
@@ -267,7 +291,7 @@ automatically replacing the saved file.
 | `PUT /api/settings` | partial Settings JSON | Settings. `400` with detail (nothing is changed) for an invalid value: `output_dir` not a full path ("Enter a full folder path, for example ~/Music/AudioLab.") or not writable, a switch that isn't `true`/`false` (also `"true"`/`"false"`, `1`/`0`), a format key not in Health `formats`, an empty `enhance_formats`, another fixed choice that isn't listed below. Unknown keys are ignored. Works while the current output folder is unreachable |
 | `POST /api/probe` | `{"url": "…"}` | Probe (below). `400` with detail for bad links |
 | `POST /api/tracklist` | `{"text": "…", "duration_s": 3490}` (`duration_s` optional; alias `duration`) | Tracklist preview (below) |
-| `POST /api/jobs` | multipart: `task`, `options` (JSON string), and one of `url`, `urls` (playlist items, see below), `file` (an extension from Health `upload_extensions`, else `400`), `source_job` (id of an earlier job — reuse its source and own cover, e.g. "re-run as Concert" or "now split it"; a link is looked up again when it runs; `404` unknown job, `410` its file is gone → upload again); optional `cover` (image file, see "Cover image" above; `413` over 15 MB) | `{"jobs": [Job, …]}` |
+| `POST /api/jobs` | multipart: `task`, `options` (JSON string), and one of `url`, `urls` (playlist items, see below), `file` (an extension from Health `upload_extensions`, else `400`), `source_job` (id of an earlier job — reuse its source and own cover, e.g. "re-run as Concert" or "now split it"; a link is looked up again when it runs; `404` unknown job, `410` its file is gone → upload again), optionally with `source_file` (a file id of that job's result: the new job's source is that file instead, e.g. "Check the result"; `404` no such file, `410` it is gone, `400` not an audio file such as a cover); optional `cover` (image file, see "Cover image" above; `413` over 15 MB) | `{"jobs": [Job, …]}` |
 | `GET /api/jobs` | – | `{"jobs": [Job, …]}` newest first |
 | `GET /api/jobs/{id}` | – | Job |
 | `GET /api/jobs/{id}/journal` | – | `{"events": [{"ts", "kind", "stage", "message", "detail"}]}` |
@@ -282,10 +306,13 @@ automatically replacing the saved file.
 | `POST /api/jobs/{id}/cover` | – | "Save cover to folder": writes the finished job's cover into its output folder, exactly as `save_cover` does, adds it to `result.files` (saved, and a `job` event) and to its Library entry; returns that file (a Result.files entry). Idempotent: a cover file that is still there is returned as it is (one that was moved or deleted is written again, same id). `404` unknown job, or no output folder (not finished, or the folder is gone); `409` "This recording has no cover image to save."; fetching the thumbnail failed → `400` with detail |
 | `GET /api/library` | – | `{"groups": [LibraryGroup, …], "count": n}` — see Library below |
 | `GET /api/library/{id}` | – | one LibraryEntry (with `job_exists`). `404` unknown |
+| `GET /api/library/{id}/tone-timeline` | – | the entry's `tone_timeline` (as in the Result analysis). `404` unknown entry or none |
 | `GET /api/library/{id}/pcm/{file_id}` | `?offset=<frame>&frames=<n>` | PCM chunk (below) of one file of the entry (`original` or a result). `404` unknown entry/file, `410` moved or deleted, `400` off the grid |
 | `GET /api/library/{id}/files/{file_id}` | `?download=1` optional | one file of a Library entry (`file_id` from its `files`, incl. `original`): inline with Range support for the players, or as an attachment with `download=1`. `404` unknown entry/file, `410` moved or deleted |
 | `POST /api/library/{id}/reveal` | – | opens the entry's output folder (only when `health.local`): `{"ok": true}`, or `{"ok": true, "fallback": "output"}` when that folder is gone and the output root was opened instead (say so). Neither there → `400` "This folder isn't there any more: <path>." with hints. Never creates a folder. `404` unknown |
-| `DELETE /api/library/{id}` | – | `{"deleted": id, "original_removed": bool, "freed_bytes": b}` — forgets the entry only: output files are never touched; its kept original is deleted with it unless another entry still uses that file. `404` unknown |
+| `DELETE /api/library/{id}` | `?trash_files=1` optional | `{"deleted": id, "original_removed": bool, "freed_bytes": b, "trashed": [names], "trash_failed": [names]}` — forgets the entry; its kept original is deleted with it unless another entry still uses that file. Output files stay unless the user opts in with `trash_files=1`: then the entry's files that still exist (results, tracks, saved cover, an imported file; an AudioLab output folder left empty — never an imported file's folder) go to the system Trash — never a permanent delete. `trashed`/`trash_failed` name the files (a file that can't go to the Trash stays where it is; a file another entry still uses stays and is in neither list). If the Trash is unavailable on this system: `409` with a plain message and hints, nothing removed. `404` unknown |
+| `POST /api/library/{id}/keep-only` | `{"trash_files": false}` | `{"kept": id, "removed": n, "trashed": [names], "trash_failed": [names]}` — "Keep only this version": forgets every other entry of the same `group` (their kept originals as for `DELETE`); with `trash_files: true` their files also go to the Trash, as for `DELETE` (results, tracks, saved cover, an imported file; an AudioLab output folder left empty). `409` as above, `404` unknown |
+| `POST /api/library/import` | `{"path": "/Users/me/Music/Master.wav", "group": "youtube:abc" (optional), "title": "…" (optional)}` | one queued Job of task `import` (only when `health.local`): reads the audio file where it is (no copy), measures its loudness and true peak over the whole file, then records a Library entry (task `import`, see Library). `group`: add it as a version of that recording, else its own content key. `400` when the path is not an existing audio file; `403` when not local |
 | `DELETE /api/library/{id}/original` | – | `{"id": id, "original_removed": bool, "freed_bytes": b}` — stops keeping the original of this entry's recording: **every entry of the same `group`** gets `original.kept: false` and their kept files are deleted (usually one; a file an entry of another recording still uses stays); the entries and their output files stay. `original_removed`: the recording had a kept original. Nothing kept → `false`/`0`. `404` unknown entry |
 | `DELETE /api/library/originals` | – | `{"deleted": n, "freed_bytes": b}` — "Delete kept originals" (Storage): deletes every kept original (only AudioLab's own files in that folder); the entries stay and are detached (`original.kept: false`, also if the same recording is kept again later) |
 | `POST /api/jobs/{id}/reveal` | – | opens the job's output folder (only when `health.local`): `{"ok": true}`; when it was moved or deleted, the output root instead: `{"ok": true, "fallback": "output"}` (say so); a job without a folder opens the output root (`{"ok": true}`). Neither there → `400` "This folder isn't there any more: <path>." with hints. Never creates a folder |
@@ -334,7 +361,7 @@ detail.
     "separate": [{"key": "wav16", "label": "WAV · 16-bit", "description": "…", "kind": "lossless", "ext": ".wav",
                   "facts": ["…"], "cover": false}]
   },
-  "format_notes": {"source": "YouTube audio is already compressed (about 130–160 kbps, 256 kbps with Premium): …"},
+  "format_notes": {"source": "YouTube audio is already compressed (about 100–160 kbps; up to 256 kbps with Premium on official music): …"},
   "ai_models": [{"key": "htdemucs", "label": "Standard", "description": "…"}]
 }
 ```
@@ -389,7 +416,7 @@ settings and kept originals; output files at their existing locations are separa
 ### Settings
 `{"output_dir", "download_format", "enhance_formats": [..], "separate_format", "ui_mode": "simple|advanced",
 "theme": "auto|light|dark", "keep_work_files": false, "embed_cover": true, "keep_originals": true,
-"auto_update_downloader": true,
+"reuse_originals": true, "auto_update_downloader": true,
 "cookies_browser": "" | "firefox" | "chrome" | "edge" | "brave" | "safari" | "chromium" | "opera" | "vivaldi",
 "locked": ["output_dir"]}`
 (`ui_mode`: the UI's "Show all options by default" — `advanced` = "More options" open and job details shown until
@@ -397,11 +424,17 @@ the user opens or closes them. Name kept for compatibility.)
 (`keep_originals`: "Keep originals for comparing" — Enhance results keep their original in the Library
 (see Library); off = new results keep none, their entry has `original.kept: false`; already kept ones stay.
 Split results no longer keep one (those kept before 2.4 stay until deleted).)
+(`reuse_originals`: "Reuse kept originals" — a link job (not Video) whose recording already has a kept original
+in the Library uses that file instead of downloading it again; the link is still looked up for its title and
+chapters. The job journal says so (`info` note) and the result has `"reused_original": true`. Only an original that a
+download of the link made is reused (never an imported file). Off = always download.)
 (`output_dir`: a full path (`~` is expanded); `""` = the default folder. The folder is not created on reading;
 `GET /api/settings` reports it even when it isn't reachable.)
-(`cookies_browser`: opt-in — downloads use that browser's YouTube sign-in, for age-restricted videos and
-"confirm you're not a bot" blocks. Only offered when `health.local`; Firefox works most reliably.
-Errors that need it carry `"fix": "use_cookies"`.)
+(`cookies_browser`: opt-in — the browser whose YouTube sign-in may be used. A link is always looked up and
+downloaded without it first; only when the site refuses (age check, "confirm you're not a bot", members only, a
+login) is it retried once with the sign-in, paced (yt-dlp `--sleep-requests`/`--sleep-interval`), because YouTube
+can block accounts that download a lot. Only offered when `health.local`; Firefox needs no OS prompt. Errors that
+need it carry `"fix": "use_cookies"`.)
 (`locked` lists keys pinned by environment variables — show them read-only.)
 (`auto_update_downloader`: retained as a preference across app replacements. It is effective only when
 `health.downloader.update_supported` is true; the packaged app never attempts an in-place package update.)
@@ -447,6 +480,11 @@ characters → `400`.
 Every job that finishes with files (Save, Enhance, Split — not Check) is recorded in the Library, which outlives
 the job (jobs expire after `AUDIOLAB_RETENTION_DAYS`, "Clear finished" removes them; the Library keeps its
 entries until they are removed with `DELETE /api/library/{id}`). Runs from the command line are not recorded.
+**Imported files** (`POST /api/library/import`) are entries of task `import` with one file of kind `"imported"`
+whose `path` is absolute (the file stays where it is), `loudness: {"original_lufs": null, "result_lufs": <measured>}`,
+`measured: {"integrated_lufs", "true_peak_dbtp", "duration_s"}`, no kept original, and the title from its tags or
+file name (or the request's `title`).
+They can be played, compared with other versions of their group and removed like any entry.
 New Enhance entries retain `processing: {requested, resolved, applied, metrics}` after job removal.
 `requested` holds validated recipe, quality, formats, advanced settings and cover/split switches;
 `resolved` holds `{recipe, params, decisions}` and, when available, `bandwidth`
@@ -504,7 +542,7 @@ A kept file is named by its content, so results with the same original share one
 // LibraryEntry: one finished result
 {"id": "j_20261006_101500_ab12cd",  // = the job id (stable; the job itself may be gone)
  "job_id": "j_20261006_101500_ab12cd", "job_exists": true,   // false once the job expired or was removed
- "task": "enhance",                 // download | enhance | separate
+ "task": "enhance",                 // download | enhance | separate | import
  "created_at": 1759740000.0,
  "title": "Song", "artist": "Artist",                        // as used for names and tags
  "source": {"kind": "url", "url": "…", "title": "…", "thumbnail": "…", "duration_s": 213.0},  // as Job.source
@@ -514,8 +552,13 @@ A kept file is named by its content, so results with the same original share one
  "loudness": {"original_lufs": -15.2, "result_lufs": -12.5}, // measured (Enhance), else null
  "markers": [{"n": 1, "title": "Artist – Track", "start_s": 0.0, "end_s": 312.4}],  // tracks/chapters, [] if none
  "markers_source": "chapters",      // chapters | description | pasted | null
+ "excerpt": {"start_s": 112.0, "duration_s": 45.0},  // Enhance: the loud passage the comparison starts at (else absent)
+ "has_tone_timeline": true,         // Enhance and import with a tone timeline (else absent); the data itself:
+                                    // GET /api/library/{id}/tone-timeline, so the list stays small
+ "stream": {…},                     // link entries: Result `stream` (else absent)
  "original": {"kept": true, "size_bytes": 3456789, "format": "webm", "codec": "opus",  // size/format/codec: null
-              "url": "https://youtu.be/…"},  // when not kept · url: the link (null for uploads), to fetch it again
+              "url": "https://youtu.be/…",   // when not kept · url: the link (null for uploads), to fetch it again
+              "key": "3f9a…"},               // the kept file's content id (entries sharing a file share it), else null
  "compare_file_id": "f1",           // the result the kept original is compared with: the first lossless one that
                                     // still exists (WAV/FLAC/ALAC), else the first one; null without a kept original
                                     // (Save, Split, not kept, dropped) or when no result file is left

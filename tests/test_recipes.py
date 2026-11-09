@@ -314,3 +314,47 @@ def test_enhance_result_has_an_excerpt_and_no_difference(tmp_path, monkeypatch):
         report = {'params': {'volume_only': True}, 'limiter': {'engaged': engaged, 'max_gr_db': 1.9}}
         lines = _summary(kind, recipe, True, before, after, report, tmp_path, [])
         assert line in lines and (('1.9 dB' in ' '.join(lines)) is engaged)
+
+
+def test_custom_eq_is_validated_resolved_and_ignored_by_volume_only():
+    from audiolab.tasks import enhance
+
+    bands = [{'hz': 160, 'db': -3.31, 'q': 2.865}, {'hz': 280, 'db': 1.52, 'q': 2.025}, {'hz': 5, 'db': 9, 'q': 99}]
+    assert enhance.eq_bands(bands) == [
+        {'hz': 160.0, 'db': -3.31, 'q': 2.87},
+        {'hz': 280.0, 'db': 1.52, 'q': 2.02},
+        {'hz': 20.0, 'db': 6.0, 'q': 8.0},
+    ]
+    assert enhance.eq_bands([{'hz': 100, 'db': 0, 'q': 1}]) == []  # no gain, no band
+    huge = [{'hz': 10**400, 'db': 1, 'q': 1}]
+    for bad in (
+        '160 Hz',
+        [{'hz': 160, 'db': -3}],
+        [{'hz': 1, 'db': True, 'q': 1}],
+        [{'hz': 1, 'db': 1, 'q': 1}] * 9,
+        huge,
+    ):
+        assert enhance.eq_bands(bad) is None
+    p, decisions = resolve('club', {'integrated_lufs': -14.0, 'lra': 5.0}, advanced={'eq': bands[:2]})
+    assert p.eq_bands == bands[:2]
+    (eq,) = [d for d in decisions if d['key'] == 'eq']
+    assert eq['value'] == '160 Hz −3.3 dB Q2.865 · 280 Hz +1.5 dB Q2.025' and eq['source'] == 'user'
+    p, _ = resolve('club', {'integrated_lufs': -14.0}, quality='light', advanced={'eq': bands[:2]})
+    assert p.eq_bands == []
+
+
+def test_mono_sources_skip_the_mono_bass_fold():
+    p, decisions = resolve('club', {'integrated_lufs': -14.0, 'lra': 5.0, 'stereo': {'is_mono': True}})
+    assert p.mono_bass_hz is None
+    assert any(d['key'] == 'mono_bass' and 'effectively mono' in d['why'] for d in decisions)
+
+
+def test_custom_eq_survives_in_saved_library_settings():
+    from audiolab import processing
+
+    bands = [{'hz': 160.0, 'db': -3.31, 'q': 2.87}]
+    options = {'recipe': 'club', 'quality': 'standard', 'formats': ['wav16'], 'advanced': {'eq': bands}}
+    snap = processing.snapshot(options, {'processing': {'params': {'target_lufs': -13.0, 'eq_bands': bands}}})
+    assert snap['requested']['advanced']['eq'] == bands and snap['resolved']['params']['eq_bands'] == bands
+    cleared = processing.snapshot({**options, 'advanced': {'eq': []}}, {'processing': {'params': {}}})
+    assert cleared['requested']['advanced']['eq'] == [] and 'eq_bands' not in cleared['resolved']['params']

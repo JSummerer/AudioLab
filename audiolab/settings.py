@@ -103,6 +103,7 @@ class UserSettings:
     keep_work_files: bool = False  # keep big intermediates (reference, stems) after success
     embed_cover: bool = True
     keep_originals: bool = True  # Library: keep the original of Enhance jobs for comparing
+    reuse_originals: bool = True  # a link job uses its recording's kept original instead of downloading again
     auto_update_downloader: bool = True  # on a 'site changed' error: update yt-dlp once and retry
     cookies_browser: str = ''  # '' | firefox | chrome | edge | brave | safari | chromium | opera | vivaldi
 

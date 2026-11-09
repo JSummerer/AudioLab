@@ -2,6 +2,59 @@
 
 ## Unreleased
 
+- Check and Enhance show a tone timeline for recordings longer than 3 minutes: how deep bass, mids, top end
+  and four more bands move against the recording's own typical balance, minute by minute, from the whole
+  file. It shows the balance without judging it: on two DJ sets and a concert, changes of 2–5 dB lasting
+  many minutes were common, and they are often the music itself.
+- Section EQ for experts (Fine-tuning and Library previews): EQ bands for chosen parts of a recording,
+  faded in and out at their edges, for example a gentler top end for a brighter first part.
+- Library: removing a version can also move its files to the Trash (off by default; files can be put back
+  from the Trash), and "Keep only this version" removes the other versions of a recording the same way.
+- Library: "Add a file…" adds a file from your disk where it is (no copy), measures its loudness, and can join
+  a recording as another version, so it can be compared at matched volume with AudioLab's versions.
+- Links whose recording already has a kept original reuse that file instead of downloading it again
+  (Settings → Reuse kept originals, on by default).
+- The YouTube sign-in is used only when YouTube refuses a video without it, and then paced, never for ordinary
+  videos: YouTube can block accounts that download a lot. Settings says a spare Google account is safer.
+- The tone timeline marks a link's chapters, and section EQ can suggest bands for a part you pick: half of its
+  difference from the recording's typical balance, at most −2/+1 dB, never a boost in the highs.
+- Results and the Library show the stream a site delivered (e.g. "Opus · 99 kbps · 48 kHz · stereo").
+- After Enhance, "Check the result" checks the finished file; "Check the original" checks the source.
+- Library: a search field, Newest/Largest sorting and a totals line; the less common actions of a version
+  (Show in Finder, Open job, Keep only this version, Remove) moved into a ⋯ menu. The Library loads faster:
+  tone timelines are fetched only when a preview shows them.
+- Enhanced files' tags tell versions apart: "(Enhanced 2)", "(Enhanced 3)" … in the title, and a comment line with
+  the AudioLab version, recipe, loudness target and date. File and folder names are unchanged.
+- Format presets are named by destination ("USB stick, TV & car", "iPhone & Apple Music") and remembered per task.
+
+- Long recordings (20 minutes or more) choose club, dense or wide dynamics from their typical 30-second
+  peak-to-loudness and 3-minute loudness range, not from whole-file loudness range and absolute level.
+  A DJ set's level drift between tracks no longer reads as concert dynamics, so Auto applies the club
+  loudness and glue instead of leaving the set nearly untouched. Shorter pieces keep the previous rule.
+  Calibrated on two DJ sets and one concert; listening preference still needs evidence.
+- The rumble filter is a 24 dB/octave zero-phase filter, at 20 Hz for DJ sets and music (speech keeps
+  60 Hz). The previous one was a soft first-order design at 25 Hz that also took 2.3 dB at 45 Hz and
+  1.4 dB at 60 Hz, cutting kick and sub-bass.
+- Effectively mono recordings (two identical channels) skip the mono-bass step and say so; the analysis
+  calls them "effectively mono" instead of "identical".
+- Custom EQ for experts in Fine-tuning and in Library previews: up to 8 bell bands typed as text
+  (e.g. 160 Hz −3.3 dB Q 2.9), with two starting presets, Sub focus and Clean upper bass. Q values
+  match a DAW's bell.
+- Library previews also offer the loudness target and glue compression, and accept times as mm:ss.
+  Apply to full recording keeps the cover art of the version it starts from.
+- Library versions show what they are under their title (loudness, compression, custom EQ, an unusual
+  sample rate, and which settings you chose), so two Enhance versions no longer look identical. The Library
+  comparison starts at the same loud passage as the job page. New's summary counts fine-tuning changes.
+  The sample-rate note says 48 kHz suits TVs, phones and most players and 44.1 kHz is for CDs.
+- Library can compare two versions of one recording at matched volume ("Compare versions"), and says
+  when versions differ by more than 1 dB in loudness, because louder often sounds better at first.
+- WAV exports of 4 GB or more (for example a 2 h 40 min set at 96 kHz/24-bit) are written as RF64 with a
+  warning instead of a WAV whose header cannot describe the size. FAT32 USB sticks cannot hold such files.
+- The YouTube quality note says about 100–160 kbps (a long mono set measured 99 kbps), and that Premium's
+  256 kbps applies only to official music videos and Art Tracks.
+- "Restore highs" is now called "Brighten muffled highs", to say what it does: it only acts on files
+  whose highs are cut off and adds new harmonics.
+
 ## 2.4.0b5 (2026-11-06, public beta)
 
 - Changes timeline in comparison shows measured low-mid, de-esser, compressor and limiter reduction

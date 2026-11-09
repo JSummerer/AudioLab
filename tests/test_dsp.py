@@ -268,3 +268,24 @@ def test_long_steps_offer_cancellation_points():
             assert len(calls) >= 6, (name, len(calls))  # per block, not once per call
         with pytest.raises(Cancelled):
             step(stop)
+
+
+def test_zero_phase_bell_matches_a_daw_bell_and_rumble_filter_keeps_the_kick():
+    """The g/2 design run forward-backward has the single DAW biquad's response, so Pro-Q style Q values
+    carry over unchanged. The 20 Hz rumble filter leaves 45 Hz (kick sub) within half a dB."""
+    import math
+
+    from scipy.signal import sosfreqz
+
+    f = np.geomspace(20, 2000, 4000)
+    for fc, g, q in [(160, -3.31, 2.865), (45, 1.0, 3.1)]:
+        _, half = sosfreqz(peak_fq(fc, g, q, SR), worN=f, fs=SR)
+        a, w0 = 10 ** (g / 40), 2 * math.pi * fc / SR
+        alpha = math.sin(w0) / (2 * q)
+        b = np.array([1 + alpha * a, -2 * math.cos(w0), 1 - alpha * a])
+        den = np.array([1 + alpha / a, -2 * math.cos(w0), 1 - alpha / a])
+        _, full = sosfreqz(np.concatenate([b / den[0], den / den[0]])[None], worN=f, fs=SR)
+        assert np.abs(40 * np.log10(np.abs(half)) - 20 * np.log10(np.abs(full))).max() < 0.02
+    _, h = sosfreqz(highpass_fq(20.0, sr=SR), worN=[20.0, 45.0, 60.0], fs=SR)
+    db = 40 * np.log10(np.abs(h))
+    assert db[0] == pytest.approx(-6.02, abs=0.05) and db[1] > -0.5 and db[2] > -0.15

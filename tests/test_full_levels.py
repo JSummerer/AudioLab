@@ -94,3 +94,71 @@ def test_extreme_finite_float_audio_keeps_level_readings_json_safe(tmp_path):
     json.dumps(asdict(scan), allow_nan=False)
     assert scan.percentiles['noise_floor_db'] == pytest.approx(377.0, abs=0.1)
     assert scan.percentiles['snr_db'] == pytest.approx(0.0, abs=0.1)
+
+
+def _energy(lufs):
+    return 10.0 ** ((np.asarray(lufs, dtype=np.float64) + 0.691) / 10.0)
+
+
+def test_density_ignores_slow_drift_between_sections():
+    """A long set whose level steps between tracks has a wide whole-file range but dense sections."""
+    from audiolab.dsp import loudness
+
+    rng = np.random.default_rng(1)
+    steps = np.repeat(np.tile([-13.0, -19.0], 5), 1800)  # 30 min of 100 ms bins, a level step every 3 min
+    bins = _energy(steps + rng.normal(0.0, 0.5, steps.size))
+    peaks = 10.0 ** ((steps + 10.0) / 20.0)
+    density = loudness.programme_density(bins, peaks)
+    whole = loudness._gated_range(
+        -0.691 + 10 * np.log10(np.lib.stride_tricks.sliding_window_view(bins, 30)[::10].mean(axis=1))
+    )
+    assert whole > 5.5 and density['section_lra'] < 2.0
+    assert density['peak_to_loudness_db'] == pytest.approx(10.0, abs=0.6)
+    assert loudness.programme_density(bins[:3000], peaks[:3000]) is None  # under two sections
+
+
+@pytest.mark.parametrize(
+    ('plr', 'section', 'lufs', 'kind'),
+    [
+        (10.9, 6.1, -15.9, 'club'),
+        (10.3, 4.7, -12.3, 'club'),
+        (13.0, 7.2, -13.8, 'concert'),
+        (7.5, 2.5, -13.0, 'festival'),
+        (10.0, 4.0, -10.5, 'festival'),
+    ],
+)
+def test_long_recordings_judge_density_not_absolute_loudness(plr, section, lufs, kind):
+    """Measured: two DJ sets and a 76-minute orchestral concert; then two dense cases."""
+    style = profile.dynamics_style(lufs, 7.5, {'peak_to_loudness_db': plr, 'section_lra': section, 'sections': 9})
+    assert style['type'] == kind
+    assert profile.dynamics_style(-15.9, 7.5)['type'] == 'concert'  # short pieces keep the original rule
+    if kind == 'club':
+        assert style['recommended_glue_comp'] and style['recommended_target_lufs'] >= -13.5
+
+
+def test_scan_measures_density_on_the_level_grid(tmp_path, monkeypatch):
+    from audiolab.dsp import loudness
+
+    monkeypatch.setattr(loudness, 'DENSITY_SECTION_S', 6)
+    monkeypatch.setattr(loudness, 'DENSITY_WINDOW_S', 3)
+    monkeypatch.setattr(levels, '_SCAN_BLOCK_S', 1)
+    x = _tone(24.05)
+    path = tmp_path / 'steady.wav'
+    sf.write(path, x, SR, subtype='FLOAT')
+    scan = levels.scan_levels(path, SR, len(x))
+    crest = 20 * np.log10(0.1) - programme_loudness(np.column_stack((x, x)))
+    assert scan.density['section_lra'] < 0.5
+    assert scan.density['peak_to_loudness_db'] == pytest.approx(crest, abs=0.3)
+
+
+def test_scan_reports_the_tone_timeline_on_its_own_grid(tmp_path, monkeypatch):
+    from audiolab.analysis import tone
+
+    monkeypatch.setattr(levels, '_SCAN_BLOCK_S', 1)
+    monkeypatch.setattr(tone, 'STEP_S', 2)
+    x = _tone(6.0)
+    path = tmp_path / 'steady.wav'
+    sf.write(path, x, SR, subtype='FLOAT')
+    timeline = levels.scan_levels(path, SR, len(x)).tone_timeline
+    assert timeline['step_s'] == 2 and len(timeline['values']) == 3
+    assert all(abs(v) < 0.2 for row in timeline['values'] for v in row)  # a steady tone: typical everywhere

@@ -7,7 +7,9 @@
 /* ==========================================================================
    Library
    ========================================================================== */
-.lib-reassure { margin-top: var(--s-1); color: var(--ink-3); font-size: var(--fs-small); }
+/* Search and sort: one row under the page head. */
+.lib-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-4); margin-bottom: var(--s-5); }
+.lib-search { flex: 1 1 220px; max-width: 320px; }
 
 .lib-groups { display: grid; grid-template-columns: minmax(0, 1fr); }
 .lib-group + .lib-group { margin-top: var(--s-5); padding-top: var(--s-6); border-top: 1px solid var(--line); }
@@ -46,6 +48,16 @@
 /* What was done, in ink and weight: blue is for things to click. */
 .lib-task { font-weight: 650; }
 .lib-when { color: var(--ink-2); font-size: var(--fs-small); white-space: nowrap; }
+/* What this version is (its loudness, compression, EQ; your settings or Auto): tells versions apart. */
+.lib-version { margin: 0; color: var(--ink-2); font-size: var(--fs-small); }
+/* Versions of one recording that differ in loudness: one plain line above them. */
+.lib-hint { margin: var(--s-3) 0 0; max-width: 72ch; color: var(--ink-2); font-size: var(--fs-small); }
+/* Import (a file already on this computer) and the Trash opt-in under a removal. */
+.lib-add-version { margin: var(--s-1) 0 0 -8px; }
+.lib-import .field + .muted, .lib-import .field-label { margin-top: var(--s-3); }
+.lib-import-error { margin: var(--s-2) 0 0; color: var(--danger); }
+.lib-import-error:empty { display: none; }
+.lib-trash { margin-top: var(--s-3); }
 .lib-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px var(--s-1); }
 @container content (max-width: 960px) {
   /* Not enough room beside the title for every version: the actions go under it, for all of them alike. */
@@ -81,6 +93,9 @@
 .lib-stage-head strong { min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lib-stage-head .icon-btn { margin-right: -6px; }
 .lib-preview-action { margin-top: var(--s-3); }
+/* Compare versions: which other version, above the player. */
+.lib-version-pick { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--s-1) var(--s-3); margin-bottom: var(--s-3); }
+.lib-version-pick > span { padding-top: var(--s-1); color: var(--ink-2); }
 
 @container content (max-width: 720px) {
   .lib-original { grid-template-columns: minmax(0, 1fr); }
@@ -197,7 +212,10 @@
 .quick-preview-number, .quick-preview-choice { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-2); }
 .quick-preview-number .field { width: var(--label-w); }
 .quick-preview-settings { display: grid; gap: var(--s-2); padding-top: var(--s-2); border-top: 1px solid var(--line); }
-.quick-preview-settings :is(.quick-preview-choice, .quick-preview-number) > span { min-width: var(--label-w); }
+.quick-preview-settings :is(.quick-preview-choice, .quick-preview-number, .quick-preview-eq) > span { min-width: var(--label-w); }
+.quick-preview-eq { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--s-1) var(--s-2); }
+.quick-preview-eq > span { padding-top: var(--s-2); }
+.quick-preview-eq .eq-edit { flex: 1 1 18rem; width: auto; }
 .quick-preview-listen { padding-top: var(--s-3); border-top: 1px solid var(--line); }
 .quick-preview .dialog-actions { flex-wrap: wrap; }
 

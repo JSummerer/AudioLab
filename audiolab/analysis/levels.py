@@ -9,7 +9,8 @@ import soundfile as sf
 
 from ..context import Progress
 from ..dsp.limiter import TRUE_PEAK_CONTEXT, true_peak_db
-from ..dsp.loudness import stream_programme_levels
+from ..dsp.loudness import programme_density, stream_programme_levels
+from .tone import block_bands, tone_timeline
 
 SILENCE_DBFS = -80.0  # sample peak below this is treated as silence
 _SILENCE_PEAK = 10.0 ** (SILENCE_DBFS / 20.0)
@@ -25,6 +26,8 @@ class ProgrammeLevels:
     dc_offset: float
     percentiles: dict[str, float]
     audible_span: tuple[int, int] | None
+    density: dict[str, float] | None = None  # programme_density (long recordings)
+    tone_timeline: dict | None = None  # analysis.tone: how the tonal balance moves (chart data)
 
 
 def stereo_samples(x: np.ndarray) -> np.ndarray:
@@ -85,7 +88,7 @@ def _windows(
 def scan_levels(path: Path, sr: int, frames: int, progress: Progress | None = None) -> ProgrammeLevels:
     """Measure complete programme levels with small overlapping reads and a single K-weighting pass."""
     progress = progress or Progress.null()
-    rms = []
+    rms, bin_peaks, bins, band_blocks = [], [], [], []
     tp, sample_peak = -480.0, 0.0
     clipped = 0
     channel_sum = np.zeros(2)
@@ -98,6 +101,8 @@ def scan_levels(path: Path, sr: int, frames: int, progress: Progress | None = No
             own = window[start:stop]
             channel_sum[:] += own.sum(axis=0, dtype=np.float64)
             rms.append(frame_rms_db(own, sr))
+            bin_peaks.append(_bin_peaks(own, sr // 10))
+            band_blocks.append(block_bands(own, sr))
             if window.any():
                 tp = max(tp, true_peak_db(window, span=span))
             clipped += flat_top_count(window, 0.999, span)
@@ -112,7 +117,7 @@ def scan_levels(path: Path, sr: int, frames: int, progress: Progress | None = No
             progress(90.0 * (offset + len(own)) / frames)
             yield own
 
-    lufs, spread = stream_programme_levels(samples(), sr, check_cancel=progress.check_cancel)
+    lufs, spread = stream_programme_levels(samples(), sr, check_cancel=progress.check_cancel, bins_out=bins)
     if sample_peak > 1.41:
         # Preserve the float-file rule: very hot waveforms are checked against their own global peak.
         clipped = sum(
@@ -127,4 +132,15 @@ def scan_levels(path: Path, sr: int, frames: int, progress: Progress | None = No
         dc_offset=float(np.abs(channel_sum).max() / max(1, frames)),
         percentiles=programme_percentiles(np.concatenate(rms) if rms else np.empty(0)),
         audible_span=None if first_audible is None else (first_audible, last_audible),
+        density=programme_density(bins[0], np.concatenate(bin_peaks)) if bins and bin_peaks else None,
+        tone_timeline=tone_timeline(np.array(band_blocks), _SCAN_BLOCK_S) if band_blocks else None,
     )
+
+
+def _bin_peaks(x: np.ndarray, size: int) -> np.ndarray:
+    """Sample peak per `size` frames (both channels); a short last bin counts on its own."""
+    full = len(x) // size * size
+    peaks = np.abs(x[:full]).reshape(-1, size * x.shape[1]).max(axis=1) if full else np.empty(0, np.float32)
+    if full < len(x):
+        peaks = np.append(peaks, np.abs(x[full:]).max())
+    return peaks

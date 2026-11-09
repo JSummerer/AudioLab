@@ -190,12 +190,6 @@
 .tl-status.is-stale { opacity: .55; }
 .tl-out { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-2); }
 .tl-out:empty { display: none; }
-.tl-errors {
-  margin: 0; padding: var(--s-2) var(--s-3) var(--s-2) 28px; display: grid; gap: 3px;
-  border-radius: var(--r-md); background: var(--danger-soft); box-shadow: inset 3px 0 0 var(--danger);
-  font-size: var(--fs-small); overflow-wrap: anywhere;
-}
-.tl-errors strong { color: var(--danger); }
 
 /* --------------------------------------------------------------------------
    The sleeve: the picture (a record slides out once something is loaded), the title, one

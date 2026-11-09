@@ -4,6 +4,8 @@ import { h, icon, fmtDuration, fmtNum, fmtSigned, confidenceWords } from '../../
 import { mediaUrl } from '../../api.js';
 import { showDetails } from '../../store.js';
 import { block } from '../../ui.js';
+import { toneChart } from '../../tone-chart.js';
+import { audioLine, streamLine } from '../../compare.js';
 
 export function loudnessWord(l) {
   if (l == null) return '–';
@@ -94,19 +96,9 @@ export function metricsBlock(r) {
         tr('Loudness range', 'LU', 'lra'))));
 }
 
-const CODEC_NAMES = {
-  mp3: 'MP3', aac: 'AAC', alac: 'Apple Lossless', flac: 'FLAC', opus: 'Opus', vorbis: 'Ogg Vorbis',
-  wmav2: 'WMA', ac3: 'AC-3', eac3: 'E-AC-3', pcm_s16le: 'PCM 16-bit', pcm_s24le: 'PCM 24-bit',
-  pcm_s32le: 'PCM 32-bit', pcm_f32le: 'PCM 32-bit float', pcm_s16be: 'PCM 16-bit', pcm_s24be: 'PCM 24-bit',
-};
-
 /** "MP3 · 128 kbps · 44.1 kHz · stereo" — the source's own format (details). */
 export function sourceLine(a) {
-  if (!a) return '';
-  const codec = a.source_audio_codec ? (CODEC_NAMES[a.source_audio_codec] || a.source_audio_codec.toUpperCase()) : null;
-  const ch = a.channels === 1 ? 'mono' : a.channels === 2 ? 'stereo' : a.channels ? `${a.channels} channels` : null;
-  return [codec, a.source_bitrate_kbps ? `${Math.round(a.source_bitrate_kbps)} kbps` : null,
-    a.samplerate ? `${fmtNum(a.samplerate / 1000, 1).replace('.0', '')} kHz` : null, ch].filter(Boolean).join(' · ');
+  return a ? audioLine({ codec: a.source_audio_codec, kbps: a.source_bitrate_kbps, rate: a.samplerate, channels: a.channels }) : '';
 }
 
 export function decisionsBlock(r) {
@@ -117,6 +109,18 @@ export function decisionsBlock(r) {
         h('th', { scope: 'row' }, d.label, h('span', { class: ['src-tag', `src-${d.source}`] }, d.source)),
         h('td', { class: 'num' }, d.value),
         h('td', { class: 'muted' }, d.why || ''))))));
+}
+
+/** "Source stream: Opus · 99 kbps · 48 kHz · stereo": what the site delivered (link jobs), or null. */
+export function streamNote(r) {
+  const line = streamLine(r?.stream);
+  return line ? h('p', { class: 'muted small metrics-note' }, `Source stream: ${line}`) : null;
+}
+
+/** How the tonal balance moves over the recording (recordings over 3 minutes have a timeline), with its chapters. */
+export function toneBlock(r) {
+  const chart = toneChart(r?.analysis?.tone_timeline, { markers: r?.markers });
+  return chart ? block('Tone over time', chart) : null;
 }
 
 export function spectrogramBlock(job, r) {
@@ -169,11 +173,13 @@ export function analyzeResult(job, r) {
       null, bpm ? `≈ ${Math.round(bpm)} BPM` : null, true),
     key ? verdict('Key', key, conf != null && conf < 0.4 ? 'rough estimate' : 'estimate', null,
       conf != null ? `${Math.round(conf * 100)} % confidence` : null) : null);
-  const out = [detailsBlock('Quality check', verdicts)];
+  const out = [detailsBlock('Quality check', verdicts, streamNote(r))];
   const alerts = (a.alerts || []).filter((x) => x.level !== 'ok');
   if (alerts.length) out.push(block('Findings', h('ul', { class: 'findings' }, alerts.map(findingRow))));
   const s = summaryBlock(r, 'Summary');
   if (s) out.push(s);
+  const tone = toneBlock(r);
+  if (tone) out.push(tone);
   if (r.spectrogram) out.push(spectrogramBlock(job, r));
   if (showDetails()) out.push(factsBlock(a));
   return out;

@@ -111,6 +111,7 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
             'previews': [{'key': 'file:f0', 'label': 'Play'}] if f['playable'] else [],
             'summary': summary,
             'warnings': [],
+            **common.link_result(acq),
             '_library': common.library_hints(acq),
         }
     )

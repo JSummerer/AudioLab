@@ -150,6 +150,7 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
         'previews': previews,
         'summary': summary,
         'warnings': warnings,
+        **common.link_result(acq),
         '_media': media,
         '_library': common.library_hints(acq),  # no original kept: nothing compares stems with it
     }

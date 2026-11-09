@@ -73,6 +73,7 @@ const PATHS = {
   key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M15 8l2 2"/>',
   pencil: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  more: '<circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/>',
   clipboard: '<rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4V3h6v1"/><path d="M9 10h6M9 14h6M9 18h3"/>',
   archive: '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9"/><path d="M10 13h4"/>',
   bookmark: '<path d="M6 3h12v18l-6-4-6 4z"/>',
@@ -106,6 +107,26 @@ export function fmtDuration(s) {
   s = Math.max(0, Math.round(s));
   const hh = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60), ss = s % 60;
   return hh ? `${hh}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}` : `${mm}:${String(ss).padStart(2, '0')}`;
+}
+
+/** "90", "1:30" or "1:02:03" (seconds may have decimals) → seconds, or NaN. */
+export function parseClock(text) {
+  const parts = String(text ?? '').trim().replace(',', '.').split(':');
+  const last = parts.at(-1);
+  if (parts.length > 3 || !/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(last) || !parts.slice(0, -1).every((p) => /^\d+$/.test(p))) return NaN;
+  const nums = parts.map(Number);
+  if (nums.slice(1).some((n) => n >= 60)) return NaN; // minutes and seconds after the first part
+  return nums.reduce((total, n) => total * 60 + n, 0);
+}
+
+/** Seconds → "m:ss" or "h:mm:ss", keeping milliseconds when there are any. */
+export function clockText(s) {
+  const ms = Math.floor(s * 1000);
+  const whole = Math.floor(ms / 1000);
+  const frac = ms % 1000 ? `.${String(ms % 1000).padStart(3, '0').replace(/0+$/, '')}` : '';
+  const hh = Math.floor(whole / 3600), mm = Math.floor((whole % 3600) / 60);
+  const sec = `${String(whole % 60).padStart(2, '0')}${frac}`;
+  return hh ? `${hh}:${String(mm).padStart(2, '0')}:${sec}` : `${mm}:${sec}`;
 }
 
 export function fmtDurationWords(s) {

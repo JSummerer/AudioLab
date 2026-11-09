@@ -107,6 +107,8 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
         'classification': kind,
         'analysis': analysis,
         'spectrogram': 'spectrogram' if 'spectrogram' in media else None,
+        'markers': common.chapters(acq),
+        **common.link_result(acq),
         'warnings': [a['message'] for a in analysis.get('alerts', []) if a.get('level') in ('warning', 'danger')],
         '_media': media,
     }

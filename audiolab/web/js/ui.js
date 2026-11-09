@@ -1,5 +1,5 @@
 // Shared UI pieces: toasts, dialogs (copy text, access token), form controls, info cards,
-// content blocks, callouts, meters and LEDs.
+// menus, content blocks, callouts, meters and LEDs.
 import { h, icon, clear, append } from './dom.js';
 import { setToken, getToken } from './api.js';
 
@@ -141,8 +141,11 @@ export function tokenDialog(onSaved) {
 let uid = 0;
 const nextId = (p) => `${p}-${++uid}`;
 
-/** Yes/no question in a modal dialog (Cancel has the focus); resolves true for the confirm button. */
-export function confirmDialog({ title, message, confirm }) {
+/**
+ * Yes/no question in a modal dialog (Cancel has the focus); resolves true for the confirm button.
+ * `extra`: more content under the message (an opt-in switch the caller reads afterwards).
+ */
+export function confirmDialog({ title, message, confirm, extra = null }) {
   closeInfo(); // its Esc listener would take the dialog's first Esc
   return new Promise((resolve) => {
     const titleId = nextId('confirm');
@@ -150,8 +153,9 @@ export function confirmDialog({ title, message, confirm }) {
       h('form', { method: 'dialog', class: 'dialog-form' },
         h('h2', { id: titleId }, title),
         h('p', { class: 'muted' }, message),
+        extra,
         h('div', { class: 'dialog-actions' },
-          h('button', { type: 'submit', class: 'btn btn-ghost', value: 'cancel' }, 'Cancel'),
+          h('button', { type: 'submit', class: 'btn btn-ghost', value: 'cancel', autofocus: true }, 'Cancel'),
           h('button', { type: 'submit', class: 'btn btn-primary', value: 'ok' }, confirm))));
     document.body.append(dlg);
     dlg.addEventListener('close', () => {
@@ -299,6 +303,63 @@ function onInfoKey(e) {
 function onInfoPointer(e) {
   // A click on the button itself toggles it (its click handler closes the card).
   if (openInfo && !openInfo.card.contains(e.target) && !openInfo.btn.contains(e.target)) closeInfo();
+}
+
+// ---------------------------------------------------------------------------
+// A menu behind a "⋯" button: items [{ label, icon?, onSelect }] (null items are left out).
+// Arrow keys, Home and End move; Esc closes and returns focus to the button; a click outside closes.
+// ---------------------------------------------------------------------------
+let openMenu = null; // { btn, menu }
+
+export function menuButton({ label, items }) {
+  const menu = h('div', { class: 'menu', role: 'menu', id: nextId('menu'), 'aria-label': label, hidden: true });
+  const btn = h('button', {
+    type: 'button', class: 'icon-btn icon-btn-sm', 'aria-label': label, title: label,
+    'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-controls': menu.id,
+  }, icon('more', 16));
+  const entries = items.filter(Boolean).map((it) => h('button', {
+    type: 'button', class: 'menu-item', role: 'menuitem', tabindex: '-1',
+    onclick: () => { closeMenu({ refocus: true }); it.onSelect(); },
+  }, it.icon ? icon(it.icon, 15) : null, it.label));
+  menu.append(...entries);
+  const open = () => {
+    closeMenu();
+    menu.hidden = false;
+    // Opens to the left of the button; to the right when that would leave the window.
+    menu.classList.remove('is-right');
+    menu.classList.toggle('is-right', (menu.getBoundingClientRect?.().left ?? 1) < 0);
+    btn.setAttribute('aria-expanded', 'true');
+    openMenu = { btn, menu };
+    entries[0]?.focus();
+    document.addEventListener('pointerdown', onMenuPointer, true);
+  };
+  btn.addEventListener('click', () => { if (menu.hidden) open(); else closeMenu(); });
+  btn.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown' && menu.hidden) { e.preventDefault(); open(); } });
+  menu.addEventListener('keydown', (e) => {
+    const i = entries.indexOf(document.activeElement);
+    const to = { ArrowDown: i + 1, ArrowUp: i - 1, Home: 0, End: entries.length - 1 }[e.key];
+    if (to != null) entries[(to + entries.length) % entries.length].focus();
+    else if (e.key === 'Escape') closeMenu({ refocus: true });
+    else if (e.key === 'Tab') { closeMenu(); return; }
+    else return;
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  return h('span', { class: 'menu-wrap' }, btn, menu);
+}
+
+export function closeMenu({ refocus = false } = {}) {
+  if (!openMenu) return;
+  const { btn, menu } = openMenu;
+  openMenu = null;
+  menu.hidden = true;
+  btn.setAttribute('aria-expanded', 'false');
+  document.removeEventListener('pointerdown', onMenuPointer, true);
+  if (refocus && btn.isConnected) btn.focus();
+}
+
+function onMenuPointer(e) {
+  if (openMenu && !openMenu.menu.contains(e.target) && !openMenu.btn.contains(e.target)) closeMenu();
 }
 
 export function switchControl({ id, checked, onChange, label, disabled }) {

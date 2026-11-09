@@ -65,6 +65,35 @@ def _filter(sos, x: np.ndarray, check_cancel, scratch: ScratchBuffers | None, *k
     return filtfilt_stream(sos, x, check_cancel=check_cancel, out=_work_buffer(scratch, x, *keep))
 
 
+def apply_section_eq(x: np.ndarray, sections: list[dict], sr: int, check_cancel=None) -> int:
+    """Each section's bands over its own time span, in place: a zero-phase filter of the span (with
+    filter context around it) blended in with linear fades inside the boundaries. Filtered and dry
+    audio are the same signal shaped differently, so equal-gain fades keep the level steady.
+    Times may start before or end after `x` (a preview excerpt): only the overlap is touched.
+    Returns how many sections touched the audio."""
+    check = check_cancel or (lambda: None)
+    n, done = len(x), 0
+    margin = 1 << 16  # filter context on both sides, as in filtfilt_stream
+    for sec in sections:
+        a, b = round(sec['start_s'] * sr), round(sec['end_s'] * sr)
+        lo, hi = max(0, a), min(n, b)
+        if hi - lo <= 0:
+            continue
+        fade = max(1, round(sec['fade_s'] * sr))
+        sos = np.concatenate([peak_fq(band['hz'], band['db'], q=band['q'], sr=sr) for band in sec['bands']])
+        c0, c1 = max(0, lo - margin), min(n, hi + margin)
+        shaped = filtfilt_stream(sos, x[c0:c1], check_cancel=check)
+        for s0 in range(lo, hi, 1 << 20):
+            check()
+            s1 = min(hi, s0 + (1 << 20))
+            t = np.arange(s0, s1, dtype=np.float64)
+            w = np.clip(np.minimum((t - a) / fade, (b - t) / fade), 0.0, 1.0).astype(np.float32)[:, None]
+            dry = x[s0:s1]
+            dry += w * (shaped[s0 - c0 : s1 - c0] - dry)
+        done += 1
+    return done
+
+
 def subharmonic_reinforce(
     x: np.ndarray,
     wet: float = 0.3,
@@ -366,6 +395,15 @@ def _render(
         if params.air_db:
             x = _filter(highshelf_fq(11000.0, params.air_db, s=1.0, sr=sr), x, p.check_cancel, scratch)
             steps.append(f'Adjusted the high frequencies ({params.air_db:+.1f} dB)')
+    if params.eq_bands and not params.volume_only:
+        # One SOS cascade, one zero-phase pass: each band's g/2 design squares to the DAW bell's response.
+        sos = np.concatenate([peak_fq(b['hz'], b['db'], q=b['q'], sr=sr) for b in params.eq_bands])
+        x = _filter(sos, x, p.check_cancel, scratch)
+        steps.append(f'Applied your custom EQ ({len(params.eq_bands)} band{"s" if len(params.eq_bands) != 1 else ""})')
+    if params.section_eq and not params.volume_only:
+        done = apply_section_eq(x, params.section_eq, sr, p.check_cancel)
+        if done:
+            steps.append(f'Applied your section EQ to {done} part{"s" if done != 1 else ""} of the recording')
     elif use_ai and params.ai_stage == 'stem_eq':
         adaptive_stats = {'engaged': False, 'skip_reason': 'AI stem EQ already shapes the low-mids'}
 

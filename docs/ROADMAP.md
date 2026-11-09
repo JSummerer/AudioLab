@@ -38,8 +38,7 @@ promises. Completed changes belong in [CHANGELOG.md](../CHANGELOG.md).
   is open).
 - **Folder batch**: pick a whole folder (several files at once already work).
 - **Library, later steps** (left out of 2.3 on purpose): "Locate…" for a moved file (needs a native file
-  picker in the app window); "Move to Trash" for a result's files (explicit, separate from "Remove from
-  Library"); finding moved files automatically (a relocation scan); retention or a size cap for kept originals
+  picker in the app window); finding moved files automatically (a relocation scan); retention or a size cap for kept originals
   (today they stay until cleared in Storage); "Fetch the original again" for a link whose original is not kept
   (the entry has `original.url`; download it again, check it is the same recording, attach it to the entry);
   comparing stems of a Split result with each other.

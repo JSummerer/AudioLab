@@ -16,16 +16,16 @@ share app data for the same computer user; quit one before opening the other.
 The initial binary target is **macOS 14 or later on Apple silicon (arm64)**. No Python installation,
 Terminal setup or Apple developer account is required. Intel support is not yet qualified.
 
-Download the [**v2.4.0b5 Mac app**](https://github.com/JSummerer/AudioLab/releases/download/v2.4.0b5/AudioLab-2.4.0b5-macOS-arm64.dmg).
+Download the [**v2.4.0b6 Mac app**](https://github.com/JSummerer/AudioLab/releases/download/v2.4.0b6/AudioLab-2.4.0b6-macOS-arm64.dmg).
 Open it, drag **AudioLab.app** into **Applications**, eject the image and open the app from Applications.
 This is the only file testers need. **Source code (zip)** is for the separate source setup below.
 
 This beta uses ad-hoc signing and is not Apple Developer ID signed or notarized. For the expected
 first-opening warning, use the [Mac guide's graphical Open Anyway steps](MACOS.md#first-opening).
 That guide also covers updates, storage and uninstall. The
-[release notes](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b5) describe testing and beta limitations.
+[release notes](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b6) describe testing and beta limitations.
 
-The **2.4.0b5** app includes **Save / Convert**, **Check**, and **Volume only/Adaptive Enhance**, plus the
+The **2.4.0b6** app includes **Save / Convert**, **Check**, and **Volume only/Adaptive Enhance**, plus the
 Library. Settings offers the [optional managed AI download](#optional-ai) for Split and AI stems Enhance.
 The main app and its downloader update by replacing the app.
 
@@ -106,7 +106,7 @@ Open **Settings → AI & system → Enable AI features**. When a compatible add-
 that app build, Settings shows its download and installed-file sizes. These describe the release
 asset, not the RAM needed to process audio. Allow additional free space for downloading, unpacking
 and audio intermediates; no fixed download-size or minimum-RAM promise applies to every release.
-Beta 5 uses the same AI 1.0.0 add-on as beta 4. It is about **570 MB to download** and **1.02 GB installed**.
+Betas 5 and 6 use the same AI 1.0.0 add-on as beta 4. It is about **570 MB to download** and **1.02 GB installed**.
 
 The optional download is self-contained: it includes its own AI runtime and both **Standard** and
 **Fine-tuned** model choices. AudioLab verifies the download and tests the runtime before enabling

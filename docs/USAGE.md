@@ -39,8 +39,15 @@ Use only material you have permission to process.
 or choose several output formats. A multi-file result can be downloaded as a ZIP.
 
 Library keeps Save, Enhance and Split results with their versions. When the original is kept, Enhance
-offers full-length comparison with matched volume. Removing an entry does not delete the output files.
+offers full-length comparison with matched volume, and later jobs on the same link reuse it instead of
+downloading again (Settings → Storage). **Add a file…** brings in a file you already have, such as a
+master from your DAW; it stays where it is. Search and sort the Library from its header; the ⋯ menu
+of a version holds Show in Finder, Open job, Keep only this version and Remove. Removing keeps the
+files unless you switch on **Also move its files to the Trash**; nothing is ever deleted permanently.
 Kept originals use disk space separately from your output folder; manage them in Settings → Storage.
+
+For links, the YouTube sign-in (Settings → Downloads & sign-in) is used only when YouTube refuses a
+video without it. YouTube can block accounts that download a lot; a spare Google account is safer.
 
 ## Automatic enhancement
 
@@ -79,6 +86,14 @@ further. Steady warmth, sustained contrasts and short attacks are left alone in 
 cases. It cannot identify musical intent: use Off if an intentional brief accent is softened. The result
 says how much it did, including when no change was needed. AI stem EQ bypasses this additional stage.
 **Bass harmonics** is separately off by default; changing Bass boost does not enable it.
+
+For experts, **More options → Fine-tuning** has **Custom EQ** (up to 8 bell bands typed as text, e.g.
+`160 Hz −3.3 dB Q 2.9`; Q matches a DAW's bell) and **Section EQ**: bands for chosen parts of the
+recording, faded in and out at their edges. Check and Enhance show a **tone timeline** for recordings
+longer than 3 minutes: how each band moves against the recording's own typical balance, with a link's
+chapters marked. It does not judge: a change is often the music itself. **Suggest from the chart**
+fills a section's EQ with half of that part's difference from the typical balance (at most −2/+1 dB,
+never a boost in the highs), for you to edit or keep.
 
 Each full-length export gets its own loudness and peak check. A warning means it exceeded the selected
 ceiling or could not be measured; try a lower ceiling or a lossless format when more headroom is needed.
@@ -149,6 +164,10 @@ needs a full render. Preview work joins the ordinary queue, so it may wait for a
 If a file's timing cannot be aligned reliably for a short preview, AudioLab explains the problem;
 try a WAV or FLAC original or run Enhance on the full recording. A new full version can reuse embedded
 artwork from the kept original, but does not recover separate artwork added to the earlier job.
+
+**Compare versions** plays two versions of the same recording at matched volume, including a file you
+added. When versions differ by more than 1 dB, Library says so: louder often sounds better at first.
+Previews also accept loudness, compression, custom EQ and section EQ changes.
 
 Job pages may offer a shorter preview of the final master when a full comparison is unavailable;
 it does not include output codec artifacts. There is no Delta mode

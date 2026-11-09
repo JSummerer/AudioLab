@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.4.0b6 (2026-11-09, public beta)
 
 - Check and Enhance show a tone timeline for recordings longer than 3 minutes: how deep bass, mids, top end
   and four more bands move against the recording's own typical balance, minute by minute, from the whole

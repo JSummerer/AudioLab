@@ -1,6 +1,6 @@
 # AudioLab for Mac
 
-**[View beta 5 on GitHub](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b5)** · [Direct download (.dmg)](https://github.com/JSummerer/AudioLab/releases/download/v2.4.0b5/AudioLab-2.4.0b5-macOS-arm64.dmg) · public beta
+**[View beta 6 on GitHub](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b6)** · [Direct download (.dmg)](https://github.com/JSummerer/AudioLab/releases/download/v2.4.0b6/AudioLab-2.4.0b6-macOS-arm64.dmg) · public beta
 
 No Terminal, Python installation or AudioLab account is needed. The app contains its own audio tools.
 Save / Convert, Check, the Library, and Enhance in **Volume only** or **Adaptive** mode work without the optional AI download.
@@ -28,7 +28,7 @@ See [hardware and storage](HARDWARE.md) for memory, disk, model choices and the 
 
 1. **Choose your download:** open the GitHub release page above and select the `.dmg` under **Assets**,
    or use **Direct download** to start immediately. The file is named
-   **AudioLab-2.4.0b5-macOS-arm64.dmg** and normally appears in Downloads.
+   **AudioLab-2.4.0b6-macOS-arm64.dmg** and normally appears in Downloads.
 2. **Open the downloaded file.** In its window, drag **AudioLab.app** into **Applications**.
    Wait for Finder to finish copying, then eject the AudioLab disk image in Finder's sidebar.
 3. **Open AudioLab from Applications.** If macOS blocks it, follow the next section.
@@ -95,7 +95,7 @@ short recording and the **Standard AI model**. Fine-tuned is slower. See [hardwa
 1. Quit AudioLab and download a fresh `.dmg` using the link at the top of this guide.
 2. Open the `.dmg` and drag **AudioLab.app** into the same **Applications** folder as your existing
    copy. Choose **Replace** when Finder asks.
-3. Eject the disk image and open the new app from that folder. Confirm **2.4.0b5** in **Settings → About**.
+3. Eject the disk image and open the new app from that folder. Confirm **2.4.0b6** in **Settings → About**.
 
 Your Library, settings and finished audio are stored outside the app and carry over when you replace
 it. App updates are manual. If macOS blocks the updated app, follow the [first-opening steps](#first-opening).
@@ -184,9 +184,9 @@ separately in `library/originals/` under app data. Download a separate copy of a
 want to retain after clearing jobs.
 
 **Settings → Storage** can clear finished jobs or explicitly delete kept originals. Removing a Library
-entry preserves output files; its kept original may go when no other entry uses it, as the dialog
-explains. Copies saved through a download dialog stay wherever you saved them.
+entry keeps output files unless you choose to move them to the Trash; its kept original may go when no
+other entry uses it, as the dialog explains. Copies saved through a download dialog stay wherever you saved them.
 
 For what was tested and remaining beta limitations, see the
-[release notes](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b5).
+[release notes](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b6).
 Build contributors: see the [macOS packaging guide](../packaging/macos/README.md).

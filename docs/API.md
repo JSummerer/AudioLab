@@ -344,7 +344,7 @@ detail.
 ### Health
 ```jsonc
 {
-  "app": "AudioLab", "version": "2.4.0b5", "local": true, "packaged": false,
+  "app": "AudioLab", "version": "2.4.0b6", "local": true, "packaged": false,
   "ffmpeg": {"ok": true, "version": "7.1", "source": "system" | "bundled", "error": null},
   "downloader": {"ok": true, "version": "2026.08.19", "age_days": 47, "update_supported": true},
   "ai": {"available": false, "device": null, "reason": "AI pack not installed", "install_supported": true, "installing": false,

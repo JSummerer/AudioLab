@@ -1,6 +1,6 @@
 # Hardware and storage
 
-For the **AudioLab 2.4.0b5 Mac beta**. [Download and install](MACOS.md) ·
+For the **AudioLab 2.4.0b6 Mac beta**. [Download and install](MACOS.md) ·
 [Memory](#memory-ram) · [Disk space](#disk-space) · [Speed and models](#speed-and-models) ·
 [Checks and limits](#what-the-app-checks)
 
@@ -52,8 +52,8 @@ explains that display. This is optional troubleshooting, not an installation req
 ## Disk space
 
 Reference payloads measured on beta 3, rounded in decimal MB/GB. See the
-[beta 5 release](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b5) for its app download size.
-Beta 5 uses the same AI 1.0.0 payload.
+[beta 6 release](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b6) for its app download size.
+Beta 6 uses the same AI 1.0.0 payload.
 
 | Files | Download | Installed files |
 |---|---:|---:|
@@ -67,7 +67,7 @@ Keep the larger working-space allowance in the table above for actual use. Repai
 an existing installation while preparing its replacement.
 
 Temporary audio can be much larger than the original file. The app checks a task/duration estimate
-plus a 2 GiB allowance before processing. The table shows rounded **beta 5 check thresholds for one
+plus a 2 GiB allowance before processing. The table shows rounded **beta 6 check thresholds for one
 60-minute job** in decimal GB.
 
 | Task | Free-space estimate, including that allowance |
@@ -137,7 +137,8 @@ macOS 15.7.9 arm64; local functional checks used an Apple M4 Pro with 48 GB on m
 See the release notes for each test scope.
 [Beta 3](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b3) ·
 [Beta 4](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b4) ·
-[Beta 5](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b5)
+[Beta 5](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b5) ·
+[Beta 6](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b6)
 
 This evidence does not qualify minimum RAM, long-recording performance or every chip. A supported
 minimum needs checks on actual lower-memory Macs, including the app and AI helper together, GPU/system

@@ -54,7 +54,8 @@ line and the Docker image.
 | `diagnostics.py` | Log file setup and the plain-text system/job report for bug reports (`/api/diagnostics`, `audiolab doctor --report`) |
 | `errors.py` | `AudioLabError(message, hints, fix, detail)` — every user-visible failure carries plain-language hints, an optional one-click fix and the raw text behind it (`detail`, for bug reports only); `storage_error()` words a full disk or a folder AudioLab may not write to. Anything else unexpected becomes a JSON 500 with hints (`api/app.py`) or "Something went wrong while …" on the job (`jobs.py`) |
 | `util.py` | File-name safety, unique paths, hard links, media types, and human-readable sizes and durations |
-| `system.py` | **The OS layer** — data/log folders, whether a folder is writable, reveal in Finder/Explorer, move to the Trash (only on the user's opt-in), notifications, keep-awake, single-instance lock, process groups, memory size, file-name limits, app identity and shortcut. A leaf module with no third-party dependencies |
+| `system.py` | **The OS layer** — data/log folders, whether a folder is writable, reveal in Finder/Explorer, notifications, keep-awake, single-instance lock, process groups, memory size, file-name limits, app identity and shortcut. A leaf module with no third-party dependencies |
+| `trash.py` | Moving files to the system Trash (only on the user's opt-in, never a permanent delete) and telling links from real folders. OS-specific like `system.py`, kept apart so the AI add-on's pinned `system.py` stays byte-identical |
 | `assets/` | App icon |
 | `web/` | The UI (see below) |
 

@@ -84,7 +84,7 @@ Gatekeeper acceptance. Downloaded apps update by replacement, not in-place packa
 - **Preserve by default.** New processing must not make a good recording worse; bold moves are opt-in
   or limited to the recipe that needs them.
 - **Never lose user files.** No overwriting (use `util.unique_path`), no deleting outside job folders unless
-  the user explicitly opts in, and then only to the system Trash (`system.trash`).
+  the user explicitly opts in, and then only to the system Trash (`trash.move_to_trash`).
 - **Stay cancellable.** Long loops report through `Progress` (which raises `Cancelled`); subprocesses go
   through `media.proc.run`.
 - **Bounded memory.** Keep audio float32 and stream long signals (see `dsp/filters.filtfilt_stream`).

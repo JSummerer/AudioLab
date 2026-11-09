@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from audiolab import library, system, tasks
+from audiolab import library, tasks, trash
 from audiolab.api import create_app
 from audiolab.errors import AudioLabError
 from audiolab.jobs import JobManager
@@ -154,7 +154,7 @@ def test_trash_is_opt_in_and_never_a_permanent_delete(tmp_path, monkeypatch):
         moved.append(Path(path))
         os.replace(path, bin_ / f'{len(moved)}-{Path(path).name}')
 
-    monkeypatch.setattr(system, 'trash', fake_trash)
+    monkeypatch.setattr(trash, 'move_to_trash', fake_trash)
     m = JobManager(runner=results_runner, stages_for=lambda job: STAGES, root=tmp_path / 'jobs', workers=1)
     m.start()
     source = {'kind': 'url', 'url': LINK, '_probe': PROBE}
@@ -228,7 +228,7 @@ def test_freedesktop_trash_moves_never_deletes(tmp_path, monkeypatch):
     monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'xdg'))
     song = tmp_path / 'song 1.wav'
     song.write_bytes(b'riff')
-    system._trash_freedesktop(song)
+    trash._trash_freedesktop(song)
     home = tmp_path / 'xdg' / 'Trash'
     assert not song.exists() and (home / 'files' / 'song 1.wav').read_bytes() == b'riff'
     info = (home / 'info' / 'song 1.wav.trashinfo').read_text(encoding='utf-8').splitlines()
@@ -239,7 +239,7 @@ def test_freedesktop_trash_moves_never_deletes(tmp_path, monkeypatch):
     monkeypatch.setenv('XDG_DATA_HOME', str(blocker))  # no Trash can be made: an error, the file stays
     song.write_bytes(b'riff')
     with pytest.raises(AudioLabError):
-        system._trash_freedesktop(song)
+        trash._trash_freedesktop(song)
     assert song.is_file()
 
 

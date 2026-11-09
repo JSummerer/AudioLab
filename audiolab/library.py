@@ -11,7 +11,7 @@ any export checks with the entry (comparing streams the full files).
 
 JobManager writes the entry when a job finishes (CLI runs are not recorded); jobs expire or get
 cleared, entries stay until the user removes them. Removing an entry leaves the output files alone
-unless the user opts in: then they go to the system Trash (system.trash), never a permanent delete.
+unless the user opts in: then they go to the system Trash (trash.move_to_trash), never a permanent delete.
 A kept original goes with the last entry that refers to it, or on its own on request. A new link
 job may reuse a kept original instead of downloading the recording again (`kept_original`).
 Output paths are stored relative to the output folder of that time (`root`), so a moved file shows
@@ -36,7 +36,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
-from . import processing, system
+from . import processing, trash
 from .errors import AudioLabError
 from .media.export import FORMATS
 from .settings import SETTINGS
@@ -595,7 +595,7 @@ def _trash_files(entries: list[dict[str, Any]], remaining: list[dict[str, Any]])
 
     def move(p: Path) -> bool:
         try:
-            system.trash(p)
+            trash.move_to_trash(p)
         except AudioLabError:
             if not trashed:  # no Trash at all: nothing has moved, nothing is removed
                 raise
@@ -644,9 +644,9 @@ def _plain_inside(p: Path, root: Path) -> bool:
 
 def _no_link(p: Path) -> bool:
     """No part of the absolute path `p` is a symbolic link or junction, each part checked on its own
-    (system.is_link). A path under a linked folder fails here, which only keeps a file where it is."""
+    (trash.is_link). A path under a linked folder fails here, which only keeps a file where it is."""
     p = Path(os.path.abspath(p))
-    return not any(system.is_link(part) for part in (p, *p.parents) if part != Path(part.anchor))
+    return not any(trash.is_link(part) for part in (p, *p.parents) if part != Path(part.anchor))
 
 
 def _real(p: Path) -> Path:

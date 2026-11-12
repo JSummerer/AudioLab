@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import test from 'node:test';
+import { fmtDuration } from '../../audiolab/web/js/dom.js';
 import { PROCESSING_LABELS, LIGHT_KEYS } from '../../audiolab/web/js/views/new/state.js';
 import { parseEq } from '../../audiolab/web/js/eq.js';
 import { checkSections } from '../../audiolab/web/js/section-eq.js';
@@ -27,6 +28,7 @@ const original = { key: 'original', label: 'Original', cover: false };
 
 function setup({ crlf = false } = {}) {
   const redrawn = [];
+  const requests = [];
   const source = { kind: 'file', file: { name: 'plain.wav', size: 32 } };
   const state = {
     source, task: 'download', download: { format: 'mp3', embed_cover: true },
@@ -37,24 +39,27 @@ function setup({ crlf = false } = {}) {
   } } };
   const context = vm.createContext({
     state, store, redrawn, PROCESSING_LABELS,
+    refs: { input: { value: '' } }, AbortController, setTimeout, fmtDuration,
+    focusStart() {},
+    api: async (path, { json }) => { requests.push({ path, json }); },
     h: (tag, attrs, ...children) => new Element(tag, attrs || {}, children),
     icon: () => '', fmtBytes: (size) => `${size} B`,
     localStorage: { getItem: () => null, setItem() {} },
     switchControl: (attrs) => new Element('input', attrs),
     definePart() {}, redraw: (...parts) => redrawn.push(parts),
-    isFileLike: () => state.source?.kind === 'file',
+    isFileLike: () => state.source?.kind === 'file' || state.source?.job?.source?.kind === 'file',
     parseEq, checkSections, // state.js's appliedAdvanced, for this sandbox's state:
     appliedAdvanced: () => Object.entries(state.enhance.advanced)
       .filter(([k]) => state.enhance.quality !== 'light' || LIGHT_KEYS.includes(k)),
   });
-  for (const name of ['cover', 'options', 'sleeve']) {
+  for (const name of ['cover', 'names', 'tracks', 'options', 'source', 'sleeve']) {
     const path = new URL(`../../audiolab/web/js/views/new/${name}.js`, import.meta.url);
     const original = readFileSync(path, 'utf8');
     const checkout = crlf ? original.replace(/\r?\n/g, '\r\n') : original;
     const source = checkout.replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '');
     vm.runInContext(source, context, { filename: path.pathname });
   }
-  return { state, store, context, redrawn, run: (code) => vm.runInContext(code, context) };
+  return { state, store, context, redrawn, requests, run: (code) => vm.runInContext(code, context) };
 }
 
 test('the separate image is off by default and does not control embedding', () => {
@@ -156,4 +161,47 @@ test('the embedding switch refreshes the sleeve without changing the sidecar pre
 test('cover controls and summaries also execute with Windows checkout line endings', () => {
   const s = setup({ crlf: true });
   assert.equal(s.run('plan()[1]'), 'Cover art inside audio when available');
+});
+
+test('checking an export uses its file metadata and reusing the original still looks up the link', () => {
+  const s = setup();
+  const url = 'https://example.com/recording';
+  s.context.job = {
+    id: 'previous', title: 'Source recording',
+    source: { kind: 'url', url, duration_s: 100, thumbnail: 'old.jpg', cover_name: 'own.jpg' },
+    options: { meta: { title: 'Source rename', artist: 'Source artist' }, split_tracks: true, tracklist: '0:00 Source track' },
+  };
+  s.context.file = { id: 'f2', name: 'Recording (Enhanced).wav' };
+
+  s.run('useJobSource(job, "analyze", { file })');
+  assert.deepEqual(s.requests, []);
+  assert.equal(s.state.source.job.id, 'previous');
+  assert.equal(s.state.source.sourceFile.id, 'f2');
+  assert.equal(s.run('loaded().title'), 'Recording (Enhanced)');
+  assert.equal(s.run('loaded().meta'), 'Recording (Enhanced).wav');
+  assert.equal(s.run('loaded().art'), undefined);
+  assert.equal(s.run('sourceDuration()'), null);
+
+  s.state.task = 'enhance';
+  assert.equal(s.run('tracksOffered()'), true);
+  assert.equal(s.run('Object.keys(tracksOptions()).length'), 0);
+  assert.equal(s.run('hasOwnCover()'), false);
+  s.run('setTracklist(state.source, "0:00 File track")');
+  assert.equal(s.requests[0].path, '/api/tracklist');
+  assert.equal(s.requests[0].json.text, '0:00 File track');
+  assert.equal(s.requests[0].json.duration_s, undefined);
+
+  s.run('useJobSource(job, "enhance")');
+  assert.equal(s.run('refs.input.value'), url);
+  assert.equal(s.state.source.sourceFile, undefined);
+  assert.equal(s.run('loaded().title'), 'Source rename');
+  assert.equal(s.run('sourceDuration()'), 100);
+  assert.equal(s.requests[1].json.text, '0:00 Source track');
+  assert.equal(s.requests[2].path, '/api/probe');
+  assert.equal(s.requests[2].json.url, url);
+
+  s.run('useJobSource(job, "analyze", { file: { ...file, duration_s: 32 } })');
+  assert.equal(s.requests.length, 3);
+  assert.equal(s.run('sourceDuration()'), 32);
+  assert.match(s.run('loaded().meta'), /0:32$/);
 });

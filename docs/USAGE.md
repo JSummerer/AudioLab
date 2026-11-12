@@ -88,12 +88,13 @@ says how much it did, including when no change was needed. AI stem EQ bypasses t
 **Bass harmonics** is separately off by default; changing Bass boost does not enable it.
 
 For experts, **More options → Fine-tuning** has **Custom EQ** (up to 8 bell bands typed as text, e.g.
-`160 Hz −3.3 dB Q 2.9`; Q matches a DAW's bell) and **Section EQ**: bands for chosen parts of the
+`160 Hz −3.3 dB Q 2.9`) and **Section EQ**: bands for chosen parts of the
 recording, faded in and out at their edges. Check and Enhance show a **tone timeline** for recordings
 longer than 3 minutes: how each band moves against the recording's own typical balance, with a link's
-chapters marked. It does not judge: a change is often the music itself. **Suggest from the chart**
-fills a section's EQ with half of that part's difference from the typical balance (at most −2/+1 dB,
-never a boost in the highs), for you to edit or keep.
+chapters marked. It does not judge: a change is often the music itself. Relative band shares cannot
+identify which frequencies need correction, so the chart supplies observations without automatic EQ
+proposals. The bells use forward/backward filtering: their magnitude follows the plotted response,
+but their transient behavior differs from a conventional causal EQ and can include pre-onset energy.
 
 Each full-length export gets its own loudness and peak check. A warning means it exceeded the selected
 ceiling or could not be measured; try a lower ceiling or a lossless format when more headroom is needed.
@@ -151,23 +152,28 @@ or limiting reduced the signal. Choose a highlighted passage to repeat it in the
 are the strongest reductions within short intervals; overall volume and fixed EQ changes are listed
 in Processing details instead. Older versions may have no timeline.
 
-**Preview changes** tries settings on 5–30 seconds from the kept original. It starts at your playhead
-or selected repeat range. Adjust low-mid control, Sharp S sounds, bass boost or bass harmonics; Volume
-only offers a loudness target. Make a preview, compare it, then choose **Apply to full recording** to
-save a new version. Editing settings invalidates the old preview, so Apply always uses the choices
-you just previewed. Closing or cancelling a preview does not create a Library version.
+**Adjust** opens an optional workspace for a Library version with saved settings and a kept original.
+Choose a 5–30 second passage, edit the global or a selected section's EQ using the graph, numeric controls
+or text, and audition the change. Volume only keeps its loudness controls and processing mode.
+The main comparison uses **Saved settings (re-rendered)** and **Edited settings**, both from the same
+original bounds and surrounding context. You can choose Original as the reference or return to the
+Library to hear the actual exported version. Dragging changes the graph; render an audition to hear it.
+Changed settings mark the audio stale. Undo, bypass and reset help compare alternatives, and keeping
+the existing version is a valid result. Opening or leaving Adjust does not create an export.
 
 A section preview is an estimate: it uses nearby audio for context, while the full render checks the
-whole recording again. It excludes saved-format compression artifacts. Short previews are currently
+whole recording again. Even retained full-recording gain cannot predict how EQ changes the next full
+render's normalization. Auditions exclude saved-format compression artifacts. Short previews are currently
 available for Volume only and Adaptive results with saved settings and a kept original; AI stems
 needs a full render. Preview work joins the ordinary queue, so it may wait for a running job.
 If a file's timing cannot be aligned reliably for a short preview, AudioLab explains the problem;
-try a WAV or FLAC original or run Enhance on the full recording. A new full version can reuse embedded
-artwork from the kept original, but does not recover separate artwork added to the earlier job.
+try a WAV or FLAC original or run Enhance on the full recording. **Apply to full recording** reanalyzes
+the complete original and verifies new exports, preserving previous versions. It reuses available
+saved artwork. Compare the actual exports afterwards; a short audition is never promoted to a master.
 
 **Compare versions** plays two versions of the same recording at matched volume, including a file you
 added. When versions differ by more than 1 dB, Library says so: louder often sounds better at first.
-Previews also accept loudness, compression, custom EQ and section EQ changes.
+Adjust also accepts loudness, compression, custom EQ and section EQ changes.
 
 Job pages may offer a shorter preview of the final master when a full comparison is unavailable;
 it does not include output codec artifacts. There is no Delta mode

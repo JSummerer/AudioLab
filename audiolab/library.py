@@ -160,6 +160,8 @@ def record(job, check_cancel: Callable[[], None] | None = None, begin_commit: Ca
         entry['processing'] = details
     if job.task == 'enhance' and (excerpt := _excerpt(result.get('excerpt'))):
         entry['excerpt'] = excerpt  # the loud passage the job page compares first
+    if job.task == 'enhance' and (overview := original_overview(result.get('_overview'))):
+        entry['overview'] = overview
     if job.task == 'enhance' and type(hints.get('version')) is int and hints['version'] > 0:
         entry['version'] = hints['version']  # "(Enhanced 2)" in its tags: tasks.common.next_version
     timeline = _tone_timeline((result.get('analysis') or {}).get('tone_timeline'))
@@ -244,6 +246,24 @@ def _rounded(value: Any, digits: int = 2) -> float | None:
     if type(value) not in (int, float) or not math.isfinite(value):
         return None
     return round(float(value), digits)
+
+
+def original_overview(value: Any) -> dict | None:
+    """Bound and validate the overview stored outside the public Library list."""
+    from .analysis.levels import OVERVIEW_MAX_BINS
+
+    if not isinstance(value, dict) or value.get('basis') != 'original_sample_peak':
+        return None
+    duration, step = (_rounded(value.get(key), 9) for key in ('duration_s', 'bin_duration_s'))
+    peaks = value.get('peaks')
+    if not duration or not step or min(duration, step) < 0 or not isinstance(peaks, list):
+        return None
+    if not 0 < len(peaks) <= OVERVIEW_MAX_BINS or not (len(peaks) - 1) * step < duration <= len(peaks) * step + 1e-6:
+        return None
+    peaks = [_rounded(v, 6) for v in peaks]
+    if any(v is None or v < 0 for v in peaks):
+        return None
+    return {'basis': 'original_sample_peak', 'duration_s': duration, 'bin_duration_s': step, 'peaks': peaks}
 
 
 def _tone_timeline(value: Any) -> dict[str, Any] | None:
@@ -426,9 +446,11 @@ def public(entry: dict[str, Any], job_exists: bool = False) -> dict[str, Any]:
                 'exists': True,
             }
         )
-    out = {k: v for k, v in entry.items() if k not in ('files', 'original', 'root', 'tone_timeline')}
+    out = {k: v for k, v in entry.items() if k not in ('files', 'original', 'root', 'tone_timeline', 'overview')}
     if entry.get('tone_timeline'):
         out['has_tone_timeline'] = True  # the data: GET /api/library/{id}/tone-timeline (keeps the list small)
+    if entry.get('overview') and kept:
+        out['has_overview'] = True
     folder = _resolve(entry, entry.get('output_dir'))
     out['output_dir'] = str(folder) if folder else None
     out['files'] = files

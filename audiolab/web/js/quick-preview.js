@@ -281,7 +281,9 @@ export function openQuickPreview(entry, comparison, opener) {
       if (!player) { finish(work, 'No comparison was available for this preview.'); return; }
       listen.append(player.el);
       ready = { advanced };
-      finish(work, 'Section estimate. The full recording is checked again when saved.');
+      finish(work, job.result?.preview_basis === 'saved_export'
+        ? job.result.summary?.[0] || 'Playing the saved version. No new processing was applied.'
+        : 'Section estimate. The full recording is checked again when saved.');
     } else {
       const message = job.error?.message || 'The preview couldn’t be made.';
       finish(work, [message, job.error?.hints?.[0]].filter(Boolean).join(' '));

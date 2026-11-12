@@ -63,6 +63,7 @@ def deess(
     check_cancel=None,
     *,
     band_buffer: np.ndarray | None = None,
+    calibration: dict[str, float] | None = None,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Soften S-sound spikes in place (x is modified and returned); `mix=False` for a voice alone.
     Stats: engaged, max_gr_db, active_pct (share of the time turned down by more than 0.5 dB),
@@ -81,7 +82,8 @@ def deess(
     pb = np.maximum(uniform_filter1d(_ctrl_power(band, decim, n_ctrl, check), k, mode='nearest'), 0.0)
     pf = np.maximum(uniform_filter1d(_ctrl_power(x, decim, n_ctrl, check), k, mode='nearest'), 0.0)
     level = 10.0 * np.log10(pf + 1e-20)
-    audible = level > np.percentile(level, 95) - QUIET_DB
+    gate_dbfs = calibration['gate_dbfs'] if calibration is not None else float(np.percentile(level, 95)) - QUIET_DB
+    audible = level > gate_dbfs
     if audible.sum() < 200:
         return x, {'engaged': False, 'skip_reason': 'too little sound to judge'}
     share = 10.0 * np.log10((pb + 1e-20) / (pf + 1e-20))
@@ -101,16 +103,18 @@ def deess(
 
     margin = STRONG_MARGIN_DB if max_gr_db > 4.0 else MARGIN_DB
     base = float(np.percentile(share[audible], BASE_PCT)) + margin
-    threshold, gr = base, shape(base)
-    if not within(gr):  # raise the threshold until only the biggest spikes are left
+    threshold = calibration['threshold_db'] if calibration is not None else base
+    gr = shape(threshold)
+    if calibration is None and not within(gr):  # raise the threshold until only the biggest spikes are left
         lo, hi = base, float(share[audible].max()) + 1.0  # at hi nothing is touched: always within
         for _ in range(12):
             check()
             mid = 0.5 * (lo + hi)
             lo, hi = (lo, mid) if within(shape(mid)) else (mid, hi)
         threshold, gr = hi, shape(hi)
+    detector = {'gate_dbfs': gate_dbfs, 'threshold_db': threshold}
     if not (gr > 0.1).any():
-        return x, {'engaged': False, 'skip_reason': 'no sharp S sounds found'}
+        return x, {'engaged': False, 'skip_reason': 'no sharp S sounds found', '_calibration': detector}
 
     cut = 1.0 - 10.0 ** (-gr / 20.0)  # share of the band to take away, per control period
     centres = (np.arange(n_ctrl) + 0.5) * decim
@@ -126,6 +130,7 @@ def deess(
         'active_pct': round(100.0 * float((gr > 0.5).mean()), 2),
         'band_change_db': round(band_change_db(gr), 2),
         'threshold_db': round(threshold, 1),
-        'budget_db': round(threshold - base, 1),
+        **({'budget_db': round(threshold - base, 1)} if calibration is None else {}),
+        '_calibration': detector,
         'timeline': reduction_timeline(gr, len(x), sr, step_frames=decim, start_frame=decim / 2),
     }

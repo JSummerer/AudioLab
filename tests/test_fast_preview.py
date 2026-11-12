@@ -1,6 +1,7 @@
 """Preview and rerender from a Library original through the real job queue."""
 
 import json
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -31,17 +32,19 @@ def app(tmp_path, monkeypatch):
         yield client, manager
 
 
-def retained(tmp_path, seconds=8, *, quality='standard', known_duration=None):
+def retained(tmp_path, seconds=8, *, quality='standard', known_duration=None, varying_level=False):
     original = tmp_path / 'fixture.wav'
     with sf.SoundFile(original, 'w', SR, 2, subtype='PCM_16') as out:
         t = np.arange(SR) / SR
         for second in range(seconds):
             hz = 880 if 37 <= second < 42 else 220
             x = 0.08 * np.sin(2 * np.pi * hz * t)
+            if varying_level and second < seconds // 2:
+                x *= 0.1
             out.write(np.column_stack((x, x)))
     exported = SETTINGS.output_dir / 'Existing.wav'
     exported.parent.mkdir(parents=True, exist_ok=True)
-    exported.write_bytes(b'existing export')
+    shutil.copyfile(original, exported)
     markers = [
         {'n': 1, 'title': 'Intro', 'start_s': 0.0, 'end_s': 2.0},
         {'n': 2, 'title': 'Second', 'start_s': 2.0, 'end_s': float(seconds)},
@@ -100,6 +103,7 @@ def test_preview_seeks_decodes_bounded_audio_and_publishes_only_excerpt(app, tmp
     entry, exported = retained(tmp_path, seconds=82)
     original = library.file_path(entry, 'original')
     before_original = original.read_bytes()
+    before_export = exported.read_bytes()
     decode = ffmpeg.decode_reference
     called = []
 
@@ -123,6 +127,7 @@ def test_preview_seeks_decodes_bounded_audio_and_publishes_only_excerpt(app, tmp
     result = job['result']
     assert called == [(17.0, 45.0)]
     assert result['preview'] is True and result['files'] == []
+    assert result['preview_basis'] == 'section_estimate'
     assert result['excerpt'] == {'start_s': 37.0, 'duration_s': 5.0}
     assert 'library_id' not in result
     assert 'path' not in job['source'] and '_preview' not in job['options'] and '_media' not in result
@@ -143,9 +148,202 @@ def test_preview_seeks_decodes_bounded_audio_and_publishes_only_excerpt(app, tmp
             assert hz == 880  # inside the excerpt; all surrounding context uses a different tone
     assert not (manager.work_dir(job['id']) / 'scratch').exists()
     assert original.read_bytes() == before_original
-    assert exported.read_bytes() == b'existing export'
+    assert exported.read_bytes() == before_export
     assert client.get('/api/library').json()['count'] == 1
     assert list(SETTINGS.output_dir.iterdir()) == [exported]
+
+
+def test_unchanged_preview_uses_saved_render_gain_and_timeline(app, tmp_path, monkeypatch):
+    client, manager = app
+    entry, exported = retained(tmp_path, seconds=64, quality='light', varying_level=True)
+    original = library.file_path(entry, 'original')
+    audio, _ = sf.read(original, dtype='float32', always_2d=True)
+    # A saved full render uses one gain even in this quiet passage. Re-normalising
+    # just that passage would make it much louder than this actual output.
+    sf.write(exported, audio * 2, SR, subtype='PCM_16')
+    before = exported.read_bytes()
+    entry['processing']['applied'] = {
+        'loudness_gain_db': 6.02,
+        'limiter': {
+            'timeline': {
+                'duration_s': 64,
+                'bins': [
+                    {'start_s': 4, 'peak_s': 5, 'end_s': 6, 'max_gr_db': 1.2},
+                ],
+            }
+        },
+    }
+    (SETTINGS.library_dir / f'{entry["id"]}.json').write_text(json.dumps(entry))
+    calls = []
+    decode = ffmpeg.decode_reference
+
+    def decode_excerpt(*args, **kwargs):
+        calls.append(kwargs['excerpt'])
+        return decode(*args, **kwargs)
+
+    def no_render(*_args, **_kwargs):
+        pytest.fail('Unchanged settings must audition the saved full render')
+
+    monkeypatch.setattr(ffmpeg, 'decode_reference', decode_excerpt)
+    monkeypatch.setattr(preview, 'render', no_render)
+    # Repeating an already-saved value is also unchanged after normalization.
+    r = client.post(
+        f'/api/library/{entry["id"]}/preview',
+        json={
+            'start_s': 3.123,
+            'duration_s': 5,
+            'advanced': {'target_lufs': -18},
+        },
+    )
+    assert r.status_code == 200, r.text
+    job = wait_result(client, r.json()['id'])
+    result = job['result']
+    assert result['preview_basis'] == 'saved_export'
+    assert 'saved WAV' in result['summary'][0]
+    assert calls == [(3.12, 5.003), (3.12, 5.003)]
+    pcm = client.get(f'/api/jobs/{job["id"]}/pcm/enhanced', params={'frames': 5 * SR})
+    actual = np.frombuffer(pcm.content, dtype='<f4').reshape(-1, 2)
+    expected, _ = sf.read(exported, start=round(3.123 * SR), frames=5 * SR, dtype='float32', always_2d=True)
+    np.testing.assert_array_equal(actual, expected)
+    assert result['processing']['applied']['limiter']['timeline']['bins'][0]['peak_s'] == pytest.approx(1.877)
+    assert result['metrics']['after']['lufs'] - result['metrics']['before']['lufs'] == pytest.approx(6.02, abs=0.02)
+    assert exported.read_bytes() == before
+    assert client.get('/api/library').json()['count'] == 1
+    assert not (manager.work_dir(job['id']) / 'scratch').exists()
+    assert 'saved_export' not in job['options'] and str(exported) not in json.dumps(job)
+
+
+def test_preview_without_available_export_is_explicitly_an_estimate(app, tmp_path):
+    client, _ = app
+    entry, exported = retained(tmp_path, quality='light')
+    exported.rename(tmp_path / 'moved.wav')
+    r = client.post(f'/api/library/{entry["id"]}/preview', json={'start_s': 1, 'duration_s': 5})
+    assert r.status_code == 200, r.text
+    result = wait_result(client, r.json()['id'])['result']
+    assert result['preview_basis'] == 'section_estimate'
+    assert 'may differ' in result['summary'][0]
+
+
+def test_paired_audition_reuses_one_bounded_decode_and_aligns_all_sides(app, tmp_path, monkeypatch):
+    client, manager = app
+    entry, exported = retained(tmp_path, seconds=60)
+    call = client.post
+    decode = ffmpeg.decode_reference
+    decodes = []
+
+    def record_decode(*args, **kwargs):
+        decodes.append(kwargs['excerpt'])
+        return decode(*args, **kwargs)
+
+    monkeypatch.setattr(ffmpeg, 'decode_reference', record_decode)
+    exported.rename(tmp_path / 'moved.wav')
+    start = 37.12343
+    body = {'start_s': start, 'duration_s': 5, 'paired': True}
+    response = call(f'/api/library/{entry["id"]}/preview', json=body)
+    assert response.status_code == 200, response.text
+    job = wait_result(client, response.json()['id'])
+    result = job['result']
+    first = round(start * SR)
+    assert decodes == [(17.16, pytest.approx((first - round(17.16 * SR)) / SR + 25))]
+    assert result['preview_basis'] == 'section_estimate'
+    assert result['comparison_basis'] == 'section_gain'
+    assert result['calibration']['gain'] == 'section'
+    assert result['metrics']['saved'] == result['metrics']['after']
+    assert result['processing'] == result['baseline_processing']
+    assert result['excerpt'] == {
+        'start_s': first / SR,
+        'duration_s': 5,
+        'start_frame': first,
+        'frames': 5 * SR,
+        'sample_rate_hz': SR,
+    }
+
+    def pcm(key):
+        response = client.get(f'/api/jobs/{job["id"]}/pcm/{key}', params={'frames': 5 * SR})
+        assert response.status_code == 200
+        return response.content
+
+    assert pcm('enhanced') == pcm('saved') != pcm('original')
+    assert len(pcm('saved')) == 5 * SR * 8
+    assert client.get('/api/library').json()['count'] == 1
+    assert client.get(f'/api/library/{entry["id"]}/overview').status_code == 404
+    assert client.delete(f'/api/jobs/{job["id"]}').status_code == 200
+    assert not manager.job_dir(job['id']).exists()
+
+
+def test_legacy_reset_to_auto_applies_and_retains_audition_state(app, tmp_path):
+    client, _ = app
+    entry, exported = retained(tmp_path, seconds=12)
+    original = library.file_path(entry, 'original')
+    old_bytes = (original.read_bytes(), exported.read_bytes())
+    entry['processing']['requested']['advanced']['glue'] = 'on'
+    entry['processing']['resolved']['params']['compressor'] = 'glue'
+    entry['processing']['requested']['split_tracks'] = False
+    (SETTINGS.library_dir / f'{entry["id"]}.json').write_text(json.dumps(entry))
+    url = f'/api/library/{entry["id"]}'
+    body = {'start_s': 0, 'duration_s': 5, 'paired': True, 'advanced': {'glue': None}}
+    blocked = client.post(url + '/preview', json=body)
+    assert blocked.status_code == 400 and 'when you save a new version' in blocked.text
+    applied = client.post(url + '/enhance', json={'advanced': {'glue': None}})
+    assert applied.status_code == 200, applied.text
+    job = wait_result(client, applied.json()['id'])
+    saved = library.get(job['id'])
+    assert 'glue' not in saved['processing']['requested']['advanced']
+    resolved = saved['processing']['resolved']
+    assert resolved['auto_compressor'] == resolved['params']['compressor'] == 'off'
+    assert resolved['calibration']['sample_rate_hz'] == SR
+    assert job['result']['files'][0]['verification']['status'] == 'verified'
+    assert client.get('/api/library').json()['count'] == 2
+    assert (original.read_bytes(), exported.read_bytes()) == old_bytes
+
+    saved_url = f'/api/library/{job["id"]}'
+    public = client.get(saved_url).json()
+    assert public['has_overview'] and 'overview' not in public
+    overview = client.get(saved_url + '/overview').json()
+    assert overview['basis'] == 'original_sample_peak'
+    assert overview['duration_s'] == 12
+    assert overview['bin_duration_s'] == 0.1
+    assert overview['peaks'] == pytest.approx([0.080017] * 120, abs=0.00002)
+
+    # A saved explicit override can preview Auto when its automatic decision was retained.
+    saved['processing']['requested']['advanced']['glue'] = 'on'
+    saved['processing']['resolved']['params']['compressor'] = 'glue'
+    (SETTINGS.library_dir / f'{saved["id"]}.json').write_text(json.dumps(saved))
+    response = client.post(saved_url + '/preview', json=body)
+    assert response.status_code == 200, response.text
+    result = wait_result(client, response.json()['id'])['result']
+    assert result['comparison_basis'] == 'retained_gain'
+    assert result['calibration']['gain'] == 'shared_retained_estimate'
+    assert result['processing']['params']['compressor'] == 'off'
+    assert result['baseline_processing']['params']['compressor'] == 'glue'
+
+
+def test_unchanged_preview_prefers_full_lossless_output_and_never_uses_tracks(app, tmp_path):
+    from audiolab.media.export import transcode
+
+    client, manager = app
+    entry, exported = retained(tmp_path, quality='light')
+    lossy = transcode(exported, exported.with_name('Lossy'), 'mp3_320')
+    full = entry['files'][0]
+    track = {**full, 'id': 'track', 'kind': 'track'}
+    cover = {**full, 'id': 'cover', 'kind': 'cover'}
+    mp3 = {**full, 'id': 'mp3', 'format': 'mp3_320', 'path': str(lossy)}
+    entry['files'] = [track, cover, mp3, full]
+    record = SETTINGS.library_dir / f'{entry["id"]}.json'
+    record.write_text(json.dumps(entry))
+    url = f'/api/library/{entry["id"]}/preview'
+    r = client.post(url, json={'start_s': 1, 'duration_s': 5})
+    assert r.status_code == 200, r.text
+    job_id = r.json()['id']
+    assert manager.get(job_id).options['_preview']['saved_export'] == {'path': str(exported), 'format': 'wav16'}
+    assert wait_result(client, job_id)['result']['preview_basis'] == 'saved_export'
+
+    entry['files'] = [track, cover]
+    record.write_text(json.dumps(entry))
+    r = client.post(url, json={'start_s': 1, 'duration_s': 5})
+    assert r.status_code == 200, r.text
+    assert 'saved_export' not in manager.get(r.json()['id']).options['_preview']
+    assert wait_result(client, r.json()['id'])['result']['preview_basis'] == 'section_estimate'
 
 
 def test_apply_uses_original_and_saves_a_new_version_in_same_group(app, tmp_path):
@@ -153,6 +351,7 @@ def test_apply_uses_original_and_saves_a_new_version_in_same_group(app, tmp_path
     entry, exported = retained(tmp_path, quality='light')
     original = library.file_path(entry, 'original')
     before = original.read_bytes()
+    before_export = exported.read_bytes()
     url = f'/api/library/{entry["id"]}'
     changed = {'advanced': {'target_lufs': -20, 'sample_rate': 44100}}
     trial = client.post(url + '/preview', json={'start_s': 1, 'duration_s': 5, **changed})
@@ -190,7 +389,7 @@ def test_apply_uses_original_and_saves_a_new_version_in_same_group(app, tmp_path
     assert len(files) == 3
     info = sf.info(Path(files[0]['path']))
     assert info.samplerate == 44100 and info.duration == 8
-    assert original.read_bytes() == before and exported.read_bytes() == b'existing export'
+    assert original.read_bytes() == before and exported.read_bytes() == before_export
     (group,) = client.get('/api/library').json()['groups']
     assert len(group['entries']) == 2
 
@@ -216,6 +415,7 @@ def test_invalid_missing_and_unsupported_preview_requests(app, tmp_path):
         {'start_s': 0, 'duration_s': 5, 'advanced': {'eq': [{'hz': 160, 'db': 'x', 'q': 1}]}},
         {'start_s': 0, 'duration_s': 5, 'advanced': {'eq': [{'hz': 100, 'db': 1, 'q': 1}] * 9}},
         {'start_s': 0, 'duration_s': 5, 'advanced': {'eq': [{'hz': 10**400, 'db': 1, 'q': 1}]}},
+        {'start_s': 0, 'duration_s': 5, 'paired': 'true'},
     ]
     for body in invalid:
         r = client.post(url + '/preview', content=json.dumps(body), headers={'Content-Type': 'application/json'})

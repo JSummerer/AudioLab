@@ -1,0 +1,96 @@
+.eq-editor { display: grid; gap: var(--s-3); min-width: 0; }
+.eq-editor-toolbar, .eq-editor-legend, .eq-editor-choice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-1) var(--s-3);
+}
+.eq-editor-toolbar .btn[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
+.eq-editor-legend { color: var(--ink-2); }
+.eq-editor-legend > :first-child { color: var(--accent); }
+.eq-editor-context-label::before {
+  display: inline-block;
+  width: var(--s-3);
+  margin-inline-end: var(--s-1);
+  border-top: 2px dashed currentColor;
+  vertical-align: middle;
+  content: '';
+}
+.eq-editor-choice { gap: var(--s-1); }
+.eq-editor-note, .eq-editor-error { margin: 0; }
+.eq-editor-error { color: var(--danger); }
+.eq-editor-error:empty, .eq-editor-bands:empty { display: none; }
+.eq-editor-text > summary { cursor: pointer; }
+.eq-editor-text[open] > summary { margin-bottom: var(--s-2); }
+
+.eq-plot {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  grid-template-rows: clamp(10rem, 22vw, 15rem) auto;
+  column-gap: var(--s-4);
+  row-gap: var(--s-2);
+  margin: var(--s-3) var(--s-3) 0 0;
+}
+.eq-plot-area, .eq-plot-x, .eq-plot-y { position: relative; }
+.eq-plot-area > svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.eq-plot-handles { position: absolute; inset: 0; pointer-events: none; }
+.eq-plot-grid, .eq-plot-zero, .eq-plot-response, .eq-plot-context {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+.eq-plot-grid { stroke: var(--line); stroke-width: 1; }
+.eq-plot-zero { stroke: var(--ink-3); stroke-width: 1; }
+.eq-plot-response { stroke: var(--accent); stroke-width: 2; }
+.eq-plot-context { stroke: var(--ink-2); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.eq-plot-handle {
+  position: absolute;
+  display: grid;
+  width: var(--s-5);
+  height: var(--s-5);
+  padding: 0;
+  place-items: center;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: inherit;
+  font-size: var(--fs-small);
+  cursor: grab;
+  pointer-events: auto;
+  touch-action: none;
+}
+.eq-plot-handle:focus, .eq-plot-handle:hover { z-index: 1; }
+.eq-plot-handle:active { cursor: grabbing; }
+.eq-plot-handle.is-inactive { color: var(--accent); background: var(--accent-soft); }
+.eq-plot-handle:disabled { cursor: default; }
+.eq-plot-x, .eq-plot-y { font-size: var(--fs-small); color: var(--ink-2); }
+.eq-plot-x { grid-column: 2; min-height: 2.7em; }
+.eq-plot-x > span:not(.eq-plot-x-unit), .eq-plot-y > span { position: absolute; white-space: nowrap; }
+.eq-plot-x > span:not(.eq-plot-x-unit) { transform: translateX(-50%); }
+.eq-plot-x .eq-plot-x-unit { position: absolute; left: 50%; bottom: 0; transform: translateX(-50%); }
+.eq-plot-y { min-width: 6ch; text-align: right; }
+.eq-plot-y > span { right: 0; transform: translateY(-50%); }
+
+.eq-editor-band {
+  display: grid;
+  grid-template-columns: minmax(5ch, auto) repeat(3, minmax(5.5rem, 1fr)) max-content;
+  align-items: end;
+  gap: var(--s-2) var(--s-3);
+  min-width: 0;
+  margin: 0;
+  padding: var(--s-2) 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+.eq-editor-band-name { align-self: center; }
+.eq-editor-band label { display: grid; gap: var(--s-1); min-width: 0; }
+.eq-editor-band input { width: 100%; }
+.eq-editor-band input[aria-invalid="true"] { border-color: var(--danger); }
+
+@media (max-width: 640px) {
+  .eq-editor-band { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .eq-editor-band-name { grid-column: 1 / 3; }
+  .eq-editor-band > button { grid-column: 3; grid-row: 1; justify-self: end; }
+  .eq-plot-x > .is-minor:not(.is-last) { display: none; }
+}

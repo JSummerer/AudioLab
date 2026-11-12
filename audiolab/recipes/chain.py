@@ -52,6 +52,7 @@ from ..dsp.loudness import integrated_lufs, lra, programme_loudness
 from ..dsp.scratch import DISK_BACKED_AFTER_SECONDS, ScratchBuffers, blocks
 from ..errors import AudioLabError, Cancelled
 from .base import LIGHT_MAX_LIMIT_DB, STEM_PRESENCE_DB, ChainParams
+from .calibration import CALIBRATION_VERSION, AuditionCalibration
 
 # Clarity lift: narrow enough to stay out of the S sounds above 5 kHz.
 PRESENCE_HZ, PRESENCE_Q = 3000.0, 1.4
@@ -65,7 +66,9 @@ def _filter(sos, x: np.ndarray, check_cancel, scratch: ScratchBuffers | None, *k
     return filtfilt_stream(sos, x, check_cancel=check_cancel, out=_work_buffer(scratch, x, *keep))
 
 
-def apply_section_eq(x: np.ndarray, sections: list[dict], sr: int, check_cancel=None) -> int:
+def apply_section_eq(
+    x: np.ndarray, sections: list[dict], sr: int, check_cancel=None, *, scratch: ScratchBuffers | None = None
+) -> int:
     """Each section's bands over its own time span, in place: a zero-phase filter of the span (with
     filter context around it) blended in with linear fades inside the boundaries. Filtered and dry
     audio are the same signal shaped differently, so equal-gain fades keep the level steady.
@@ -82,7 +85,11 @@ def apply_section_eq(x: np.ndarray, sections: list[dict], sr: int, check_cancel=
         fade = max(1, round(sec['fade_s'] * sr))
         sos = np.concatenate([peak_fq(band['hz'], band['db'], q=band['q'], sr=sr) for band in sec['bands']])
         c0, c1 = max(0, lo - margin), min(n, hi + margin)
-        shaped = filtfilt_stream(sos, x[c0:c1], check_cancel=check)
+        # Reuse the same full-size mapping for every section, regardless of its length.
+        buffer = _work_buffer(scratch, x)
+        shaped = filtfilt_stream(
+            sos, x[c0:c1], check_cancel=check, out=buffer[: c1 - c0] if buffer is not None else None
+        )
         for s0 in range(lo, hi, 1 << 20):
             check()
             s1 = min(hi, s0 + (1 << 20))
@@ -269,6 +276,7 @@ def render(
     progress: Progress | None = None,
     *,
     disk_backed: bool | None = None,
+    calibration: AuditionCalibration | None = None,
 ) -> dict[str, Any]:
     """Render the master. Returns the report described in docs/ARCHITECTURE.md (Enhance in detail)."""
     progress = progress or Progress.null()
@@ -282,7 +290,7 @@ def render(
         scratch = ScratchBuffers(stack, work_dir, progress.check_cancel) if use_scratch and n > 0 else None
         staging_dir = stack.enter_context(TemporaryDirectory(dir=out_master.parent, prefix='.render-'))
         staged = Path(staging_dir) / 'master.flac'
-        report = _render(ref, staged, params, profile or {}, work_dir, progress, sr, n, scratch)
+        report = _render(ref, staged, params, profile or {}, work_dir, progress, sr, n, scratch, calibration)
         progress(100, 'Master ready')
         staged.replace(out_master)
     report['master_path'] = str(out_master)
@@ -299,6 +307,7 @@ def _render(
     sr: int,
     n: int,
     scratch: ScratchBuffers | None,
+    calibration: AuditionCalibration | None,
 ) -> dict[str, Any]:
     t0 = time.time()
     steps: list[str] = []
@@ -306,6 +315,8 @@ def _render(
     ai_report = None
     deess_stats: dict[str, Any] = {'engaged': False, 'skip_reason': 'off'}
     adaptive_stats: dict[str, Any] = {'engaged': False, 'skip_reason': 'off'}
+    audition = calibration or AuditionCalibration()
+    retained = {'version': CALIBRATION_VERSION, 'sample_rate_hz': sr}
 
     # --- input + optional AI stage -------------------------------------------
     use_ai = params.ai_stage in ('stem_eq', 'voice_isolate')
@@ -315,7 +326,8 @@ def _render(
     x = _read_ref(ref, warnings, check_cancel=progress.check_cancel, out=out)
     del out
     input_metrics = _measure(x, sr, check_cancel=progress.check_cancel)
-    if n == 0 or input_metrics['true_peak_dbtp'] < SILENCE_DBFS:
+    silent = input_metrics['true_peak_dbtp'] < SILENCE_DBFS
+    if n == 0 or (silent and calibration is None):
         raise AudioLabError(
             'This file is silent — there is nothing to enhance.',
             hints=[
@@ -347,6 +359,7 @@ def _render(
             use_ai = False
         elif params.ai_stage == 'stem_eq':
             steps.append('Split the mix into drums, bass, vocals and the rest with AI and applied EQ to each part')
+            adaptive_stats = {'engaged': False, 'skip_reason': 'AI stem EQ already shapes the low-mids'}
             deess_stats = res.get('deess') or deess_stats
             if deess_stats.get('engaged'):
                 steps.append(_deess_step(deess_stats, 'in the separated vocals'))
@@ -374,8 +387,15 @@ def _render(
         p(32, 'Shaping the tone...')
         if params.adaptive_lowmid_db > 0:
             x, adaptive_stats = control_lowmids(
-                x, sr, params.adaptive_lowmid_db, check_cancel=p.check_cancel, band_buffer=_work_buffer(scratch, x)
+                x,
+                sr,
+                params.adaptive_lowmid_db,
+                check_cancel=p.check_cancel,
+                band_buffer=_work_buffer(scratch, x),
+                calibration=audition.lowmid,
             )
+            if detector := adaptive_stats.pop('_calibration', None):
+                retained['lowmid'] = detector
             if adaptive_stats['engaged']:
                 steps.append(
                     f'Controlled brief low-mid rises (at most {adaptive_stats["max_gr_db"]:.1f} dB, '
@@ -396,16 +416,14 @@ def _render(
             x = _filter(highshelf_fq(11000.0, params.air_db, s=1.0, sr=sr), x, p.check_cancel, scratch)
             steps.append(f'Adjusted the high frequencies ({params.air_db:+.1f} dB)')
     if params.eq_bands and not params.volume_only:
-        # One SOS cascade, one zero-phase pass: each band's g/2 design squares to the DAW bell's response.
+        # One SOS cascade and one forward/backward pass. Each stage uses half the requested gain in dB.
         sos = np.concatenate([peak_fq(b['hz'], b['db'], q=b['q'], sr=sr) for b in params.eq_bands])
         x = _filter(sos, x, p.check_cancel, scratch)
         steps.append(f'Applied your custom EQ ({len(params.eq_bands)} band{"s" if len(params.eq_bands) != 1 else ""})')
     if params.section_eq and not params.volume_only:
-        done = apply_section_eq(x, params.section_eq, sr, p.check_cancel)
+        done = apply_section_eq(x, params.section_eq, sr, p.check_cancel, scratch=scratch)
         if done:
             steps.append(f'Applied your section EQ to {done} part{"s" if done != 1 else ""} of the recording')
-    elif use_ai and params.ai_stage == 'stem_eq':
-        adaptive_stats = {'engaged': False, 'skip_reason': 'AI stem EQ already shapes the low-mids'}
 
     # --- HF restore (opt-in exciter) -----------------------------------------
     cutoff = (profile.get('bandwidth') or {}).get('cutoff_hz')
@@ -440,7 +458,10 @@ def _render(
         comp_stats['mode'] = 'glue'
     elif params.compressor == 'leveler':
         p(62, 'Evening out the levels...')
-        thresh = integrated_lufs(x, sr=sr, check_cancel=p.check_cancel) + 3.0
+        thresh = audition.leveler_threshold_dbfs
+        if thresh is None:
+            thresh = integrated_lufs(x, sr=sr, check_cancel=p.check_cancel) + 3.0
+        retained['leveler_threshold_dbfs'] = thresh
         x, comp_stats = glue_comp(
             x,
             thresh_dbfs=thresh,
@@ -469,36 +490,61 @@ def _render(
         p(66, 'Softening sharp S sounds...')
         mix = params.deess_mix and params.ai_stage != 'voice_isolate'
         x, deess_stats = deess(
-            x, sr, max_gr_db=params.deess_db, mix=mix, check_cancel=p.check_cancel, band_buffer=_work_buffer(scratch, x)
+            x,
+            sr,
+            max_gr_db=params.deess_db,
+            mix=mix,
+            check_cancel=p.check_cancel,
+            band_buffer=_work_buffer(scratch, x),
+            calibration=audition.deess,
         )
+        if detector := deess_stats.pop('_calibration', None):
+            retained['deess'] = detector
         if deess_stats.get('engaged'):
             steps.append(_deess_step(deess_stats, 'and cymbal hits'))
 
     # --- light: DC offset (inaudible, but it eats headroom) --------------------
     tp_now = None  # true peak of x when already known
-    dc_removed = False
+    dc = np.zeros(2, dtype=np.float32)
     if params.volume_only:
         tp_now = input_metrics['true_peak_dbtp']
-        dc = sum(x[s].sum(axis=0, dtype=np.float64) for s in blocks(len(x), p.check_cancel)) / len(x)
-        if float(np.abs(dc).max()) > DC_ALERT:
+        if audition.volume_dc is not None:
+            dc = np.array(audition.volume_dc, dtype=np.float32)
+        else:
+            mean = sum(x[s].sum(axis=0, dtype=np.float64) for s in blocks(len(x), p.check_cancel)) / len(x)
+            if float(np.abs(mean).max()) > DC_ALERT:
+                dc = mean.astype(np.float32)
+        if dc.any():
             for s in blocks(len(x), p.check_cancel):
-                x[s] -= dc.astype(np.float32)
+                x[s] -= dc
             tp_now = true_peak_db(x, check_cancel=p.check_cancel)
-            dc_removed = True  # the input measurement no longer describes x
             steps.append('Removed an inaudible DC offset (the waveform sat off-centre and wasted headroom)')
+    dc_removed = bool(dc.any())
 
     # --- loudness --------------------------------------------------------------
     p(72, f'Setting loudness to {params.target_lufs:+.1f} LUFS...')
     p.check_cancel()
-    # Light changed nothing so far (unless a DC offset went): the input measurement is still valid.
-    if params.volume_only and not dc_removed:
+    if audition.volume_programme_lufs is not None:
+        i0 = audition.volume_programme_lufs
+        gain_db = params.target_lufs - i0
+    elif audition.pre_limiter_gain_db is not None:
+        gain_db = audition.pre_limiter_gain_db
+        i0 = params.target_lufs - gain_db
+    elif params.volume_only and not dc_removed:
+        # Light changed nothing so far: the input measurement is still valid.
         i0 = input_metrics['integrated_lufs']
+        gain_db = params.target_lufs - i0
     else:
         i0 = programme_loudness(x, sr=sr, check_cancel=p.check_cancel)
-    gain_db = params.target_lufs - i0
-    capped = tp_now is not None and tp_now + gain_db - params.tp_ceiling_db > LIGHT_MAX_LIMIT_DB
+        gain_db = params.target_lufs - i0
+    if silent and audition.pre_limiter_gain_db is None:
+        gain_db = 0.0  # a silent passage has no useful section loudness to normalize
+    peak_for_cap = audition.volume_peak_dbtp if audition.volume_peak_dbtp is not None else tp_now
+    if params.volume_only:
+        retained['volume'] = {'dc': dc.tolist(), 'peak_dbtp': peak_for_cap, 'programme_lufs': i0}
+    capped = peak_for_cap is not None and peak_for_cap + gain_db - params.tp_ceiling_db > LIGHT_MAX_LIMIT_DB
     if capped:
-        gain_db = params.tp_ceiling_db + LIGHT_MAX_LIMIT_DB - tp_now
+        gain_db = params.tp_ceiling_db + LIGHT_MAX_LIMIT_DB - peak_for_cap
         warnings.append(
             f'Stayed at {i0 + gain_db:.1f} LUFS instead of {params.target_lufs:.1f}: getting louder '
             f'would have needed more than {LIGHT_MAX_LIMIT_DB:.0f} dB of peak limiting, which '
@@ -530,17 +576,24 @@ def _render(
         x, tp_stats = tp_limit(
             x, ceiling_db=params.tp_ceiling_db, sr=sr, check_cancel=p.check_cancel, in_place=True, scratch=scratch
         )
+    safety_gain = 0.0
     if not tp_stats.get('ceiling_met', True):
-        over = float(tp_stats['tp_after']) - params.tp_ceiling_db + 0.05
-        gain = np.float32(10.0 ** (-over / 20.0))
+        safety_gain = params.tp_ceiling_db - float(tp_stats['tp_after']) - 0.05
+    # Use one post-limiter gain. A retained whole-master correction also affects quiet passages.
+    corrective_gain = min(audition.post_limiter_gain_db or 0.0, safety_gain)
+    if corrective_gain < 0.0:
+        gain = np.float32(10.0 ** (corrective_gain / 20.0))
         for s in blocks(len(x), p.check_cancel):
             x[s] *= gain
-        tp_stats['corrective_gain_db'] = round(-over, 2)
+        tp_stats['corrective_gain_db'] = round(corrective_gain, 2)
         tp_stats['ceiling_met'] = true_peak_db(x, check_cancel=p.check_cancel) <= params.tp_ceiling_db + 0.01
-        warnings.append(
-            f'Peaks needed more control than the limiter allows, so the whole master was turned '
-            f'down {over:.1f} dB to stay distortion-free.'
-        )
+        if corrective_gain < safety_gain:
+            warnings.append(f'Used the saved version’s whole-recording peak correction ({corrective_gain:.1f} dB).')
+        else:
+            warnings.append(
+                f'Peaks needed more control than the limiter allows, so the whole master was turned '
+                f'down {-corrective_gain:.1f} dB to stay within the ceiling.'
+            )
     if tp_stats.get('engaged'):
         steps.append(
             f'Caught peaks so nothing clips (≤ {params.tp_ceiling_db:.2f} dBTP, '
@@ -556,7 +609,12 @@ def _render(
     p.check_cancel()
     # The limiter (or, in Light, the prediction) already measured the final true peak.
     known_tp = None if 'corrective_gain_db' in tp_stats else tp_stats['tp_after']
-    if params.volume_only and not (tp_stats.get('engaged') or dc_removed) and i0 - abs(gain_db) > -45.0:
+    if (
+        calibration is None
+        and params.volume_only
+        and not (tp_stats.get('engaged') or dc_removed or corrective_gain)
+        and i0 - abs(gain_db) > -45.0
+    ):
         # Pure gain: loudness and LRA move with it exactly. (Only the fixed -70 LUFS gate does
         # not, and blocks near it sit far below the relative gates at this level.)
         final = {
@@ -575,7 +633,10 @@ def _render(
             f'Made it {abs(delta):.1f} dB {"louder" if delta > 0 else "quieter"} '
             f'({input_metrics["integrated_lufs"]:.1f} → {final["integrated_lufs"]:.1f} LUFS)',
         )
-    if abs(final['integrated_lufs'] - params.target_lufs) > 0.6 and not (capped or tp_stats.get('corrective_gain_db')):
+    # A passage rendered with the recording's retained gain is not expected to measure at the target.
+    retained_gain = audition.pre_limiter_gain_db is not None or audition.volume_programme_lufs is not None
+    off_target = abs(final['integrated_lufs'] - params.target_lufs) > 0.6
+    if tp_stats.get('engaged') and off_target and not (retained_gain or capped or tp_stats.get('corrective_gain_db')):
         warnings.append(
             f'Ended at {final["integrated_lufs"]:.1f} LUFS instead of {params.target_lufs:.1f} '
             f'(peak limiting took some loudness).'
@@ -586,6 +647,7 @@ def _render(
         'lra': final['lra'],
         'input': input_metrics,
         'loudness_gain_db': round(gain_db, 2),
+        'calibration': {**retained, 'pre_limiter_gain_db': gain_db, 'post_limiter_gain_db': corrective_gain},
         'compressor': comp_stats,
         'deess': deess_stats,
         'adaptive_lowmid': adaptive_stats,

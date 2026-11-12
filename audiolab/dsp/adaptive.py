@@ -94,6 +94,7 @@ def control_lowmids(
     check_cancel=None,
     *,
     band_buffer: np.ndarray | None = None,
+    calibration: dict[str, float] | None = None,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Modify x in place; return it and a bounded, JSON-safe account of actual changes."""
     check = check_cancel or (lambda: None)
@@ -112,7 +113,10 @@ def control_lowmids(
     hop = max(1, round(sr * HOP_S))
     full_power = _powers(x, hop, check)
     level = 10.0 * np.log10(full_power + 1e-24)
-    audible = level > max(-65.0, float(np.percentile(level, 95)) - 35.0)
+    gate_dbfs = (
+        calibration['gate_dbfs'] if calibration is not None else max(-65.0, float(np.percentile(level, 95)) - 35.0)
+    )
+    audible = level > gate_dbfs
     stats['windows_total'] = len(level)
     if audible.sum() < 40:
         return x, {**stats, 'skip_reason': 'too little audible context'}
@@ -138,7 +142,9 @@ def control_lowmids(
             threshold = reference[start] + MARGIN_DB
             lo = _event_edge(share, audible, candidate, start, -1, threshold)
             hi = _event_edge(share, audible, candidate, stop - 1, 1, threshold) + 1
-        if 3 <= run_hops and hi - lo <= _MAX_EVENT_HOPS and hi < len(share):
+        # A contrast already present at the start or still present at the end
+        # lacks one of the transitions needed to identify an isolated rise.
+        if 3 <= run_hops and hi - lo <= _MAX_EVENT_HOPS and 0 < lo and hi < len(share):
             eligible[start:stop] = True
         elif hi - lo > _MAX_EVENT_HOPS:
             sustained[start:stop] = True
@@ -155,7 +161,10 @@ def control_lowmids(
         kept = float(np.sum(band_power * 10.0 ** (-gain / 10.0)))
         return float(10.0 * np.log10(max(1e-24, kept / energy))) if energy else 0.0
 
-    if band_change(gr) < -MAX_BAND_CHANGE_DB:
+    budget_scale = 1.0
+    if calibration is not None:
+        budget_scale = calibration['budget_scale']
+    elif band_change(gr) < -MAX_BAND_CHANGE_DB:
         lo, hi = 0.0, 1.0
         for _ in range(12):
             check()
@@ -164,7 +173,9 @@ def control_lowmids(
                 hi = mid
             else:
                 lo = mid
-        gr *= lo
+        budget_scale = lo
+    gr *= budget_scale
+    stats['_calibration'] = {'gate_dbfs': gate_dbfs, 'budget_scale': budget_scale}
     if gr.max(initial=0.0) < 0.1:
         return x, {**stats, 'skip_reason': 'no isolated low-mid rises needing control'}
 

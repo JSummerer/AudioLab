@@ -114,7 +114,9 @@ def test_cancellation_after_first_output_block():
         control_lowmids(x, SR, check_cancel=check)
 
 
-@pytest.mark.parametrize('duration,event', [(3.99, (1, 2)), (4, (3.5, 4)), (40, (12.37, 22.37))])
+@pytest.mark.parametrize(
+    'duration,event', [(3.99, (1, 2)), (4, (3.5, 4)), (20, (0, 1)), (20, (19, 20)), (40, (12.37, 22.37))]
+)
 def test_uncertain_edges_and_off_grid_sustained_change_pass(duration, event):
     x = fixture(duration=duration, event=event)
     y, stats = control_lowmids(x.copy(), SR)

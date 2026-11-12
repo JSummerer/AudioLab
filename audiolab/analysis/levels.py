@@ -1,11 +1,13 @@
-"""Whole-reference levels from bounded 48 kHz reads, independent of spectral excerpts."""
+"""Whole-reference levels and stereo measurements from bounded 48 kHz reads."""
 
+import math
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+from scipy.signal import butter, sosfilt
 
 from ..context import Progress
 from ..dsp.limiter import TRUE_PEAK_CONTEXT, true_peak_db
@@ -15,6 +17,11 @@ from .tone import block_bands, tone_timeline
 SILENCE_DBFS = -80.0  # sample peak below this is treated as silence
 _SILENCE_PEAK = 10.0 ** (SILENCE_DBFS / 20.0)
 _SCAN_BLOCK_S = 10
+_BASS_FOLD_HZ = 90.0  # Club mono-bass crossover
+_BASS_CORRELATION_WINDOW_S = 0.5
+_BASS_MIN_POWER = 10.0 ** (-80.0 / 10.0)  # -80 dBFS RMS
+_BASS_MIN_SHARE = 10.0 ** (-35.0 / 10.0)  # -35 dB relative to local broadband power
+OVERVIEW_MAX_BINS = 512
 
 
 @dataclass(frozen=True)
@@ -26,8 +33,40 @@ class ProgrammeLevels:
     dc_offset: float
     percentiles: dict[str, float]
     audible_span: tuple[int, int] | None
+    stereo: dict[str, float | bool | None]
     density: dict[str, float] | None = None  # programme_density (long recordings)
     tone_timeline: dict | None = None  # analysis.tone: how the tonal balance moves (chart data)
+    overview: dict | None = None
+
+
+class LevelOverview:
+    """Maximum absolute sample across both channels in consecutive, continuous bins."""
+
+    def __init__(self, frames: int, sr: int):
+        self._frames = frames
+        self._sr = sr
+        self._size = max(1, sr // 10, (frames + OVERVIEW_MAX_BINS - 1) // OVERVIEW_MAX_BINS)
+        self._peaks = [0.0] * ((frames + self._size - 1) // self._size)
+
+    def add(self, x: np.ndarray, offset: int, check_cancel) -> None:
+        limit = offset + len(x)
+        pos = offset
+        while pos < limit:
+            check_cancel()
+            # The scan reads 10 s chunks that need not align with the overview bins.
+            index = pos // self._size
+            end = min(limit, (index + 1) * self._size)
+            chunk = x[pos - offset : end - offset]
+            self._peaks[index] = max(self._peaks[index], float(chunk.max()), -float(chunk.min()))
+            pos = end
+
+    def result(self) -> dict:
+        return {
+            'basis': 'original_sample_peak',
+            'duration_s': self._frames / self._sr,
+            'bin_duration_s': self._size / self._sr,
+            'peaks': [round(peak, 6) for peak in self._peaks],
+        }
 
 
 def stereo_samples(x: np.ndarray) -> np.ndarray:
@@ -39,6 +78,79 @@ def stereo_samples(x: np.ndarray) -> np.ndarray:
     if not np.isfinite(x).all():
         x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
     return x
+
+
+def _correlation(energy: np.ndarray) -> float:
+    left, right, cross = energy
+    denominator = math.sqrt(left) * math.sqrt(right)
+    return max(-1.0, min(1.0, float(cross) / denominator)) if denominator else 0.0
+
+
+class _StereoScan:
+    """Accumulate stereo energy and keep the lowest meaningful local bass correlation."""
+
+    def __init__(self, sr: int):
+        # Two causal passes have the crossover's squared low-pass magnitude. Carry the state
+        # between reads. The phase delay is shared by both channels, and the local windows overlap.
+        sos = butter(2, _BASS_FOLD_HZ, 'lowpass', fs=sr, output='sos')
+        self._sos = np.tile(sos, (2, 1))
+        self._state = np.zeros((len(self._sos), 2, 2))
+        self._hop = max(1, round(sr * _BASS_CORRELATION_WINDOW_S / 2))
+        self._frames = 0
+        self._mid = self._side = 0.0
+        self._bass = np.zeros(3)
+        self._previous: tuple[np.ndarray, float, int] | None = None
+        self._lowest: float | None = None
+
+    def _consider(self, bass: np.ndarray, broadband: float, frames: int) -> None:
+        if (bass[0] + bass[1]) / 2 < max(frames * _BASS_MIN_POWER, broadband * _BASS_MIN_SHARE):
+            return  # inaudible bass or low-pass leakage from much louder higher frequencies
+        corr = _correlation(bass)
+        self._lowest = corr if self._lowest is None else min(self._lowest, corr)
+
+    def add(self, x: np.ndarray) -> None:
+        low, self._state = sosfilt(self._sos, x, axis=0, zi=self._state)
+        self._frames += len(x)
+        for start in range(0, len(x), self._hop):
+            stop = start + self._hop
+            left, right = x[start:stop].T.astype(np.float64)
+            mid, side = (left + right) * 0.5, (left - right) * 0.5
+            mid_energy, side_energy = float(mid @ mid), float(side @ side)
+            self._mid += mid_energy
+            self._side += side_energy
+            left, right = low[start:stop].T
+            bass = np.array([left @ left, right @ right, left @ right])
+            self._bass += bass
+            broadband = mid_energy + side_energy
+            if self._previous is not None:
+                prev_bass, prev_broadband, prev_frames = self._previous
+                self._consider(bass + prev_bass, broadband + prev_broadband, len(left) + prev_frames)
+            self._previous = bass, broadband, len(left)
+
+    def result(self) -> dict[str, float | bool | None]:
+        if self._previous is not None and self._frames <= self._hop:
+            self._consider(*self._previous)
+        floor = max(1, self._frames) * 1e-20
+        width_db = 10.0 * math.log10((self._side + floor) / (self._mid + floor))
+        return {
+            'width_db': round(width_db, 1),
+            'is_mono': width_db < -40.0,
+            'antiphase_bass': self._lowest is not None and self._lowest < 0.0,
+            'bass_correlation': round(_correlation(self._bass), 2),
+            'lowest_bass_correlation': None if self._lowest is None else round(self._lowest, 2),
+        }
+
+
+def stereo_info(x: np.ndarray, sr: int, check_cancel=None) -> dict[str, float | bool | None]:
+    """Measure an already loaded recording with the same bounded blocks as the file scan."""
+    stereo = _StereoScan(sr)
+    block = _SCAN_BLOCK_S * sr
+    for start in range(0, len(x), block):
+        if check_cancel is not None:
+            check_cancel()
+        own = x[start : start + block]
+        stereo.add(stereo_samples(own[:, None] if own.ndim == 1 else own))
+    return stereo.result()
 
 
 def frame_rms_db(x: np.ndarray, sr: int, frame_s: float = 0.05) -> np.ndarray:
@@ -85,20 +197,27 @@ def _windows(
         yield stereo_samples(window), (start - first, stop - first), start
 
 
-def scan_levels(path: Path, sr: int, frames: int, progress: Progress | None = None) -> ProgrammeLevels:
-    """Measure complete programme levels with small overlapping reads and a single K-weighting pass."""
+def scan_levels(
+    path: Path, sr: int, frames: int, progress: Progress | None = None, *, include_overview: bool = False
+) -> ProgrammeLevels:
+    """Measure complete programme levels and stereo with small overlapping reads."""
     progress = progress or Progress.null()
     rms, bin_peaks, bins, band_blocks = [], [], [], []
     tp, sample_peak = -480.0, 0.0
     clipped = 0
     channel_sum = np.zeros(2)
     first_audible = last_audible = None
+    stereo = _StereoScan(sr)
+    overview = LevelOverview(frames, sr) if include_overview else None
 
     def samples():
         nonlocal tp, sample_peak, clipped, first_audible, last_audible
         for window, span, offset in _windows(path, sr, frames, TRUE_PEAK_CONTEXT, progress):
             start, stop = span
             own = window[start:stop]
+            if overview is not None:
+                overview.add(own, offset, progress.check_cancel)
+            stereo.add(own)
             channel_sum[:] += own.sum(axis=0, dtype=np.float64)
             rms.append(frame_rms_db(own, sr))
             bin_peaks.append(_bin_peaks(own, sr // 10))
@@ -132,8 +251,10 @@ def scan_levels(path: Path, sr: int, frames: int, progress: Progress | None = No
         dc_offset=float(np.abs(channel_sum).max() / max(1, frames)),
         percentiles=programme_percentiles(np.concatenate(rms) if rms else np.empty(0)),
         audible_span=None if first_audible is None else (first_audible, last_audible),
+        stereo=stereo.result(),
         density=programme_density(bins[0], np.concatenate(bin_peaks)) if bins and bin_peaks else None,
         tone_timeline=tone_timeline(np.array(band_blocks), _SCAN_BLOCK_S) if band_blocks else None,
+        overview=overview.result() if overview is not None else None,
     )
 
 

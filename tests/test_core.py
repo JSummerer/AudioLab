@@ -358,6 +358,33 @@ def test_restart_marks_interrupted_jobs(tmp_path):
     assert (root / kept.id / 'work' / 'scratch').is_dir()
 
 
+def test_restart_discards_adjust_auditions_left_by_a_closed_window(tmp_path):
+    import json
+    from dataclasses import asdict
+
+    from audiolab.jobs import Job
+
+    root = tmp_path / 'jobs'
+    paired = {'_preview': {'paired': True}}
+    jobs = {
+        'audition': Job(id='j_20260101_000000_aaaaaa', task='enhance', source={}, options=paired, status='done'),
+        'interrupted': Job(id='j_20260101_000001_bbbbbb', task='enhance', source={}, options=paired, status='running'),
+        'legacy': Job(
+            id='j_20260101_000002_cccccc', task='enhance', source={}, options={'_preview': {}}, status='done'
+        ),
+        'apply': Job(id='j_20260101_000003_dddddd', task='enhance', source={}, options={}, status='done'),
+    }
+    for job in jobs.values():
+        (root / job.id / 'work' / 'previews').mkdir(parents=True)
+        (root / job.id / 'job.json').write_text(json.dumps(asdict(job)))
+    m = new_manager(root)
+    m._load()
+    for name in ('audition', 'interrupted'):
+        assert m.get(jobs[name].id) is None and not (root / jobs[name].id).exists(), name
+    for name in ('legacy', 'apply'):  # the older preview dialog's jobs and ordinary jobs keep normal retention
+        assert m.get(jobs[name].id).status == 'done' and (root / jobs[name].id / 'work' / 'previews').is_dir(), name
+
+
 # --------------------------------------------------------------------- API
 def _wav_bytes(seconds=1.0, sr=48000):
     buf = io.BytesIO()

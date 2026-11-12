@@ -1,7 +1,10 @@
 // Section EQ: the client checks match the server's main rules (docs/API.md `section_eq`).
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { checkSections, sectionRows, sameSections, suggestBands } from '../../audiolab/web/js/section-eq.js';
+import {
+  checkSections, dragSectionEdge, parseFade, sectionRows, sameSections, sectionFromAudition, sectionFullStrength,
+} from '../../audiolab/web/js/section-eq.js';
+import { clockText } from '../../audiolab/web/js/dom.js';
 
 const row = (from, to, text = '14 kHz -2 dB Q 0.7', fade = '') => ({ from, to, fade, text });
 const band = { hz: 14000, db: -2, q: 0.7 };
@@ -32,13 +35,50 @@ test('saved sections become rows that check back to the same sections', () => {
   assert.ok(!sameSections(saved.slice(1), saved));
 });
 
-test('a suggestion is half the part’s difference from the typical balance, cuts up to 2 dB, never boosts the highs', () => {
-  const hz = [[30, 80], [80, 200], [200, 500], [500, 2000], [2000, 6000], [6000, 12000], [12000, 20000]];
-  const tl = { step_s: 60, bands: hz.map((r, i) => ({ key: `b${i}`, hz: r })), values: [
-    [0, 0, 0, 0, 0, 0, 0], [3, 0.5, -3, 0, 0, -4, 1.5], null, [3, 0.5, -3, 0, 0, -4, 0.5], [0, 0, 0, 0, 0, -4, 0]] };
-  assert.deepEqual(suggestBands(tl, 60, 240), { differs: true, bands: [
-    { hz: 49, db: -1.5, q: 0.8 }, { hz: 320, db: 1, q: 0.8 }, { hz: 15000, db: -0.5, q: 0.8 }] });
-  assert.deepEqual(suggestBands(tl, 240, 300), { differs: true, bands: [] }, 'only lower highs: nothing to boost');
-  assert.deepEqual(suggestBands(tl, 0, 60), { differs: false, bands: [] });
-  assert.equal(suggestBands(tl, 125, 175), null, 'a quiet stretch has no reading');
+test('exactly ten seconds with five-second fades is valid, including touching sections and millisecond round trips', () => {
+  const { sections, errors } = checkSections([row('0:01.001', '0:11.001'), row('11.0007', '21.001', '14 kHz -2 dB Q 0.7', '5.004')], 21.001);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(sections, [
+    { start_s: 1.001, end_s: 11.001, fade_s: 5, bands: [band] },
+    { start_s: 11.001, end_s: 21.001, fade_s: 5, bands: [band] },
+  ]);
+  assert.deepEqual(checkSections(sectionRows(sections), 21.001).sections, sections);
+  assert.deepEqual(sectionFullStrength(sections[0]), { start: 6.001, end: 6.001 });
+  assert.equal(checkSections([row('0', '10', '14 kHz -2 dB Q 0.7', '5.005')]).errors.length, 1);
+  assert.equal(checkSections([row('0', '10.001')], 10).errors.length, 1);
+});
+
+test('create a section around a short audition with explicit scope and boundary fades', () => {
+  const inner = sectionFromAudition({ start: 15, end: 20 }, 40);
+  assert.deepEqual(inner.section, { start_s: 12.5, end_s: 22.5, fade_s: 0.5, bands: [] });
+  assert.match(inner.message, /Section 0:12\.5–0:22\.5.*Full strength 0:13–0:22/);
+  assert.doesNotMatch(inner.message, /Part of the audition/);
+  const start = sectionFromAudition({ start: 0, end: 5 }, 40);
+  assert.deepEqual(start.section, { start_s: 0, end_s: 10, fade_s: 0.5, bands: [] });
+  assert.match(start.message, /Part of the audition lies in a fade/);
+  const end = sectionFromAudition({ start: 35, end: 40 }, 40);
+  assert.deepEqual(end.section, { start_s: 30, end_s: 40, fade_s: 0.5, bands: [] });
+  assert.match(end.message, /Part of the audition lies in a fade/);
+  const neighbors = [{ start_s: 0, end_s: 10 }, { start_s: 20, end_s: 40 }];
+  const touching = sectionFromAudition({ start: 10, end: 15 }, 40, neighbors);
+  assert.deepEqual(touching.section, { start_s: 10, end_s: 20, fade_s: 0.5, bands: [] });
+  assert.match(touching.message, /Part of the audition lies in a fade/);
+  assert.equal(sectionFromAudition({ start: 8, end: 15 }, 40, neighbors).section, null);
+  assert.equal(sectionFromAudition({ start: 2, end: 7 }, 9.999).section, null);
+});
+
+test('dragging an edge stops where the validator still accepts the section, using its fade units', () => {
+  const bounds = { start_s: 0, end_s: 20, fade_s: 5.005 };
+  const end = dragSectionEdge(bounds, [], 30, 'end', 3);
+  assert.equal(clockText(end), '0:10.02');
+  const row = { from: '0', to: clockText(end), fade: '5.005', text: '1000 Hz +1 dB Q 1' };
+  assert.deepEqual(checkSections([row], 30).errors, []);
+  const neighbours = [{ start_s: 25, end_s: 40, fade_s: 0.5 }];
+  assert.equal(dragSectionEdge(bounds, neighbours, 60, 'end', 31), 25);
+  assert.equal(dragSectionEdge({ start_s: 12, end_s: 22, fade_s: 0.5 }, [{ start_s: 0, end_s: 10, fade_s: 0.5 }], 60, 'start', 0), 10);
+  assert.equal(dragSectionEdge({ start_s: 0, end_s: 10, fade_s: 5 }, [], 9, 'end', 12), null);
+  assert.equal(dragSectionEdge({ start_s: 0, end_s: 20, fade_s: -2 }, [], 30, 'end', 15), null);
+  assert.equal(Number.isNaN(parseFade('1e1')), true);
+  assert.equal(Number.isNaN(sectionFullStrength({ start_s: 10, end_s: 20, fade_s: -2 }).start), true);
+  assert.equal(Number.isNaN(sectionFullStrength({ start_s: 5, end_s: 8, fade_s: 0.5 }).start), true);
 });

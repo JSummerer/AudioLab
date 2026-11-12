@@ -106,14 +106,10 @@ const resultLabel = (file) =>
 /** The full-length comparison of a Library entry: its kept original and its `compare_file_id`. */
 export function libraryCompare(entry, extra = {}) {
   const file = (entry.files || []).find((f) => f.id === entry.compare_file_id);
-  // The chosen export can have a different level from the master after encoding.
-  // Only entries that predate verification fall back to the historical measurement.
-  const measured = Object.hasOwn(file, 'verification');
-  const check = file.verification;
-  const loudness = measured ? {
+  const loudness = {
     original_lufs: entry.loudness?.original_lufs,
-    result_lufs: ['verified', 'warning'].includes(check?.status) ? check.integrated_lufs : null,
-  } : entry.loudness;
+    result_lufs: versionLoudness(entry, file),
+  };
   const side = (fileId, label) => ({
     label,
     url: (offset, frames) => url(`/api/library/${encodeURIComponent(entry.id)}/pcm/${encodeURIComponent(fileId)}`, { offset, frames }),
@@ -127,7 +123,7 @@ export function libraryCompare(entry, extra = {}) {
     markers: entry.markers,
     reductions: entry.processing?.applied,
     loudness,
-    showMatchUnavailable: measured,
+    showMatchUnavailable: Object.hasOwn(file, 'verification'),
     ...extra,
   });
 }
@@ -144,10 +140,13 @@ export function versionFile(entry, formats = []) {
   return picked || files.find(lossless) || files[0] || null;
 }
 
-/** A version's loudness for matching: its file's export check, else the entry's master measurement. */
+/** A version's loudness for matching. Only entries without an export check use the historical measurement. */
 export function versionLoudness(entry, file) {
-  const check = file?.verification;
-  if (['verified', 'warning'].includes(check?.status) && Number.isFinite(check.integrated_lufs)) return check.integrated_lufs;
+  if (file && Object.hasOwn(file, 'verification')) {
+    const check = file.verification;
+    return ['verified', 'warning'].includes(check?.status) && Number.isFinite(check.integrated_lufs)
+      ? check.integrated_lufs : null;
+  }
   const lufs = entry?.loudness?.result_lufs;
   return Number.isFinite(lufs) ? lufs : null;
 }
@@ -272,7 +271,8 @@ function reductionTimeline(applied, start, end, offset, cue) {
  * of the whole song for "Match volume", the first and the second side's (null: no switch
  * unless showMatchUnavailable),
  * note: one line under the player, reductions: reported processing stages, reductionOffset:
- * the song time of the stage timelines' frame 0 (usually 0, or the start of a section render).
+ * the song time of the stage timelines' frame 0 (usually 0, or the start of a section render),
+ * missing: the message when a side is gone (404/410) instead of "moved or deleted".
  */
 export function comparePlayer(opts) {
   const sides = opts.sides.map((s) => ({ ...s, gain: null }));
@@ -632,7 +632,8 @@ export function comparePlayer(opts) {
     const which = e.side === sides[0] ? 'original' : 'result';
     if (e.status === 404 || e.status === 410) {
       destroy();
-      clear(root).append(callout('warning', null, `The ${which} couldn’t be loaded. It may have been moved or deleted.`, downloads()));
+      const message = opts.missing || `The ${which} couldn’t be loaded. It may have been moved or deleted.`;
+      clear(root).append(callout('warning', null, message, downloads()));
       return;
     }
     pause();

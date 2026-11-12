@@ -45,6 +45,18 @@ def get_tone_timeline(entry_id: str):
     return timeline
 
 
+@router.get('/api/library/{entry_id}/overview')
+def get_original_overview(entry_id: str):
+    entry = _entry(entry_id)
+    original = library.file_path(entry, 'original')
+    if original is None or not original.is_file():
+        raise HTTPException(410, 'The kept original is no longer available.')
+    overview = library.original_overview(entry.get('overview'))
+    if overview is None:
+        raise HTTPException(404, 'This version has no saved level overview.')
+    return overview
+
+
 def _entry(entry_id: str) -> dict:
     entry = library.get(entry_id)
     if entry is None:
@@ -71,13 +83,17 @@ def _finite(value: Any) -> bool:
 def _overrides(body: Any, is_preview: bool) -> dict:
     from ..tasks import enhance
 
-    allowed = {'advanced', 'start_s', 'duration_s'} if is_preview else {'advanced'}
+    allowed = {'advanced', 'start_s', 'duration_s', 'paired'} if is_preview else {'advanced'}
     if not isinstance(body, dict) or body.keys() - allowed or not isinstance(body.get('advanced', {}), dict):
         raise HTTPException(400, 'Send the changed settings as an advanced options object.')
+    if 'paired' in body and type(body['paired']) is not bool:
+        raise HTTPException(400, 'Choose a valid preview comparison.')
     advanced = body.get('advanced', {})
     for key, value in advanced.items():
         if key in enhance.RANGES:
             valid = _finite(value)
+        elif key == 'glue' and value is None:
+            valid = True
         elif key in enhance.CHOICES:
             valid = value in enhance.CHOICES[key]
         elif key == 'sample_rate':
@@ -101,9 +117,11 @@ def _overrides(body: Any, is_preview: bool) -> dict:
 
 def _preview_spec(state: State, entry: dict, body: dict, options: dict, overrides: dict) -> dict:
     from ..recipes import RECIPES
+    from ..recipes.base import ChainParams, preview_params
     from ..tasks import preview
 
     start, length = body.get('start_s'), body.get('duration_s')
+    paired = body.get('paired', False)
     if not _finite(start) or not 0 <= start < 1e9:
         raise HTTPException(400, 'Choose a valid preview start time.')
     if not _finite(length) or not preview.MIN_DURATION_S <= length <= preview.MAX_DURATION_S:
@@ -129,21 +147,47 @@ def _preview_spec(state: State, entry: dict, body: dict, options: dict, override
             bandwidth = processing.preview_bandwidth(((old_job.result or {}).get('analysis') or {}).get('bandwidth'))
     changes = {key: options['advanced'][key] for key in overrides if key in options['advanced']}
     restore = changes.get('hf_restore', 'on' if params.get('hf_restore') else 'off')
-    if options['quality'] != 'light' and restore == 'on':
+    if options['quality'] != 'light' and (restore == 'on' or (paired and params.get('hf_restore'))):
         old_override = (entry['processing']['requested'].get('advanced') or {}).get('hf_restore')
         # An earlier request to restore highs that resolved to off found no lossy cutoff.
         if bandwidth is None and old_override == 'on' and params.get('hf_restore') is False:
             bandwidth = {'is_lossy_cutoff': False}
         if bandwidth is None or (bandwidth.get('is_lossy_cutoff') and not bandwidth.get('cutoff_hz')):
             raise HTTPException(400, 'This version has no saved bandwidth for a Brighten muffled highs preview.')
-    return {
+    spec = {
         'start_s': start,
         'duration_s': length,
         'recipe': {'key': recipe.key, 'name': recipe.name},
         'params': params,
         'bandwidth': bandwidth or {},
         'advanced': changes,
+        'calibration': details.get('calibration'),
+        'paired': paired,
     }
+    # An unchanged audition must keep the full render's gain and detector decisions.
+    # Use an existing full-length export (lossless first), never a split track or cover.
+    saved = ChainParams(**params)
+    changed = preview_params(recipe.key, ChainParams(**params), {'bandwidth': bandwidth or {}}, changes)
+    if 'glue' in overrides and overrides['glue'] is None:
+        old_advanced = entry['processing']['requested'].get('advanced') or {}
+        if old_advanced.get('glue') in ('on', 'off') and not changed.volume_only:
+            auto = details.get('auto_compressor')
+            if auto not in ('off', 'glue', 'leveler'):
+                raise HTTPException(400, 'This version can reset compression to Auto when you save a new version.')
+            changed.compressor = auto
+    spec['draft_params'] = changed.to_dict()
+    if changed == saved and not paired:
+        files = [
+            f for f in entry.get('files') or [] if f.get('kind') == 'enhanced' and f.get('format') in export.FORMATS
+        ]
+        files.sort(key=lambda f: export.FORMATS[f['format']].kind != 'lossless')
+        for file in files:
+            path = library.file_path(entry, file['id'])
+            if path is not None and path.is_file():
+                spec['saved_export'] = {'path': str(path), 'format': file['format']}
+                spec['applied'] = entry['processing'].get('applied') or {}
+                break
+    return spec
 
 
 def _entry_covers(entry: dict, folder: Path) -> dict[str, str]:
@@ -179,6 +223,11 @@ def _enhance_original(state: State, entry_id: str, body: Any, is_preview: bool):
     overrides = _overrides(body, is_preview)
     if is_preview and saved['quality'] == 'best':
         raise HTTPException(400, 'Short previews are available for Volume only and Adaptive processing.')
+    if is_preview and body.get('paired') and saved['quality'] not in ('light', 'standard'):
+        raise HTTPException(400, 'Adjust is available for Volume only and Adaptive processing.')
+    if is_preview and body.get('paired') and saved['quality'] == 'light':
+        if overrides.keys() - {'target_lufs', 'tp_ceiling_db', 'sample_rate'}:
+            raise HTTPException(400, 'Volume only adjusts loudness and peak ceiling.')
     source = {
         'kind': 'file',
         'name': entry['original'].get('name') or f'{entry["title"]}{original.suffix}',

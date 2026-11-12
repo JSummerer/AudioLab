@@ -47,9 +47,16 @@ def _read(path: Path, start: int, n: int) -> np.ndarray:
 
 
 def make_previews(
-    source_ref: Path, master: Path, out_dir: Path, duration_s: float = 45.0, check_cancel=None, *, start_frame=None
+    source_ref: Path,
+    master: Path,
+    out_dir: Path,
+    duration_s: float = 45.0,
+    check_cancel=None,
+    *,
+    start_frame=None,
+    saved_master: Path | None = None,
 ) -> dict[str, Any]:
-    """Write the original/enhanced excerpts (16-bit WAV at the master's rate) and describe them."""
+    """Write aligned comparison WAVs with one common headroom gain."""
     out_dir = Path(out_dir)
     if check_cancel:
         check_cancel()
@@ -57,6 +64,10 @@ def make_previews(
     info_src, info_mst = sf.info(str(source_ref)), sf.info(str(master))
     sr = info_mst.samplerate
     total = min(info_src.frames, info_mst.frames)
+    refs = {'original': source_ref, 'enhanced': master}
+    if saved_master is not None:
+        total = min(total, sf.info(saved_master).frames)
+        refs['saved'] = saved_master
     if start_frame is None:
         n = min(total, int(duration_s * sr))
         start = _pick_start(Path(master), total, sr, n, check_cancel)
@@ -65,23 +76,22 @@ def make_previews(
         start = start_frame
         n = min(total - start, round(duration_s * sr))
 
-    src = _read(source_ref, start, n)
-    mst = _read(master, start, n)
-    m = min(len(src), len(mst))
-    src, mst = src[:m], mst[:m]
-
-    peak = max(float(np.abs(src).max(initial=0.0)), float(np.abs(mst).max(initial=0.0)))
+    crops = {key: _read(path, start, n) for key, path in refs.items()}
+    m = min(map(len, crops.values()))
+    peak = max(float(np.abs(data[:m]).max(initial=0.0)) for data in crops.values())
     shared = min(1.0, _HEADROOM / peak) if peak > 0 else 1.0
-    paths = {'original': out_dir / 'preview_original.wav', 'enhanced': out_dir / 'preview_enhanced.wav'}
-    for key, data in (('original', src), ('enhanced', mst)):
+    paths = {}
+    subtype = 'PCM_24' if saved_master is not None else 'PCM_16'
+    for key, data in crops.items():
         if check_cancel:
             check_cancel()
-        sf.write(str(paths[key]), np.clip(data * np.float32(shared), -1.0, 1.0), sr, subtype='PCM_16', format='WAV')
+        paths[key] = str(out_dir / f'preview_{key}.wav')
+        sf.write(paths[key], np.clip(data[:m] * np.float32(shared), -1.0, 1.0), sr, subtype=subtype, format='WAV')
 
     return {
-        'original': str(paths['original']),
-        'enhanced': str(paths['enhanced']),
+        **paths,
         'start_s': round(start / sr, 3),
         'duration_s': round(m / sr, 3),
-        'shared_gain_db': round(20.0 * math.log10(shared), 2),
+        'frames': m,
+        'shared_gain_db': 20.0 * math.log10(shared),
     }

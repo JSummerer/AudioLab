@@ -1,15 +1,21 @@
 """Continuous level measurements agree with the array meters and cover excerpt gaps."""
 
 import json
+import threading
 from dataclasses import asdict
 
 import numpy as np
 import pytest
 import soundfile as sf
+from fastapi.encoders import jsonable_encoder
 
 from audiolab.analysis import levels, profile
+from audiolab.context import Progress
+from audiolab.dsp.bus import mono_below
 from audiolab.dsp.limiter import true_peak_db
 from audiolab.dsp.loudness import lra, programme_loudness, stream_programme_levels
+from audiolab.errors import Cancelled
+from audiolab.recipes import resolve
 
 SR = 48000
 
@@ -73,6 +79,90 @@ def test_report_uses_whole_file_levels_when_spectral_excerpts_miss_the_loud_pass
     assert 'Peaks are too hot' in {alert['title'] for alert in report['alerts']}
 
 
+@pytest.mark.parametrize('side_gain', [0.0, 0.02], ids=['mono-excerpts', 'stereo-excerpts'])
+def test_club_auto_preserves_local_antiphase_bass_missed_by_excerpts(tmp_path, monkeypatch, side_gain):
+    monkeypatch.setattr(levels, '_SCAN_BLOCK_S', 1)
+    monkeypatch.setattr(profile, '_slice_plan', lambda duration: ([0.15, 0.85], 1.0, 'two excerpts'))
+    t = np.arange(8 * SR) / SR
+    fundamental = np.sin(2 * np.pi * 45 * t)
+    bass = 0.1 * fundamental
+    mids = 0.1 * np.sin(2 * np.pi * 997 * t)
+    side = side_gain * np.sin(2 * np.pi * 1300 * t)
+    # A short polarity change spans two file reads, outside both spectral excerpts.
+    antiphase = (t >= 3.74) & (t < 4.26)
+    audio = np.column_stack((mids + bass + side, mids + np.where(antiphase, -bass, bass) - side)).astype(np.float32)
+    path = tmp_path / 'local-antiphase.wav'
+    sf.write(path, audio, SR, subtype='FLOAT')
+
+    report, excerpts, _ = profile.analyze_file(path)
+
+    sampled_stereo = profile.stereo_info(excerpts, SR)
+    assert sampled_stereo['is_mono'] is (side_gain == 0)
+    assert sampled_stereo['bass_correlation'] == 1.0 and not sampled_stereo['antiphase_bass']
+    if side_gain:
+        assert resolve('club', {'stereo': sampled_stereo})[0].mono_bass_hz == 90.0
+    assert report['analysis_basis'] == 'two excerpts' and report['stereo_basis'] == 'whole file'
+    stereo = report['stereo']
+    assert stereo == profile.stereo_info(audio, SR)
+    assert jsonable_encoder(report)['stereo'] == stereo
+    assert not stereo['is_mono'] and stereo['antiphase_bass']
+    assert stereo['bass_correlation'] > 0.8 and stereo['lowest_bass_correlation'] < -0.9
+    assert any(alert['title'] == 'Bass is out of phase' for alert in report['alerts'])
+    auto, decisions = resolve('club', report)
+    assert auto.mono_bass_hz is None
+    assert any(d['key'] == 'mono_bass' and 'measured passage' in d['why'] for d in decisions)
+    forced, decisions = resolve('club', report, advanced={'mono_bass': 'on'})
+    assert forced.mono_bass_hz == 90.0
+    assert any(d['key'] == 'mono_bass' and 'folding may thin' in d['why'] for d in decisions)
+    folded = mono_below(audio, fc=forced.mono_bass_hz)
+    inside = (t >= 3.9) & (t < 4.1)
+    ratio = (folded[inside, 0] @ fundamental[inside]) / (audio[inside, 0] @ fundamental[inside])
+    assert 20 * np.log10(abs(ratio)) == pytest.approx(-24.6, abs=0.1)
+
+
+def test_in_phase_stereo_bass_keeps_club_auto_fold_and_mono_skips_it():
+    t = np.arange(SR) / SR
+    bass = 0.1 * np.sin(2 * np.pi * 45 * t)
+    side = 0.1 * np.sin(2 * np.pi * 1300 * t)
+    stereo = profile.stereo_info(np.column_stack((bass + side, bass - side)).astype(np.float32), SR)
+    assert stereo['width_db'] == 0.0 and not stereo['is_mono'] and not stereo['antiphase_bass']
+    assert stereo['bass_correlation'] == stereo['lowest_bass_correlation'] == 1.0
+    assert jsonable_encoder(stereo) == stereo
+    assert resolve('club', {'stereo': stereo})[0].mono_bass_hz == 90.0
+    mono = profile.stereo_info(bass.astype(np.float32), SR)
+    assert mono['is_mono'] and not mono['antiphase_bass']
+    assert resolve('club', {'stereo': mono})[0].mono_bass_hz is None
+
+
+@pytest.mark.parametrize(('bass_gain', 'mid_gain'), [(1e-3, 0.2), (2e-6, 0.0)])
+def test_negligible_antiphase_bass_does_not_trigger_a_warning(bass_gain, mid_gain):
+    t = np.arange(SR) / SR
+    bass = bass_gain * np.sin(2 * np.pi * 45 * t)
+    mids = mid_gain * np.sin(2 * np.pi * 1300 * t)
+    stereo = profile.stereo_info(np.column_stack((mids + bass, mids - bass)).astype(np.float32), SR)
+    assert stereo['bass_correlation'] < -0.5
+    assert stereo['lowest_bass_correlation'] is None and not stereo['antiphase_bass']
+
+
+def test_whole_stereo_scan_cancels_between_reads(tmp_path, monkeypatch):
+    monkeypatch.setattr(levels, '_SCAN_BLOCK_S', 1)
+    path = tmp_path / 'stereo.wav'
+    sf.write(path, _tone(3), SR, subtype='FLOAT')
+    cancel = threading.Event()
+    original = levels._StereoScan.add
+    calls = []
+
+    def cancel_after_first_block(self, x):
+        original(self, x)
+        calls.append(len(x))
+        cancel.set()
+
+    monkeypatch.setattr(levels._StereoScan, 'add', cancel_after_first_block)
+    with pytest.raises(Cancelled):
+        levels.scan_levels(path, SR, 3 * SR, Progress.null(cancel))
+    assert calls == [SR]
+
+
 def test_whole_file_array_path_does_not_rescan(tmp_path, monkeypatch):
     monkeypatch.setattr(profile, 'scan_levels', lambda *args: pytest.fail('The samples are already in memory.'))
     path = tmp_path / 'short.wav'
@@ -81,6 +171,7 @@ def test_whole_file_array_path_does_not_rescan(tmp_path, monkeypatch):
     report, _, _ = profile.analyze_file(path)
 
     assert report['analysis_basis'] == report['level_analysis_basis'] == 'whole file'
+    assert report['stereo_basis'] == 'whole file'
 
 
 def test_extreme_finite_float_audio_keeps_level_readings_json_safe(tmp_path):
@@ -94,6 +185,7 @@ def test_extreme_finite_float_audio_keeps_level_readings_json_safe(tmp_path):
     json.dumps(asdict(scan), allow_nan=False)
     assert scan.percentiles['noise_floor_db'] == pytest.approx(377.0, abs=0.1)
     assert scan.percentiles['snr_db'] == pytest.approx(0.0, abs=0.1)
+    assert scan.stereo['is_mono'] and not scan.stereo['antiphase_bass']
 
 
 def _energy(lufs):
@@ -162,3 +254,18 @@ def test_scan_reports_the_tone_timeline_on_its_own_grid(tmp_path, monkeypatch):
     timeline = levels.scan_levels(path, SR, len(x)).tone_timeline
     assert timeline['step_s'] == 2 and len(timeline['values']) == 3
     assert all(abs(v) < 0.2 for row in timeline['values'] for v in row)  # a steady tone: typical everywhere
+
+
+def test_original_overview_keeps_brief_opposing_stereo_peaks_between_scan_reads(tmp_path, monkeypatch):
+    monkeypatch.setattr(levels, '_SCAN_BLOCK_S', 1)
+    monkeypatch.setattr(levels, 'OVERVIEW_MAX_BINS', 8)
+    x = np.zeros((6 * SR + 3, 2), dtype=np.float32)
+    x[SR - 1] = (0.4, -0.4)
+    x[SR + 1] = (-0.9, 0.9)
+    x[-1] = (0, -0.6)
+    path = tmp_path / 'opposing-peaks.wav'
+    sf.write(path, x, SR, subtype='FLOAT')
+    overview = levels.scan_levels(path, SR, len(x), include_overview=True).overview
+    assert overview['duration_s'] == len(x) / SR
+    assert overview['bin_duration_s'] == 36001 / SR
+    assert overview['peaks'] == [0, 0.9, 0, 0, 0, 0, 0, 0.6]

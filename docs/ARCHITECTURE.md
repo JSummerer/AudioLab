@@ -43,8 +43,8 @@ line and the Docker image.
 | `context.py` | `Progress` (scoped progress, journal notes, cancellation, child-process registry) and `TaskContext` (stages of one job) |
 | `tasks/` | The four user-facing tasks (`validate`, `stages`, `run`) and `importing.py`, the `import` task behind Library "Add a file" (`import` is a Python keyword, so `tasks/__init__.py` maps task names to modules); `common.py` acquires sources (reusing a kept original for a link when allowed) and publishes outputs; `preview.py` runs bounded Library section previews through the existing Enhance queue |
 | `media/` | `proc.py` (cancellable subprocesses), `ffmpeg.py` (system or bundled ffmpeg, probing incl. embedded tags, `decode_pcm`: 48 kHz chunks on a 1/25 s grid that join like one decode; WebM/Matroska's millisecond timestamps get a seek offset measured once per file), `youtube.py` (yt-dlp + deno, the artist/title rule for links, tracks from chapters/tracklists, self-repair update, browser sign-in), `export.py` (format matrix, the file types that can be added, tags, cover art, sample-accurate track cutting) |
-| `analysis/` | `profile.py` (loudness, true peak, LRA, bandwidth, bands, alerts), `levels.py` (bounded whole-reference level scan), `tone.py` (how the tonal balance moves, chart data from the same scan), `classify.py` (content type + reasons), `key.py` (musical key estimate) |
-| `recipes/` | `Recipe` + `ChainParams`, `resolve()` turns recipe + measurements + user overrides into parameters *with reasons*; `chain.render()` is the single mastering chain |
+| `analysis/` | `profile.py` (loudness, true peak, LRA, bandwidth, bands, alerts), `levels.py` (bounded whole-reference level and stereo scan), `tone.py` (how the tonal balance moves, chart data from the same scan), `classify.py` (content type + reasons), `key.py` (musical key estimate) |
+| `recipes/` | `Recipe` + `ChainParams`, `resolve()` turns recipe + measurements + user overrides into parameters *with reasons*; `chain.render()` is the single mastering chain; `calibration.py` validates compact full-render state and selects the compatible basis for paired auditions |
 | `ai/` | Lazy source torch/demucs detection and windowed separation; `install.py` installs source packages, `managed.py` owns the catalog-pinned packaged runtime lifecycle selected by `api/state.py`, `client.py` invokes the isolated helper, `worker.py` runs/probes it and loads local offline weights |
 | `dsp/` | Float32 signal-processing blocks; `scratch.py` reuses disk-backed full-rate buffers for Enhance beyond 10 minutes; `timeline.py` collects bounded reduction highlights without retaining full-rate controls |
 | `previews.py` | The Enhance before/after excerpt (a loud 45 s passage, or the whole recording when shorter) at the true relative level, one shared headroom gain; compared when the original isn't kept |
@@ -135,18 +135,24 @@ No framework, no build step: ES modules loaded straight by the browser (reload t
 ```
 index.html            the shell: sidebar (collapses to an icon rail, ⌘\ / Ctrl+\; bottom tab bar on narrow screens) + one <section> per view
 css/                  tokens.css (colours, type, spacing; light/dark) · base.css (reset, shell) · components.css (shared controls)
-                      · one file per view: new.css · activity.css · job.css · library.css (+ the compare player) · settings.css
+                      · one file per view: new.css · activity.css · job.css · library.css (+ the compare player) · adjust.css · settings.css
+                      · eq-editor.css for the graphical EQ
 fonts/                the bundled title serif (Source Serif 4, OFL) for browsers and systems without ui-serif; README says how to swap it
 js/main.js            boot, global wiring (paste or drop a link anywhere, drop files, deep links ?url=&task=, notice banner)
-js/router.js          hash routes #/new · #/activity · #/job/<id> · #/library[/<entry id>] · #/settings[/<section>]
+js/router.js          hash routes #/new · #/activity · #/job/<id> · #/library[/<entry id>] · #/adjust/<entry id> · #/settings[/<section>]
 js/api.js store.js    HTTP client + token · app state, event bus, live updates (SSE, polling fallback)
 js/dom.js ui.js       tiny DOM helpers and icons · shared controls (toasts, dialogs, menus, meters, segmented…)
 js/player.js          job page players: stems, tracks, one file (says when this browser can't play its format)
 js/compare.js         the compare player (job page and Library): original | result sample-locked on one Web Audio clock from
                       server-decoded PCM chunks, crossfaded switch, whole-song volume match · plain Library file player
 js/actions.js         job actions shared by views (cancel, retry, remove, clear finished…)
-js/quick-preview.js   Library "Preview changes": a 5–30 s passage of the kept original with changed settings, then Apply
-js/eq.js              custom EQ as text (parse/format bands, the two presets, the shared editor in Fine-tuning and previews)
+js/quick-preview.js   legacy preview-dialog helper retained with its existing API/playback regressions; Library now opens Adjust
+js/eq.js              canonical EQ normalization and text/APO parsing/formatting, optional examples, compact Fine-tuning editor
+js/eq-editor.js       graphical/numeric/text EQ, drag and keyboard edits, bypass/undo/reset, lightweight draft snapshots
+js/eq-response.js     plots server-equivalent zero-phase filter magnitude; no browser audio processing engine
+js/adjust-overview.js original level overview with distinct draggable audition and processing-section bounds/fades
+js/adjust-audition.js identity-owned paired audition jobs, aligned comparison player and bounded spectrum lifecycle
+js/audition-spectrum.js on-demand channel-energy spectrum of exact cropped PCM with declared frequency/gain basis
 js/section-eq.js      section EQ: the same checks as the server, the section editor (Fine-tuning, previews)
 js/tone-chart.js      the tone timeline chart (Check, Enhance, Library previews; a click picks a preview start)
 js/views/new/         the "New" view: source (link/files/playlist), names, cover, task + options, tracks, start, and the
@@ -154,6 +160,7 @@ js/views/new/         the "New" view: source (link/files/playlist), names, cover
 js/views/activity.js  the job list (in progress, then finished by day; filters)
 js/views/job/         one job: live progress, failures with fixes, results per task
 js/views/library.js   finished results by recording: versions, files, play/compare, kept originals, remove
+js/views/adjust.js    optional saved-version workspace, in-app drafts, passage/section editing, comparison and full Apply
 js/views/settings.js  preferences and system status
 ```
 
@@ -230,7 +237,8 @@ to the DSP chain).
 It analyzes every 100 ms against the surrounding 20 s, using channel energy so out-of-phase stereo
 does not disappear from detection. Only isolated 0.3–3 s rises in 180–480 Hz qualify, with a 6 dB
 relative margin and an audible-level gate. Pinning each event's reference prevents a sustained
-change from appearing brief as the moving reference catches up. Duration checks bridge up to two
+change from appearing brief as the moving reference catches up. Events touching either file boundary
+pass unchanged because the full rise and return are unknown. Duration checks bridge up to two
 intervening 100 ms dips, including quiet ones; those dips gain no processing eligibility. This can
 conservatively leave closely spaced events alone. A 300 ms gain envelope subtracts
 the zero-phase band; maximum reduction is 1.5 dB (3 dB in Strong), with a 0.25 dB modeled whole-band
@@ -255,22 +263,50 @@ are outside this timeline; missing markers do not establish that nothing changed
 
 Library section previews reuse the kept original and saved resolved parameters. The API clones the
 original into a new job input, creates a server-owned preview specification, and submits it to the
-existing cancellable Enhance queue. `tasks/preview.py` decodes only the requested 5–30 seconds plus
-up to 20 seconds of context on each side, renders through the same chain, then crops aligned excerpts.
+existing cancellable Enhance queue. If normalized effective parameters are unchanged and a full-length
+export remains, `tasks/preview.py` decodes the requested 5–30 seconds directly from that saved output
+(lossless first) and the original. This preserves the full render's processing and includes that export's
+codec effects. It reads the saved file where it is; moving it before decoding can fail that attempt.
+If parameters change or no export remains, it decodes the passage plus up to 20 seconds of context
+on each side, renders through the same chain, then crops aligned excerpts.
 The decoder shares comparison playback's preroll and resampling phase. WebM/Matroska alignment can
 add short probes at 1, 10 and 25 seconds; if these cannot establish timing, the preview fails with an
 actionable explanation instead of decoding an arbitrarily long prefix or silently shifting the passage.
-It measures the cropped comparison for volume matching. Context-dependent gain and dynamics can
-differ from a full render, so it is explicitly a section estimate. AI stems previews are excluded:
+It measures the cropped comparison for volume matching. The result distinguishes `saved_export` from
+`section_estimate`: in a new section render, context-dependent gain and dynamics can differ from a full
+render. Reusing the old gain after a tonal/dynamics edit would not establish full-render equivalence.
+AI stems previews are excluded:
 a short reseparation would add latency and different context without establishing faithful results.
 Preview jobs write no exports or Library versions. Applying settings creates an ordinary full Enhance
 job, reanalyzes the source and checks its actual exports; the preview buffer is never promoted to a master.
+
+The optional routed Adjust view requests paired auditions: saved settings re-rendered and edited settings
+use the same decoded original bounds and context. Original is a third reference, and all three crops
+share one headroom gain. The existing PCM player performs synchronized switching and LUFS matching on
+the audible crop. This re-rendered baseline is distinct from the actual saved export. Compatible full-render
+calibration can retain pre-limiter gain, detector gates/thresholds/budgets, Voice leveler threshold and
+Volume only's DC/peak basis; upstream edits invalidate dependent detector values on both sides. Edited
+EQ remains an estimate because full-program normalization can change even outside an edited section.
+Post-limiter correction stays after limiting and is never doubled with a local safety correction; when an
+edit leaves a saved correction out of both sides, the pair's basis says so.
+Calibration is optional and versioned; old entries remain readable and missing values are not inferred
+from rounded presentation metrics. See [the API contract](API.md#library) for units and compatibility.
+
+Adjust keeps small draft settings across in-app navigation and releases its audition player, spectrum
+buffers and preview job when superseded or left; the job manager discards finished paired auditions at
+startup, since a closed window skips that release. `adjust-audition.js` owns request/cancellation identity
+and paired playback; `audition-spectrum.js` computes an on-demand Hann-windowed spectrum of the exact
+cropped stereo PCM, averaging channel energy rather than cancelling opposing channels through a mid sum.
+It declares its frequency resolution and pre-playback-matching gain basis. New Enhance analyses retain
+at most 512 original sample-peak bins for the passage overview, without rescanning the original on open.
+The older tone timeline remains a coarse, relative-share observation, with no automatic EQ diagnosis.
 
 Above 600 seconds, `chain.render()` lazily allocates reusable float32 arrays backed by private temporary
 files: at most three stereo buffers and three mono limiter controls. Storage is written before mapping
 to avoid sparse-file allocation failures on first access. The render closes mappings before deleting
 their files, including on cancellation and errors. Filter, compressor, limiter, mix and gain operations
-work in blocks with real neighboring context; low-rate analysis/control arrays still grow with duration.
+work in blocks with real neighboring context; Section EQ uses the same reusable scratch budget rather
+than a whole-section heap copy. Low-rate analysis/control arrays still grow with duration.
 The master is staged and published only after final measurements succeed. Disk mapping reduces large
 heap allocations; it does not qualify a RAM minimum or guarantee multi-hour capacity.
 
@@ -279,7 +315,14 @@ Profile and classification share the already measured LRA, and bandwidth uses th
 Welch spectrum; the classifier's time-resolved spectrum serves a different purpose. Long-file levels
 use 10 s reads with overlap for true peak and carried K-weighting state; only scalar energy windows
 remain in memory. Loudness, LRA, peaks, clipping, DC and programme percentiles cover the whole file.
-Spectrum, stereo, key and classifier features still use 3×30 s excerpts up to 20 min, 5×24 s beyond;
+The same reads accumulate full-reference stereo width and bass correlation. A carried-state 90 Hz
+low-pass matches the mono fold's magnitude; 0.5 s windows at 0.25 s hops retain the lowest meaningful
+local correlation separately from the global average. Bass below −80 dBFS RMS or −35 dB relative to
+the local broadband power does not qualify. Any eligible negative window disables automatic mono bass
+for the recording, preserving passages a positive average or excerpts could hide. Explicit On remains
+available with an explanation. These reversible thresholds do not claim to detect every short/quiet
+phase problem or distinguish intent.
+Spectrum, key and classifier features still use 3×30 s excerpts up to 20 min, 5×24 s beyond;
 silent excerpts are replaced with a bounded excerpt anchored at sound found by the level scan.
 Separate basis fields prevent mistaking these estimates for complete spectral coverage. A successful AI stage transfers its
 audio array to the chain rather than retaining a second obsolete buffer through the remaining DSP.

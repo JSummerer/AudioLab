@@ -229,7 +229,12 @@ class JobManager:
                 job.status = CANCELLED
                 job.message = NOT_STARTED
                 self._save(job)
-            if cutoff and job.status in FINISHED and (job.finished_at or job.updated_at) < cutoff:
+            expired = cutoff and job.status in FINISHED and (job.finished_at or job.updated_at) < cutoff
+            # An Adjust audition belongs to the draft in the tab that requested it. Closing the window skips
+            # the page's own release, so its media would otherwise stay for weeks. A tab still open across a
+            # restart says the audition is gone and offers to render it again.
+            audition = isinstance(job.options.get('_preview'), dict) and job.options['_preview'].get('paired')
+            if expired or (audition and job.status in FINISHED):
                 shutil.rmtree(d, ignore_errors=True)
                 continue
             self._jobs[job.id] = job

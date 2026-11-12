@@ -121,7 +121,7 @@ export function parseClock(text) {
 
 /** Seconds → "m:ss" or "h:mm:ss", keeping milliseconds when there are any. */
 export function clockText(s) {
-  const ms = Math.floor(s * 1000);
+  const ms = Math.round(s * 1000);
   const whole = Math.floor(ms / 1000);
   const frac = ms % 1000 ? `.${String(ms % 1000).padStart(3, '0').replace(/0+$/, '')}` : '';
   const hh = Math.floor(whole / 3600), mm = Math.floor((whole % 3600) / 60);

@@ -123,25 +123,32 @@ export function setFiles(list) {
 /**
  * Start from an earlier job's source ("Do more with this"). Its own name, tracklist and
  * split choice come along; `again` ("Change and start again" on a failed or cancelled job)
- * also takes its task's options, so only what went wrong needs changing. `file`: one of the
- * job's result files is the source instead ("Check the result", sent as `source_file`).
+ * also takes its task's options, so only what went wrong needs changing. A result file is a
+ * fresh file source ("Check the result", sent as `source_file` with the earlier job ID).
  */
 export function useJobSource(job, task, { again = false, file = null } = {}) {
   probeCtl?.abort();
   probeCtl = null;
-  if (refs.input) refs.input.value = job.source?.kind === 'url' && !file ? (job.source.url || '') : '';
-  const o = job.options || {};
+  const duration = file?.duration_s;
+  const previous = file ? {
+    id: job.id,
+    title: file.name.replace(/\.[^.]+$/, ''),
+    source: { kind: 'file', name: file.name, duration_s: Number.isFinite(duration) && duration > 0 ? duration : null },
+  } : job;
+  const link = previous.source?.kind === 'url' ? previous.source.url : null;
+  if (refs.input) refs.input.value = link || '';
+  const o = previous.options || {};
   // The earlier job's own name overrides carry over (its source keeps the original name).
   const carried = o.meta && Object.keys(o.meta).length ? { ...o.meta } : null;
-  const src = { kind: 'job', job, meta: carried, artistCleared: carried?.artist === '' };
+  const src = { kind: 'job', job: previous, meta: carried, artistCleared: carried?.artist === '' };
   if (file) src.sourceFile = { id: file.id, name: file.name };
   if (typeof o.split_tracks === 'boolean') src.splitTracks = o.split_tracks;
   state.source = src;
   if (task) state.task = task;
-  if (again) applyOptions(job.task, o);
+  if (again) applyOptions(previous.task, o);
   if (isFileLike() && ['original', 'video'].includes(state.download.format)) state.download.format = 'mp3';
   if (typeof o.tracklist === 'string') setTracklist(src, o.tracklist);
-  if (job.source?.kind === 'url' && job.source.url) lookUpJobLink(src, job.source.url);
+  if (link) lookUpJobLink(src, link);
   redraw();
   setTimeout(focusStart, 0);
 }
@@ -280,8 +287,9 @@ function renderSource() {
       const j = src.job;
       const name = shownName(src);
       el.append(sourceCard({
-        thumb: j.source?.thumbnail, iconName: j.source?.kind === 'file' || src.sourceFile ? 'music' : 'video', title: name.title,
-        meta: src.sourceFile ? metaJoin(name.artist, 'Result of an earlier job', src.sourceFile.name)
+        thumb: j.source?.thumbnail, iconName: j.source?.kind === 'file' ? 'music' : 'video', title: name.title,
+        meta: src.sourceFile
+          ? metaJoin(name.artist, 'Result of an earlier job', src.sourceFile.name, fmtDuration(j.source?.duration_s))
           : metaJoin(name.artist, 'From an earlier job', j.source?.kind === 'file' ? j.source?.name : null, fmtDuration(j.source?.duration_s)),
         extra: guessLine(j.result?.classification), rename: src, cover: src,
       }));

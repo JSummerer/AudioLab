@@ -27,6 +27,12 @@ EQ_MAX_BANDS = 8
 EQ_LIMITS = {'hz': (20.0, 20000.0), 'db': (-6.0, 6.0), 'q': (0.3, 8.0)}
 
 
+def _scaled_round(value: float, scale: int) -> int:
+    """Shared with the browser's EQ inputs, including halfway values and negative gains."""
+    magnitude = math.floor(abs(value) * scale + 0.5)
+    return -magnitude if value < 0 else magnitude
+
+
 def eq_bands(value: Any) -> list[dict[str, float]] | None:
     """Custom EQ bands, clamped to EQ_LIMITS; bands with no gain are dropped. None when `value` is
     not a list of at most EQ_MAX_BANDS {hz, db, q} objects with finite numbers ([] = no custom EQ)."""
@@ -40,8 +46,9 @@ def eq_bands(value: Any) -> list[dict[str, float]] | None:
         if any(v is None for v in nums.values()):
             return None
         hz, db, q = (min(hi, max(lo, nums[k])) for k, (lo, hi) in EQ_LIMITS.items())
-        if round(db, 2):
-            bands.append({'hz': round(hz, 1), 'db': round(db, 2), 'q': round(q, 2)})
+        gain = _scaled_round(db, 100)
+        if gain:
+            bands.append({'hz': _scaled_round(hz, 10) / 10, 'db': gain / 100, 'q': _scaled_round(q, 100) / 100})
     return bands
 
 
@@ -69,12 +76,16 @@ def section_eq(value: Any) -> list[dict[str, Any]] | None:
         fade = sec.get('fade_s', default)
         if not all(_finite(v) for v in (sec['start_s'], sec['end_s'], fade)):
             return None
-        start, end, fade = float(sec['start_s']), float(sec['end_s']), min(hi, max(lo, float(fade)))
+        if not 0 <= sec['start_s'] <= 1e9 or not 0 <= sec['end_s'] <= 1e9:
+            return None
+        start = _scaled_round(sec['start_s'], 1000)
+        end = _scaled_round(sec['end_s'], 1000)
+        fade = _scaled_round(min(hi, max(lo, fade)), 100)
         bands = eq_bands(sec['bands'])
-        if bands is None or start < 0 or end - start < max(SECTION_MIN_S, 2 * fade):
+        if bands is None or end - start < max(SECTION_MIN_S * 1000, 20 * fade):
             return None
         if bands:
-            out.append({'start_s': round(start, 3), 'end_s': round(end, 3), 'fade_s': round(fade, 2), 'bands': bands})
+            out.append({'start_s': start / 1000, 'end_s': end / 1000, 'fade_s': fade / 100, 'bands': bands})
     out.sort(key=lambda sec: sec['start_s'])
     if any(b['start_s'] < a['end_s'] for a, b in zip(out, out[1:])):
         return None
@@ -252,6 +263,16 @@ def _choice(v: Any, allowed: tuple[str, ...]) -> str | None:
     return s if s in allowed else None
 
 
+def automatic_compressor(key: str, profile: dict[str, Any]) -> str:
+    """The full-analysis compression choice before explicit overrides."""
+    if key == 'voice':
+        return 'leveler'
+    if key == 'club' and float(profile.get('lra', 5.0)) >= 3.0:
+        if (profile.get('dynamics_style') or {}).get('recommended_glue_comp', True):
+            return 'glue'
+    return 'off'
+
+
 def resolve(
     recipe_key: str, profile: dict[str, Any], quality: str = 'standard', advanced: dict[str, Any] | None = None
 ) -> tuple[ChainParams, list[dict[str, Any]]]:
@@ -293,8 +314,8 @@ def resolve(
             if p.bass_db < 1.0
             else 'club systems benefit from a little extra low-end weight',
         )
-        glue = bool(style.get('recommended_glue_comp', True)) and lra_v >= 3.0
-        p.compressor = 'glue' if glue else 'off'
+        p.compressor = automatic_compressor(key, prof)
+        glue = p.compressor == 'glue'
         d.set(
             'compressor',
             'Glue compression',
@@ -350,7 +371,7 @@ def resolve(
             'recipe',
             'a lift around 3 kHz makes speech easier to understand',
         )
-        p.compressor = 'leveler'
+        p.compressor = automatic_compressor(key, prof)
         d.set('compressor', 'Leveler', 'on', 'recipe', 'evens out loud and quiet speakers / moments')
         d.set(
             'denoise',
@@ -364,23 +385,23 @@ def resolve(
     # judges temporary rises against nearby context instead of cutting the whole file.
     p.adaptive_lowmid_db = 1.5
     _highs(key, prof, p, d)
-    if p.mono_bass_hz and stereo.get('is_mono'):
+    if p.mono_bass_hz and antiphase:
         p.mono_bass_hz = None
         d.set(
             'mono_bass',
             'Mono bass',
             'off',
             'auto',
-            'left and right already carry the same sound (effectively mono) — there is nothing to fold',
+            'left and right bass partly cancel in a measured passage, so folding could thin it',
         )
-    elif p.mono_bass_hz and antiphase:
+    elif p.mono_bass_hz and stereo.get('is_mono'):
         p.mono_bass_hz = None
         d.set(
             'mono_bass',
             'Mono bass',
             'off',
             'auto',
-            'left and right bass are out of phase — folding them to mono would cancel the bass',
+            'left and right already carry nearly the same sound (effectively mono)',
         )
     elif p.mono_bass_hz:
         d.set(
@@ -575,8 +596,7 @@ def _apply_overrides(key: str, prof: dict, adv: dict, p: ChainParams, d: _Decisi
             'Mono bass',
             'below 90 Hz' if c == 'on' else 'off',
             'user',
-            'set by you'
-            + (' — note: the bass is partly out of phase, mono may thin it' if c == 'on' and antiphase else ''),
+            'set by you' + (' — folding may thin the bass in a measured passage' if c == 'on' and antiphase else ''),
         )
     c = _choice(adv.get('deess'), ('auto', 'off', 'strong'))
     if c == 'auto':

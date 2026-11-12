@@ -322,7 +322,7 @@ def test_custom_eq_is_validated_resolved_and_ignored_by_volume_only():
     bands = [{'hz': 160, 'db': -3.31, 'q': 2.865}, {'hz': 280, 'db': 1.52, 'q': 2.025}, {'hz': 5, 'db': 9, 'q': 99}]
     assert enhance.eq_bands(bands) == [
         {'hz': 160.0, 'db': -3.31, 'q': 2.87},
-        {'hz': 280.0, 'db': 1.52, 'q': 2.02},
+        {'hz': 280.0, 'db': 1.52, 'q': 2.03},
         {'hz': 20.0, 'db': 6.0, 'q': 8.0},
     ]
     assert enhance.eq_bands([{'hz': 100, 'db': 0, 'q': 1}]) == []  # no gain, no band

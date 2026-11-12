@@ -1,6 +1,6 @@
 """Audio profile: the measurements every other decision builds on.
 
-Levels cover the whole file. For long recordings, spectrum, stereo and key use
+Levels and stereo cover the whole file. For long recordings, spectrum and key use
 spread-out excerpts (see `load_samples`). Everything here is plain numpy/scipy
 (no ffmpeg), 48 kHz in, float32.
 
@@ -18,18 +18,19 @@ from typing import Any
 
 import numpy as np
 import soundfile as sf
-from scipy.signal import butter, sosfiltfilt
 
 from ..dsp.limiter import true_peak_db
 from ..dsp.loudness import lra, programme_loudness
 from .key import estimate_key
 from .levels import (
     SILENCE_DBFS,
+    LevelOverview,
     ProgrammeLevels,
     flat_top_count,
     frame_rms_db,
     programme_percentiles,
     scan_levels,
+    stereo_info,
     stereo_samples,
 )
 
@@ -236,26 +237,6 @@ def flat_top_clipping(x: np.ndarray, threshold: float = 0.999) -> float:
     return round(100.0 * flat_top_count(x, threshold * ref) / max(1, x.size), 4)
 
 
-def stereo_info(x: np.ndarray, sr: int) -> dict[str, Any]:
-    if x.ndim < 2 or x.shape[1] < 2:
-        return {'width': 0.0, 'is_mono': True, 'antiphase_bass': False, 'bass_correlation': 1.0}
-    mid = (x[:, 0] + x[:, 1]) * 0.5
-    side = (x[:, 0] - x[:, 1]) * 0.5
-    em, es = float((mid**2).mean()) + 1e-20, float((side**2).mean()) + 1e-20
-    width_db = 10.0 * math.log10(es / em)
-    sos = butter(4, 120.0, 'lowpass', fs=sr, output='sos')
-    low = sosfiltfilt(sos, x, axis=0)
-    left, right = low[:, 0], low[:, 1]
-    denom = math.sqrt(float((left**2).sum()) * float((right**2).sum())) + 1e-20
-    corr = float((left * right).sum()) / denom
-    return {
-        'width_db': round(width_db, 1),
-        'is_mono': width_db < -40.0,
-        'antiphase_bass': corr < 0.0,
-        'bass_correlation': round(corr, 2),
-    }
-
-
 # ---------------------------------------------------------------------------
 # Dynamics style (the validated ClubReady anchor rules, used by the club recipe)
 # ---------------------------------------------------------------------------
@@ -342,6 +323,7 @@ def _silent_profile(sr: int, duration_s: float, basis: str, level_basis: str, ch
         'channels': channels,
         'analysis_basis': basis,
         'level_analysis_basis': level_basis,
+        'stereo_basis': level_basis,
         'is_silent': True,
         'integrated_lufs': -70.0,
         'true_peak_dbtp': -120.0,
@@ -364,7 +346,13 @@ def _silent_profile(sr: int, duration_s: float, basis: str, level_basis: str, ch
         'top_end': 'normal',
         'noise_floor_db': -120.0,
         'snr_db': 0.0,
-        'stereo': {'width_db': 0.0, 'is_mono': True, 'antiphase_bass': False, 'bass_correlation': 1.0},
+        'stereo': {
+            'width_db': 0.0,
+            'is_mono': True,
+            'antiphase_bass': False,
+            'bass_correlation': 1.0,
+            'lowest_bass_correlation': None,
+        },
         'dynamics_style': dynamics_style(-70.0, 0.0),
         'key': None,
         'alerts': [{'level': 'danger', 'title': 'No sound', 'message': msg}],
@@ -416,7 +404,7 @@ def profile(
     top_end_db = round(lr['8000'] - (lr['1000'] + lr['2000']) / 2.0, 2)
     top_end = 'bright' if top_end_db > TOP_END_BRIGHT_DB else 'dull' if top_end_db < TOP_END_DULL_DB else 'normal'
     check()
-    stereo = stereo_info(x, sr)
+    stereo = levels.stereo if levels is not None else stereo_info(x, sr, check_cancel=check_cancel)
     density = levels.density if levels is not None and duration_s >= LONG_PROGRAMME_S else None
     style = dynamics_style(lufs, lra_val, density)
     check()
@@ -500,7 +488,7 @@ def profile(
             {
                 'level': 'warning',
                 'title': 'Bass is out of phase',
-                'message': 'Left and right bass partly cancel each other; it may sound thin on mono speakers.',
+                'message': 'In at least one passage, left and right bass partly cancel when combined to mono.',
             }
         )
     if stereo['is_mono']:
@@ -519,6 +507,7 @@ def profile(
         'channels': channels,
         'analysis_basis': basis,
         'level_analysis_basis': level_basis,
+        'stereo_basis': level_basis,
         'is_silent': False,
         'integrated_lufs': round(lufs, 2),
         'true_peak_dbtp': round(tp, 2),
@@ -544,7 +533,12 @@ def profile(
 
 
 def analyze_file(
-    path: Path, progress=None, source_rate: int | None = None, source_channels: int | None = None
+    path: Path,
+    progress=None,
+    source_rate: int | None = None,
+    source_channels: int | None = None,
+    *,
+    include_overview: bool = False,
 ) -> tuple[dict[str, Any], np.ndarray, int]:
     """Profile a (48 kHz reference) file. Returns (profile, samples, sr); the samples
     are handed on to analysis.classify.audio_features to avoid a second read.
@@ -560,7 +554,13 @@ def analyze_file(
     if basis != 'whole file':
         if progress is not None:
             progress(40, 'Measuring levels across the whole recording...')
-        levels = scan_levels(Path(path), sr, info.frames, progress.sub(40, 80) if progress is not None else None)
+        levels = scan_levels(
+            Path(path),
+            sr,
+            info.frames,
+            progress.sub(40, 80) if progress is not None else None,
+            include_overview=include_overview,
+        )
         if levels.audible_span is None:
             basis = 'whole-file silence confirmed by a streamed peak scan'
         elif max(float(x.max(initial=0)), -float(x.min(initial=0))) < 10.0 ** (SILENCE_DBFS / 20.0):
@@ -577,6 +577,13 @@ def analyze_file(
     elif progress is not None:
         progress(40, 'Measuring loudness, peaks and frequency range...')
     rep = profile(x, sr, info.duration, basis, levels=levels, **fmt)
+    if include_overview:
+        if levels is not None:
+            rep['overview'] = levels.overview
+        else:
+            overview = LevelOverview(info.frames, sr)
+            overview.add(x, 0, check or (lambda: None))
+            rep['overview'] = overview.result()
     if progress is not None:
         progress(100, 'Analysis done')
     return rep, x, sr

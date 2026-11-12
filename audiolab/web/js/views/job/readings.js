@@ -197,7 +197,8 @@ function factsBlock(a) {
     fact('Length', fmtDuration(a.duration_s)),
     fact('Source', sourceLine(a)),
     fact('Levels measured on', a.level_analysis_basis || a.analysis_basis),
-    fact('Tone, stereo and key measured on', a.analysis_basis)));
+    fact('Spectrum and key measured on', a.analysis_basis),
+    fact('Stereo measured on', a.stereo_basis || a.analysis_basis)));
 }
 
 /** Nothing to measure: one clear state instead of a list of "–". */

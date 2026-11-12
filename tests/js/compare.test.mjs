@@ -187,6 +187,9 @@ function setup(t) {
       frames: Number(url.searchParams.get('frames')), signal: options.signal };
     env.requests.push(request);
     if (env.mode === 'deferred') return new Promise((resolve) => { request.resolve = () => resolve(env.pcm(request)); });
+    if (env.mode === 'gone' && request.path.endsWith('result')) {
+      return { ok: false, status: 404, json: async () => ({ detail: 'Preview not available.' }) };
+    }
     if (env.mode === 'failure' && request.path.endsWith('result')) {
       return { ok: false, status: 500, json: async () => ({ detail: 'Generated transient error.' }) };
     }
@@ -222,6 +225,20 @@ test('recoverable PCM errors suspend output, retain position and can retry', asy
   assert.equal(player.snapshot().playing, true);
   assert.equal(env.contexts[0].state, 'running');
   assert.equal(env.requests.at(-1).offset, 10 * 48000);
+});
+
+test('a side that is gone ends the player with the default or a caller-supplied message', async (t) => {
+  const env = setup(t);
+  env.mode = 'gone';
+  const library = env.create();
+  button(library.el, 'Play').click();
+  await flush();
+  assert.match(library.el.textContent, /The result couldn’t be loaded\. It may have been moved or deleted\./);
+  const audition = env.create({ missing: 'This audition is no longer available. Render it again.' });
+  button(audition.el, 'Play').click();
+  await flush();
+  assert.match(audition.el.textContent, /This audition is no longer available\. Render it again\./);
+  assert.doesNotMatch(audition.el.textContent, /moved or deleted/);
 });
 
 test('retry before the fade settles is not suspended by the old pause', async (t) => {
@@ -566,40 +583,72 @@ test('a preview reduction cue uses source time while requesting excerpt-relative
   assert.ok(env.requests[0].offset < 48000, 'play starts roughly 2.5 seconds before the 3-second excerpt peak');
 });
 
-test('a section preview uses the repeat range and is cleared on edits before it can be applied', async (t) => {
+test('an unchanged preview plays the saved export and edits clear it before a section estimate', async (t) => {
   const env = setup(t);
   const current = env.create({ length: 60 });
   current.restore({ time: 32, repeat: { start: 31, end: 39, enabled: true } });
   const requests = [];
+  const savedSummary = 'Playing the saved WAV version with its full-recording processing. No new processing was applied.';
+  let basis;
   globalThis.fetch = async (path, options) => {
-    requests.push([path, options?.method, options?.body && JSON.parse(options.body)]);
-    if (path.endsWith('/preview')) return jsonResponse({ id: 'section', status: 'queued' });
-    if (path === '/api/jobs/section') return jsonResponse(previewJob());
+    const payload = options?.body && JSON.parse(options.body);
+    requests.push([path, options?.method, payload]);
+    if (path.endsWith('/preview')) {
+      basis = Object.keys(payload.advanced).length ? 'section_estimate' : 'saved_export';
+      return jsonResponse({ id: 'section', status: 'queued' });
+    }
+    if (path === '/api/jobs/section') {
+      const job = previewJob();
+      job.result.preview_basis = basis;
+      if (basis === 'saved_export') job.result.summary = [savedSummary];
+      return jsonResponse(job);
+    }
     assert.fail(`Unexpected request: ${path}`);
   };
   const dismiss = openQuickPreview(previewEntry(), current);
   t.after(dismiss);
   const dialog = document.body.querySelector('dialog');
+  const status = find(dialog, (n) => n.getAttribute('role') === 'status');
   const make = named(dialog, 'Make preview');
   make.click();
   make.click();
   await flush();
   assert.deepEqual(requests, [['/api/library/preview-source/preview', 'POST',
     { start_s: 31, duration_s: 8, advanced: {} }]]);
-  assert.match(find(dialog, (n) => n.getAttribute('role') === 'status').textContent, /Preview queued/);
+  assert.match(status.textContent, /Preview queued/);
   env.runTimers(600);
   await flush();
   assert.ok(dialog.querySelector('.ab'));
+  assert.equal(status.textContent, savedSummary);
   const apply = named(dialog, 'Apply to full recording');
   assert.equal(apply.hidden, false);
   type(field(dialog, 'Bass boost (dB)'), '2');
   assert.equal(apply.hidden, true);
   assert.equal(dialog.querySelector('.ab'), null);
+  assert.match(status.textContent, /Settings changed/);
   apply.click();
   assert.equal(requests.length, 2);
   make.click();
   await flush();
   assert.deepEqual(requests.at(-1)[2].advanced, { bass_db: 2 });
+  env.runTimers(600);
+  await flush();
+  assert.ok(dialog.querySelector('.ab'));
+  assert.match(status.textContent, /Section estimate/);
+});
+
+test('the preview job page shows whether it played a saved export or estimated a section', async (t) => {
+  setup(t);
+  const { doneView } = await import('../../audiolab/web/js/views/job/results.js');
+  const ctx = { onCleanup: (fn) => t.after(fn) };
+  const job = previewJob();
+  job.result.preview_basis = 'saved_export';
+  job.result.summary = ['Playing the saved WAV version with its full-recording processing.'];
+  assert.ok(doneView(job, ctx).some((node) => node.textContent === job.result.summary[0]));
+
+  job.result.preview_basis = 'section_estimate';
+  delete job.result.summary;
+  assert.ok(doneView(job, ctx).some((node) => node.textContent.startsWith('Section estimate.')));
 });
 
 test('a section preview takes clock times, loudness, compression and a custom EQ, sent only when changed', async (t) => {
@@ -835,11 +884,13 @@ test('a version is compared by the server’s pick, else its first lossless resu
   assert.equal(versionFile({}), null);
 });
 
-test('version loudness: a checked export, else the master measurement; a spread counts above 1 dB', () => {
+test('version loudness uses export measurements or legacy estimates; a spread counts above 1 dB', () => {
   const entry = { loudness: { result_lufs: -14.2 } };
   assert.equal(versionLoudness(entry, { verification: { status: 'verified', integrated_lufs: -13.5 } }), -13.5);
   assert.equal(versionLoudness(entry, { verification: { status: 'warning', integrated_lufs: -13.9 } }), -13.9);
-  assert.equal(versionLoudness(entry, { verification: { status: 'unverified', integrated_lufs: null } }), -14.2);
+  assert.equal(versionLoudness(entry, { verification: { status: 'unverified', integrated_lufs: null } }), null);
+  assert.equal(versionLoudness(entry, { verification: { status: 'verified', integrated_lufs: null } }), null);
+  assert.equal(versionLoudness(entry, { verification: null }), null);
   assert.equal(versionLoudness(entry, {}), -14.2);
   assert.equal(versionLoudness({}, null), null);
   assert.deepEqual(loudnessSpread([-13.5, -15.4, -14]), { low: -15.4, high: -13.5 });
@@ -852,7 +903,9 @@ test('two versions play side by side from their own files, the louder one turned
   const env = setup(t);
   const version = (id, lufs, label) => ({ entry: { id, duration_s: 20, loudness: { result_lufs: lufs } },
     file: { id: `f-${id}`, kind: 'enhanced', exists: true }, label, name: `The ${label.toLowerCase()} version` });
-  const player = versionCompare(version('old', -15.4, 'Older'), version('new', -13.5, 'Newer'));
+  const newer = version('new', -14, 'Newer');
+  newer.file.verification = { status: 'warning', integrated_lufs: -13.5 };
+  const player = versionCompare(version('old', -15.4, 'Older'), newer);
   t.after(() => player.destroy());
   assert.equal(player.el.getAttribute('aria-label'), 'Compare the older version with the newer version');
   assert.deepEqual(player.el.querySelectorAll('.ab-key-label').map((n) => n.textContent), ['Older', 'Newer']);
@@ -894,6 +947,20 @@ test('Library offers Compare versions within a recording and says when the versi
   open.click({ isTrusted: true });
   assert.equal(open.getAttribute('aria-expanded'), 'false');
   assert.equal(stage.hidden, true);
+});
+
+test('an unverified Library export disables matching and suppresses the loudness hint', async (t) => {
+  const known = enhanced('known', 2, -16);
+  const unknown = enhanced('unknown', 1, -12);
+  unknown.files[0].verification = { status: 'unverified', integrated_lufs: null };
+  const env = await librarySetup(t, [known, unknown]);
+  assert.equal(document.body.querySelector('.lib-hint'), null);
+  const card = env.card('unknown');
+  compareVersions(card).click({ isTrusted: true });
+  const match = toggle(card, 'Match volume');
+  assert.equal(match.disabled, true);
+  assert.equal(match.checked, false);
+  assert.match(card.querySelector('.cmp-volume-note').textContent, /needs a loudness measurement for both versions/);
 });
 
 test('with three versions a picker chooses the other one; versions within 1 dB get no loudness line', async (t) => {
@@ -974,7 +1041,7 @@ test('the preview fetches the tone chart; a picked point sets the start and the 
   chart.fire('keydown', { key: 'End' });
   assert.equal(chart.getAttribute('aria-valuetext'), '0:30 · Drop · Deep bass +0.5 dB · Mids 0.0 dB · Top end −2.0 dB');
   chart.fire('keydown', { key: 'ArrowLeft' });
-  assert.equal(chart.getAttribute('aria-valuetext'), '0:20 · Intro · quiet here');
+  assert.equal(chart.getAttribute('aria-valuetext'), '0:20 · Intro · no usable mid-signal reading');
   chart.fire('keydown', { key: 'Enter' });
   assert.equal(field(dialog, 'Start').value, '0:20');
   assert.match(find(dialog, (n) => n.getAttribute('id')?.endsWith('-range')).textContent, /Section 0:20–0:35/);

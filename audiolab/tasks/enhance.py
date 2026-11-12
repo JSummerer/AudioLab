@@ -18,7 +18,7 @@ from ..media import export
 from ..media.verification import PEAK_TOLERANCE_DB, measure_export
 from ..previews import make_previews
 from ..processing import report_details
-from ..recipes.base import eq_bands, section_eq
+from ..recipes.base import automatic_compressor, eq_bands, section_eq
 from ..recipes.chain import render
 from ..settings import SETTINGS
 from ..util import sanitize_filename
@@ -185,7 +185,10 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
 
     # --- listen: measure + classify ------------------------------------------
     p = ctx.stage('analyze', 'Listening to the recording…')
-    analysis, x, sr = prof.analyze_file(ref, progress=p.sub(0, 70), **common.source_format(acq))
+    analysis, x, sr = prof.analyze_file(
+        ref, progress=p.sub(0, 70), include_overview=quality != 'best', **common.source_format(acq)
+    )
+    overview = analysis.pop('overview', None)
     features = classify.audio_features(x, sr, check_cancel=p.check_cancel, known_lra=analysis.get('lra'))
     kind = classify.classify(features, acq.duration_s or 0, acq.metadata)
     del x
@@ -344,12 +347,16 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
         'recipe': {'key': recipe.key, 'name': recipe.name},
         'decisions': decisions,
         'metrics': metrics,
-        'processing': report_details(report),
+        'processing': {
+            **report_details(report, keep_calibration=quality != 'best'),
+            **({'auto_compressor': automatic_compressor(recipe_key, analysis)} if quality == 'standard' else {}),
+        },
         'analysis': analysis,
         'spectrogram': None,
         'warnings': list(report.get('warnings') or []),
         'markers': common.chapters(acq),
         **common.link_result(acq),
         '_media': media,
+        **({'_overview': overview} if overview is not None else {}),
         '_library': {**common.library_hints(acq, keep_original=True), **({'version': version} if version else {})},
     }

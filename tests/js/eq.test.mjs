@@ -102,3 +102,11 @@ test('sameEq ignores order and number types but not values', () => {
   assert.ok(!sameEq(a, a.slice(0, 1)));
   assert.ok(!sameEq(a, [band(160, -3.2, 2.9), band(280, 1.5, 2)]));
 });
+
+test('text uses the server precision and preserves tenths of a hertz above 1 kHz', () => {
+  const parsed = parseEq('1000.05 Hz -1.125 dB Q 2.125\n2.6785 kHz +0.005 dB Q 8\n80 Hz -0.004 dB Q 1');
+  assert.deepEqual(parsed, { bands: [band(1000.1, -1.13, 2.13), band(2678.5, 0.01, 8)], errors: [] });
+  assert.equal(formatEq(parsed.bands), '1.0001 kHz −1.13 dB Q 2.13\n2.6785 kHz +0.01 dB Q 8.0');
+  assert.deepEqual(parseEq(formatEq(parsed.bands)), parsed);
+  assert.equal(parseEq('19.9999 Hz +1 dB Q 1\n100 Hz +6.0001 dB Q 1\n100 Hz +1 dB Q 0.2999').errors.length, 3);
+});

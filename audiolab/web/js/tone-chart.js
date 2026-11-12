@@ -13,6 +13,38 @@ const PAD = 4;    // viewBox units kept free above the top and below the bottom 
 const TICK_STEPS = [60, 120, 300, 600, 900, 1200, 1800, 3600, 5400, 7200, 10800];
 const MAX_MARKERS = 60; // chapter lines drawn at most (more are thinned evenly)
 export const TONE_DEFAULT = ['deep_bass', 'mids', 'top_end'];
+const TONE_BASIS = 'Sampled mid-signal band shares relative to the recording’s median balance';
+
+/** Summarize whole audible bins within a selection. Relative shares alone cannot yield corrective EQ. */
+export function toneObservation(tl, start, end, duration = null) {
+  const step = Number(tl?.step_s);
+  const bands = tl?.bands || [];
+  const values = tl?.values || [];
+  const basis = `${TONE_BASIS} in ${step} s bins.`;
+  if (!(step > 0) || !bands.length || !values.length) {
+    return { status: 'insufficient', differences: [], message: 'No tone-over-time readings are available.' };
+  }
+  if (!(Number.isFinite(start) && Number.isFinite(end) && end > start)) {
+    return { status: 'insufficient', differences: [], basis, message: 'Choose the start and end first.' };
+  }
+  // Older timelines can end with a partial bin. Only a known file length or a later bin confirms its coverage.
+  const confirmedEnd = Number.isFinite(duration) && duration > 0 ? duration : (values.length - 1) * step;
+  const first = Math.max(0, Math.ceil(start / step));
+  const stop = Math.min(values.length, Math.floor(Math.min(end, confirmedEnd) / step));
+  const complete = values.slice(first, Math.max(first, stop));
+  const audible = complete.filter((row) => bands.every((_, j) => Number.isFinite(row?.[j])));
+  if (!audible.length) {
+    const message = complete.length ? 'No complete audible tone reading within this range.'
+      : `This range contains no complete ${step} s tone bin.`;
+    return { status: 'insufficient', differences: [], basis, message };
+  }
+  const differences = bands.map((band, j) => ({
+    label: band.label || band.key,
+    db: audible.reduce((sum, row) => sum + row[j], 0) / audible.length,
+  }));
+  const coverage = `Mean of ${audible.length} of ${complete.length} complete ${step} s bins in this range with audible readings.`;
+  return { status: 'no_candidate', differences, basis, message: `${coverage} No EQ proposed from relative shares.` };
+}
 
 const bandIndex = (tl, key) => (tl?.bands || []).findIndex((b) => b.key === key);
 const color = (key) => `var(--tone-${String(key).replace(/_/g, '-')}, var(--ink-3))`;
@@ -91,7 +123,7 @@ export function toneReadout(tl, i, keys, markers = null) {
     return col >= 0 && Number.isFinite(v) ? `${tl.bands[col].label} ${fmtSigned(v, 1)} dB` : null;
   }).filter(Boolean);
   const chapter = chapterAt(markers, i * step)?.title || null;
-  return [fmtDuration(i * step), chapter, ...(parts.length ? parts : ['quiet here'])].filter(Boolean).join(' · ');
+  return [fmtDuration(i * step), chapter, ...(parts.length ? parts : ['no usable mid-signal reading'])].filter(Boolean).join(' · ');
 }
 
 /** The chapter starts to draw inside the chart (not at 0), every k-th once there are more than MAX_MARKERS. */
@@ -139,8 +171,8 @@ export function toneChart(tl, { compact = false, onPick = null, markers = null }
     class: ['tone-tick', t === 0 && 'is-first', t >= end - 1e-6 && 'is-last'], style: { left: `${(t / end) * 100}%` },
   }, axisTime(t, end))));
   const readout = h('p', { class: 'tone-readout', 'aria-live': 'polite' });
-  const note = h('figcaption', { class: 'tone-note' }, 'How the balance moves over the recording. A change is often the music itself; ',
-    onPick ? 'click a point to preview from there.' : 'preview a part to judge it.');
+  const note = h('figcaption', { class: 'tone-note' }, `${TONE_BASIS} in ${step} s bins. `,
+    onPick ? 'Pick a point to start the audition there.' : 'Listen to a passage to judge its tone.');
   const options = tl.bands.map((b) => ({
     value: b.key, label: [h('i', { class: 'tone-swatch', style: { '--c': color(b.key) }, 'aria-hidden': 'true' }), b.label],
   }));

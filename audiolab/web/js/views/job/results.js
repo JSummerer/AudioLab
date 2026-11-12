@@ -35,10 +35,13 @@ export function doneView(job, ctx) {
 function previewResult(job, r, ctx) {
   const preview = sectionPreviewCompare(job);
   if (preview) ctx.onCleanup(() => preview.destroy());
+  const description = r.summary?.[0] || (r.preview_basis === 'saved_export'
+    ? 'Playing the saved version. No new processing was applied.'
+    : 'Section estimate. The full recording is checked again when saved.');
   return [
     listenSection('Listen to the section preview',
       preview?.el || h('p', { class: 'muted' }, 'This section preview is unavailable.')),
-    h('p', { class: 'muted small' }, 'Section estimate. The full recording is checked again when saved.'),
+    h('p', { class: 'muted small' }, description),
     warningsCallout(job, r), footer(job), journalBlock(job, ctx),
   ].filter(Boolean);
 }

@@ -1,7 +1,7 @@
 // Library (#/library[/<entry id>]): finished results grouped by recording, newest first or
 // largest first, searchable by title and artist. Each recording is a sleeve row (cover, title,
 // credits), then its versions (Saved, Enhanced, Stems…): a head line with the full-length
-// comparison with the kept original (or Preview changes) and Compare versions, the rest (Show in
+// comparison with the kept original, Adjust and Compare versions, the rest (Show in
 // Finder, Open job, Keep only, Remove — files stay unless the user opts in to the Trash) in a ⋯ menu,
 // then the files — play, download, or "Moved or deleted" when a file is gone. A kept original is
 // AudioLab's own copy, shared by the versions of one recording, and can be deleted per recording
@@ -18,7 +18,7 @@ import {
   libraryCompare, plainPlayer, libraryFileUrl, codecName, versionCompare, versionFile, versionLoudness, loudnessSpread,
   streamLine,
 } from '../compare.js';
-import { openQuickPreview, previewUnavailable } from '../quick-preview.js';
+import { adjustLink, adjustUnavailable } from './adjust.js';
 import { PROCESSING_LABELS, LIGHT_KEYS } from './new/state.js';
 import { eqSummary } from '../eq.js';
 import { sectionSummary } from '../section-eq.js';
@@ -41,7 +41,6 @@ let reloadTimer = 0;
 let doneKey = '';    // finished jobs with a Library entry: the list reloads when this changes
 let target = null;   // #/library/<id> still to scroll to
 let player = null;   // the open player: { entryId, what: 'compare' | 'versions' | file id, fileId, title, el, stage, pause, destroy }
-let preview = null;  // the section preview, tied to the active version and this view
 let clock = 0;       // the timer that refreshes relative times
 let uid = 0;
 let query = '';      // the search text (title or artist)
@@ -91,7 +90,6 @@ export const libraryView = {
 
   show(arg) {
     visible = true;
-    closePreview();
     refreshTimes();
     clearInterval(clock);
     clock = setInterval(refreshTimes, CLOCK_MS);
@@ -169,7 +167,6 @@ function render() {
   for (const [id, c] of cards) {
     if (ids.has(id)) continue;
     if (player?.entryId === id) closePlayer();
-    if (preview?.entryId === id) closePreview();
     c.el.remove();
     cards.delete(id);
   }
@@ -351,7 +348,6 @@ function fillCard(c, entry) {
   // The open player stays when its files are still there (it is moved, not rebuilt).
   const keep = player?.entryId === entry.id && playerStillFits(c, entry);
   if (player?.entryId === entry.id && !keep) closePlayer();
-  if (preview?.entryId === entry.id && previewUnavailable(entry)) closePreview();
   // Focus comes back to the same control; an item of the ⋯ menu counts as its button (the new menu is closed).
   const controls = () => [...c.el.querySelectorAll('a, button, summary')].filter((n) => !n.closest('.menu'));
   const focused = c.el.contains(document.activeElement) ? document.activeElement : null;
@@ -585,8 +581,9 @@ function entryActions(c, entry) {
     }, icon('compare', 15), 'Compare with the original');
     c.toggles.set('compare', b);
     btns.push(b);
-  } else if (entry.task === 'enhance' && !previewUnavailable(entry)) {
-    btns.push(previewButton(entry));
+  }
+  if (!adjustUnavailable(entry)) {
+    btns.push(adjustLink(entry, () => player?.entryId === entry.id && player.what === 'compare' ? player.snapshot?.() : null));
   }
   if (c.peers) {
     const b = h('button', {
@@ -710,39 +707,17 @@ function attachPlayer(c) {
   }, icon('close', 15));
   append(clear(c.stage), [h('div', { class: 'lib-stage-head' }, h('strong', null, player.title), close),
     player.what === 'versions' ? versionPicker(c) : null, player.el]);
-  if (player.what === 'compare' && c.entry.task === 'enhance') {
-    const reason = previewUnavailable(c.entry);
-    c.stage.append(h('div', { class: 'lib-preview-action' },
-      reason ? h('p', { class: 'muted small' }, reason) : previewButton(c.entry, player)));
-  }
   c.stage.hidden = false;
   player.stage = c.stage;
 }
 
 function closePlayer() {
-  closePreview();
   if (!player) return;
   const { stage } = player;
   player.destroy();
   player = null;
   if (stage) { clear(stage); stage.hidden = true; }
   updateToggles();
-}
-
-function closePreview() {
-  preview?.close();
-  preview = null;
-}
-
-function previewButton(entry, comparison) {
-  return h('button', {
-    type: 'button', class: 'btn btn-key btn-sm',
-    onclick: (e) => {
-      closePreview();
-      if (player !== comparison) player?.pause();
-      preview = { entryId: entry.id, close: openQuickPreview(entry, comparison, e.currentTarget) };
-    },
-  }, 'Preview changes');
 }
 
 function playerStillFits(c, entry) {

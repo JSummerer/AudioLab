@@ -4,9 +4,11 @@
 import { h } from './dom.js';
 
 export const EQ_MAX_BANDS = 8;
-const HZ = [20, 20000];
-const DB = [-6, 6];
-const Q = [0.3, 8];
+export const EQ_FIELDS = {
+  hz: { label: 'Frequency (Hz)', min: 20, max: 20000, scale: 10, error: 'Frequency must be 20 Hz to 20 kHz.' },
+  db: { label: 'Gain (dB)', min: -6, max: 6, scale: 100, error: 'Gain must be −6 to +6 dB.' },
+  q: { label: 'Width (Q)', min: 0.3, max: 8, scale: 100, error: 'Q must be 0.3 to 8.' },
+};
 const EXAMPLE = '160 Hz −3.3 dB Q 2.9';
 
 /** Starting points from a sound engineer's curves; a preset adds its bands to the list. */
@@ -29,8 +31,20 @@ const GAIN_WORDS = new Set(['g', 'gain']);
 const TYPE_WORDS = new Set(['pk', 'peq', 'peak', 'peaking', 'bell']); // "PK 160 Hz …" reads like a plain line
 // Equalizer APO: "Filter 3: ON PK Fc 160 Hz Gain -3.3 dB Q 2.90" (and "Preamp: -4 dB", which the loudness step replaces).
 const APO_FILTER = /^filter\s*\d*\s*:\s*(\S+)\s+([a-z]+)(.*)$/i;
-const round = (v) => Math.round(v * 1000) / 1000;
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// Match recipes/base.py: binary64 rounding to the nearest unit, halves away from zero.
+export const scaledUnits = (value, scale) => (value < 0 ? -1 : 1) * Math.floor(Math.abs(value) * scale + 0.5);
+
+export function normalizeEqBand(raw) {
+  const band = {};
+  for (const [key, { min, max, scale, error }] of Object.entries(EQ_FIELDS)) {
+    const value = raw[key];
+    if (!Number.isFinite(value) || value < min || value > max) return { error, key };
+    band[key] = scaledUnits(value, scale) / scale || 0;
+  }
+  return { band };
+}
 
 /**
  * Text → { bands: [{ hz, db, q }], errors: [{ line, message }] }. Blank lines and lines starting
@@ -95,15 +109,12 @@ function readBand(text) {
     else return { error: 'Write the width as Q, like Q 1.4.' };
     expect = null;
     if (band[key] != null) return { error: 'Use one band per line.' };
-    band[key] = round(value);
+    band[key] = value;
   }
   if (band.hz == null) return { error: 'Add a frequency, like 160 Hz.' };
   if (band.db == null) return { error: 'Add a gain in dB, like −3 dB.' };
   if (band.q == null) return { error: 'Add a width as Q, like Q 1.4.' };
-  if (band.hz < HZ[0] || band.hz > HZ[1]) return { error: 'Frequency must be 20 Hz to 20 kHz.' };
-  if (band.db < DB[0] || band.db > DB[1]) return { error: 'Gain must be −6 to +6 dB.' };
-  if (band.q < Q[0] || band.q > Q[1]) return { error: 'Q must be 0.3 to 8.' };
-  return { band: { hz: band.hz, db: band.db, q: band.q } };
+  return normalizeEqBand(band);
 }
 
 // --- Display ---------------------------------------------------------------------
@@ -113,7 +124,7 @@ const digits = (v, max, min = 0) => {
 };
 
 function bandText(b, compact = false) {
-  const hz = Number(b.hz) >= 1000 ? `${digits(b.hz / 1000, 3)} kHz` : `${digits(b.hz, 2)} Hz`;
+  const hz = Number(b.hz) >= 1000 ? `${digits(b.hz / 1000, 4)} kHz` : `${digits(b.hz, 1)} Hz`;
   const db = Number(b.db);
   const gain = `${db > 0 ? '+' : db < 0 ? '−' : ''}${digits(Math.abs(db), 2, 1)} dB`;
   return `${hz} ${gain} ${compact ? 'Q' : 'Q '}${digits(b.q, 2, 1)}`;
@@ -121,19 +132,25 @@ function bandText(b, compact = false) {
 
 const list = (bands) => (Array.isArray(bands) ? bands : []);
 
+/** Canonical bands as used by the graph, API and text editor. */
+export function canonicalEq(bands) {
+  return list(bands).map((b) => normalizeEqBand({ hz: Number(b?.hz), db: Number(b?.db), q: Number(b?.q) }).band)
+    .filter((b) => b?.db);
+}
+
 /** Bands → text for the box, one per line: "160 Hz −3.3 dB Q 2.9" (parseEq reads it back). */
 export function formatEq(bands) {
-  return list(bands).map((b) => bandText(b)).join('\n');
+  return canonicalEq(bands).map((b) => bandText(b)).join('\n');
 }
 
 /** Bands on one line, for settings lists: "160 Hz −3.3 dB Q2.9 · 280 Hz +1.5 dB Q2.0". */
 export function eqSummary(bands) {
-  return list(bands).map((b) => bandText(b, true)).join(' · ');
+  return canonicalEq(bands).map((b) => bandText(b, true)).join(' · ');
 }
 
 /** The same bands as far as anyone can see (order aside). */
 export function sameEq(a, b) {
-  const key = (bands) => list(bands).map((x) => bandText(x)).sort().join('\n');
+  const key = (bands) => canonicalEq(bands).map((x) => bandText(x)).sort().join('\n');
   return key(a) === key(b);
 }
 
@@ -143,7 +160,7 @@ let uid = 0;
 /**
  * The bands as text, the presets, and the problems per line under it.
  * `onInput({ text, bands, errors })` runs after every edit (typing or a preset).
- * Returns { el, textarea, read() → parseEq result, set(text) }.
+ * Returns { el, textarea, read() → parseEq result, set(text, { notify }) }.
  */
 export function eqField({ id, text = '', label = 'Custom EQ', onInput }) {
   const base = id || `eq-${++uid}`;
@@ -154,10 +171,10 @@ export function eqField({ id, text = '', label = 'Custom EQ', onInput }) {
   ta.value = text;
   const note = h('p', { class: 'small muted eq-note', id: `${base}-note`, 'aria-live': 'polite' });
   const out = h('div', { class: 'eq-out' });
-  const presets = h('div', { class: 'eq-presets' }, h('span', { class: 'small muted' }, 'Presets'),
-    EQ_PRESETS.map((p) => h('button', {
-      type: 'button', class: 'btn btn-ghost btn-sm', title: p.desc, onclick: () => addPreset(p),
-    }, p.label)));
+  const presetBtns = EQ_PRESETS.map((p) => h('button', {
+    type: 'button', class: 'btn btn-ghost btn-sm', title: p.desc, onclick: () => addPreset(p),
+  }, p.label));
+  const presets = h('div', { class: 'eq-presets' }, h('span', { class: 'small muted' }, 'Presets'), presetBtns);
 
   function show({ bands, errors }) {
     ta.setAttribute('aria-invalid', String(errors.length > 0));
@@ -189,6 +206,16 @@ export function eqField({ id, text = '', label = 'Custom EQ', onInput }) {
   show(parseEq(text));
   return {
     el: h('div', { class: 'eq-edit' }, ta, presets, note, out), textarea: ta, read: () => parseEq(ta.value),
-    set: (text) => { ta.value = text; return update(); }, // new text from outside (a suggestion), as if typed
+    setDisabled: (disabled) => {
+      ta.disabled = disabled;
+      for (const btn of presetBtns) btn.disabled = disabled;
+    },
+    set: (text, { notify = true } = {}) => {
+      ta.value = text;
+      if (notify) return update();
+      const result = parseEq(text);
+      show(result);
+      return result;
+    },
   };
 }

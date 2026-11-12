@@ -127,8 +127,16 @@ median share over the recording, in dB (0 = the recording's typical balance; 0.1
 more than 20 dB below the typical level (pauses, fades). `step_s` grows past 60 s so there are at most 600 points.
 It shows how the balance moves; it does not judge it (a change is often the music).
 Loudness, LRA, true peak, clipping, DC and programme-level percentiles cover the whole reference
-(`level_analysis_basis`). Long recordings still use bounded excerpts for spectrum, stereo, key and
-classifier features (`analysis_basis` describes these). If those excerpts are silent, the whole-file
+(`level_analysis_basis`). Stereo also covers the whole reference (`stereo_basis`): `stereo.width_db`
+and `is_mono` use complete mid/side energy; `bass_correlation` is the complete-reference bass correlation.
+`lowest_bass_correlation` is the lowest eligible local correlation, or `null` without meaningful bass.
+The bass measurement uses a 90 Hz low-pass matching the mono fold's magnitude, 0.5-second windows at
+0.25-second hops, and excludes bass below −80 dBFS RMS or −35 dB relative to local broadband energy.
+Any eligible negative window sets `antiphase_bass` and bypasses automatic mono bass; an explicit On
+override still applies it with an explanation. These gates are conservative engineering choices, not
+a diagnosis of the recording's intent. Older results may have excerpt-only stereo measurements.
+Long recordings still use bounded excerpts for spectrum, key and classifier features (`analysis_basis`
+describes these). If those excerpts are silent, the whole-file
 level scan anchors a new spectral excerpt to detected sound. Older results may have excerpt-only levels.
 Legacy `noise_floor_db` and `snr_db` fields describe the lower programme-level percentile and its spread;
 they do not identify background noise or measure signal-to-noise ratio.
@@ -179,11 +187,15 @@ independent of `bass_db`),
 `sample_rate` (44100 | 48000 | 96000), `model` (an `ai_models` key, used with `quality: "best"`),
 `eq` (custom EQ: up to 8 peaking bands `[{"hz": 160, "db": -3.3, "q": 2.9}, …]`; clamped to 20–20000 Hz,
 −6…+6 dB and Q 0.3–8, bands without gain dropped; `[]` = none, so a Library preview or apply can clear a
-saved EQ; a band's Q means what it means in a DAW bell; applied after the tone shaping, before compression,
+saved EQ; normalized to 0.1 Hz and 0.01 dB/Q with half-away-from-zero rounding. Bells use the server's
+half-gain biquad design applied forward/backward, not a browser biquad. Magnitude similarity to a
+conventional DAW bell does not establish transient equivalence: pre-onset energy is possible. Applied after the tone shaping, before compression,
 loudness and peak control; ignored by Volume only).
 `section_eq` (EQ for parts of the recording: up to 8 sections `[{"start_s": 0, "end_s": 2400, "fade_s": 5,
 "bands": [{"hz": 14000, "db": -2, "q": 0.7}, …]}, …]` in the recording's own time; bands as in `eq`; `fade_s` 0.5–60
-(default 5) is the crossfade inside each boundary; a section is at least 10 s and longer than two fades;
+(default 5) is the crossfade inside each boundary; a section is at least 10 s and at least two fades long.
+Times normalize to milliseconds and fades to 0.01 s before validation; a 10 s section with 5 s fades
+is valid but has no full-strength plateau. Section bounds and fades stay inside the processing range;
 sections are sorted and must not overlap, else the whole option is invalid; sections without bands are dropped;
 `[]` = none, so a Library preview or apply can clear saved sections; applied after `eq`, before compression,
 loudness and peak control; ignored by Volume only).
@@ -307,6 +319,7 @@ automatically replacing the saved file.
 | `GET /api/library` | – | `{"groups": [LibraryGroup, …], "count": n}` — see Library below |
 | `GET /api/library/{id}` | – | one LibraryEntry (with `job_exists`). `404` unknown |
 | `GET /api/library/{id}/tone-timeline` | – | the entry's `tone_timeline` (as in the Result analysis). `404` unknown entry or none |
+| `GET /api/library/{id}/overview` | – | retained original sample-peak overview `{basis: "original_sample_peak", duration_s, bin_duration_s, peaks}` with at most 512 contiguous bins, maximum absolute sample across both channels; `404` without a saved overview/entry, `410` without the kept original. Library `has_overview` advertises availability; opening Adjust does not rescan old originals |
 | `GET /api/library/{id}/pcm/{file_id}` | `?offset=<frame>&frames=<n>` | PCM chunk (below) of one file of the entry (`original` or a result). `404` unknown entry/file, `410` moved or deleted, `400` off the grid |
 | `GET /api/library/{id}/files/{file_id}` | `?download=1` optional | one file of a Library entry (`file_id` from its `files`, incl. `original`): inline with Range support for the players, or as an attachment with `download=1`. `404` unknown entry/file, `410` moved or deleted |
 | `POST /api/library/{id}/reveal` | – | opens the entry's output folder (only when `health.local`): `{"ok": true}`, or `{"ok": true, "fallback": "output"}` when that folder is gone and the output root was opened instead (say so). Neither there → `400` "This folder isn't there any more: <path>." with hints. Never creates a folder. `404` unknown |
@@ -489,6 +502,25 @@ New Enhance entries retain `processing: {requested, resolved, applied, metrics}`
 `requested` holds validated recipe, quality, formats, advanced settings and cover/split switches;
 `resolved` holds `{recipe, params, decisions}` and, when available, `bandwidth`
 (`is_lossy_cutoff` and optional `cutoff_hz`) for repeating HF treatment in a short preview.
+New Adaptive versions also retain `resolved.auto_compressor` (`off`, `glue` or `leveler`), the automatic
+decision before an explicit Glue override. New Adaptive/Volume only versions may retain
+`resolved.calibration`, a versioned, finite, path-free object. Missing fields mean unavailable, not zero:
+
+| Calibration field | Meaning and dependency |
+|---|---|
+| `version: 1`, `sample_rate_hz: 48000` | Schema and processing rate; incompatible data is ignored |
+| `pre_limiter_gain_db` | Full precision gain immediately before limiting, including a Volume only peak cap |
+| `post_limiter_gain_db` | Nonpositive corrective gain after limiting; retained only for unchanged limiter input/ceiling, never added before the limiter or applied twice |
+| `leveler_threshold_dbfs` | Voice leveler threshold from its full pre-compressor input; reused only when upstream processing is unchanged |
+| `lowmid: {gate_dbfs, budget_scale}` | Input audibility gate and dimensionless whole-program budget multiplier; compatible only while the low-mid stage and its preceding processing are unchanged |
+| `deess: {gate_dbfs, threshold_db}` | Pre-de-esser audibility gate and band-share threshold in dB, including its budget choice; invalidated by upstream changes |
+| `volume: {dc, peak_dbtp, programme_lufs}` | Two-channel subtracted DC in linear amplitude, full post-DC/pre-gain peak and programme loudness for Volume only's global cap and gain calculation |
+
+Calibration values retain JSON floating-point precision, independently of rounded display metrics.
+Both audition sides use the same declared calibration basis. Target-only changes add the target delta
+before limiting where supported; upstream edits reuse gain as an approximation and invalidate dependent
+detectors on both sides. Detector envelopes still depend on bounded context. Apply does not reuse audition
+calibration: it analyzes and renders the complete original again.
 `applied` and `metrics` use the Result fields above.
 The projection omits source paths, tracklists and raw tool errors, bounds strings/lists and rejects
 non-finite numbers. Older entries omit `processing`; no historical settings are invented.
@@ -508,21 +540,56 @@ The decode preserves comparison playback's source alignment. WebM/Matroska timin
 to early probes at 1, 10 and 25 seconds; if these offer no matching audio, a later preview fails with a
 WAV/FLAC or full-Enhance hint. It does not fall back to decoding an arbitrarily long source prefix.
 
+On both Library mutation routes, `advanced.glue: null` explicitly removes a saved Glue override.
+For preview this requires `resolved.auto_compressor`; older versions without that provenance can reset
+only through full Apply. Omitting `glue` preserves the saved choice. This clear operation does not change
+the semantics of ordinary Enhance option validation.
+
 Preview results have `preview: true`, `files: []`, aligned `original`/`enhanced` media and PCM keys,
 `excerpt: {start_s, duration_s}`, cropped comparison `metrics` and contextual `processing` reports.
-Timeline times in these reports are relative to the cropped excerpt. The source's global resolved
-parameters are retained, but dynamics and gain use the bounded surrounding audio and can differ from
-full-recording processing. The result summary explains that limit. Preview jobs use ordinary status,
+`preview_basis` is `saved_export` when normalized effective parameters are unchanged and an existing
+full-length export can be used (lossless first, never split tracks). That passage uses the saved file's
+full-recording processing, including its codec effects, with no new mastering. The saved file is read
+in place, so moving/deleting it before decoding can fail the preview. As with Library playback, the
+app does not establish that an externally edited file still matches its creation-time processing history.
+Otherwise `preview_basis` is `section_estimate`: global resolved parameters are retained, but dynamics
+and gain can use retained compatible calibration or bounded surrounding audio, and can differ from
+full-recording processing. Older results
+without a basis are section estimates. Timeline times in either report are relative to the cropped
+excerpt; the summary states which audio was used. Preview jobs use ordinary status,
 cancellation, retry and retention routes; internal preview options are not exposed or accepted by
 `POST /api/jobs`. Failed/cancelled previews remove their comparison media and create no Library entry.
+Adjust deletes its paired auditions when they are superseded or left; any still finished when the server
+next starts (a window closed with an audition open) are discarded then. A tab left open across that
+restart reports the audition as no longer available and can render it again.
+
+`paired: true` on the preview request selects Adjust's paired estimate instead of saved-export playback.
+It renders saved and edited settings from one identical original/context decode, with up to 20 s of
+context on each side. PCM/media keys are `saved`, `enhanced` and `original`; comparison metrics are
+`saved`, `after` and `before`, measured over the same audible crop. `baseline_processing` describes the
+saved-settings render; `processing` describes the draft. `preview_basis` remains `section_estimate` even
+for identical settings. `comparison_basis` is `retained_gain` or `section_gain`; `calibration.gain` gives
+`retained`, `retained_target_delta`, `shared_retained_estimate` or `section`, with `retained_detectors`
+listing reused detector state. A shared retained gain does not establish edited/full-render equivalence.
+`calibration.omitted_post_limiter_gain_db` (negative dB) is present when the saved full render needed a
+whole-master correction after limiting that this pair leaves out, because the edit changes the limiter
+input or ceiling. The value records the omitted saved correction; the edited recording may need a
+different correction, so it does not predict either side's error against its full render. Apply can change
+the levels and the difference between them. Renders that use retained gain do not warn about missing the
+loudness target, since a passage is not expected to measure at the whole recording's target.
+`excerpt` adds exact `start_frame`, `frames` and `sample_rate_hz`; `shared_gain_db` records the single
+headroom attenuation applied equally to all three crops before delivery. Playback matching is separate
+and only attenuates the louder side. Spectra computed from these PCM crops describe audio before that
+playback matching. Paired Volume only auditions accept target, ceiling and delivery sample rate;
+tone/dynamics controls are rejected rather than changing modes. Audition processing remains at 48 kHz.
 
 `POST /api/library/{id}/enhance` accepts `{advanced: {...}}` and returns one ordinary queued Enhance Job.
 Both routes clone the retained original into the new job input, merge overrides with saved requested
 options and preserve the earlier version. The full job reanalyzes the complete original, exports and
 verifies new files, and retains its source grouping and track markers. Neither route accepts paths or
 raw chain parameters. They work after the original job expires if the required Library data survives.
-Artwork can be reused when embedded in the retained original; separate custom/downloaded artwork is
-not retained by this workflow and is not fetched again.
+Apply reuses artwork embedded in an available saved export and a separately saved cover image when
+present; it does not fetch missing artwork from the website again.
 An entry is the original plus the final output files — nothing else is written for it (no excerpts: comparing
 decodes the full files in chunks, `…/pcm/…`). For Enhance the acquired original is kept as it came — the
 downloaded stream (e.g. Opus in `.webm`) or the uploaded file, never a decoded WAV — only in AudioLab's data

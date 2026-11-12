@@ -1,0 +1,74 @@
+/* Saved version workspace */
+.adjust-page .page-head { margin-bottom: var(--s-3); }
+.adjust-workspace { display: grid; gap: var(--s-5); }
+.adjust-block { border-top: 1px solid var(--line); min-width: 0; padding-top: var(--s-3); }
+.adjust-block > h2 { font: 600 var(--fs-h2)/1.3 var(--font-serif); margin-bottom: var(--s-2); }
+.adjust-block > p { margin: var(--s-2) 0; }
+.adjust-row {
+  display: flex; align-items: center; flex-wrap: wrap; min-width: 0;
+  gap: var(--s-2) var(--s-3);
+}
+.adjust-control { display: grid; gap: var(--s-1); min-width: 0; }
+.adjust-control > input { width: var(--label-w); }
+.adjust-control > select { max-width: min(100%, 19rem); }
+.adjust-row > .adjust-control { align-self: end; }
+.adjust-row:has(> .adjust-control) > .btn { align-self: end; }
+.adjust-settings { display: grid; justify-items: start; gap: var(--s-2); margin-top: var(--s-2); }
+.adjust-settings > .adjust-control {
+  display: grid; grid-template-columns: minmax(0, var(--label-w)) auto; align-items: center;
+  gap: var(--s-2);
+}
+.adjust-settings > .adjust-row > span { flex: 0 0 var(--label-w); }
+.adjust-settings .adjust-level { width: 6rem; }
+.adjust-section-edit { margin-top: var(--s-2); }
+.adjust-graph-panel { margin-top: var(--s-2); }
+.adjust-errors { color: var(--danger); margin: var(--s-2) 0; padding-inline-start: var(--s-5); }
+.adjust-error-text { padding-inline-start: 0; }
+.adjust-listen { margin-top: var(--s-3); }
+.adjust-audition { display: grid; gap: var(--s-2); }
+.adjust-audition details > :is(p, div) { margin: var(--s-2) 0; }
+
+.adjust-overview { margin-bottom: var(--s-3); }
+.adjust-overview p { margin-top: var(--s-1); }
+.adjust-timeline-area {
+  display: grid; position: relative; grid-template-rows: 3rem var(--s-4);
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  background: var(--panel-2); touch-action: pan-y; cursor: crosshair;
+}
+.adjust-timeline-area.has-sections { grid-template-rows: 3rem var(--s-4) var(--s-4); }
+.adjust-waveform { min-width: 0; overflow: hidden; }
+.adjust-waveform svg { display: block; width: 100%; height: 100%; }
+.adjust-waveform path { fill: none; stroke: var(--ink-3); vector-effect: non-scaling-stroke; }
+.adjust-lane { position: relative; min-width: 0; border-top: 1px solid var(--line); }
+.adjust-strip { display: block; position: absolute; height: 100%; min-width: 1px; }
+.adjust-strip-audition { background: var(--accent); cursor: grab; }
+.adjust-strip-section {
+  background: repeating-linear-gradient(135deg, var(--sunken) 0 var(--s-1), var(--ink-3) var(--s-1) calc(var(--s-1) + 1px));
+  cursor: pointer;
+}
+.adjust-strip-section.is-active { outline: 1px solid var(--accent); outline-offset: -1px; }
+.adjust-full { position: absolute; height: 100%; background: var(--ink-3); pointer-events: none; }
+.adjust-strip-section.is-active .adjust-full { background: var(--accent); }
+.adjust-handle {
+  position: absolute; z-index: 1; inset-block: 0; width: var(--s-3); cursor: ew-resize;
+  color: var(--accent);
+}
+.adjust-handle-start { transform: translateX(-100%); border-inline-end: 2px solid currentColor; }
+.adjust-handle-end { border-inline-start: 2px solid currentColor; }
+.adjust-timeline-times { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
+.adjust-legend-passage::before, .adjust-legend-section::before {
+  content: ''; display: inline-block; width: var(--s-2); height: var(--s-2); margin-inline-end: var(--s-1);
+  background: var(--accent);
+}
+.adjust-legend-section::before { background: var(--ink-3); }
+
+.adjust-spectrum-plot { display: block; width: 100%; max-width: 45rem; height: auto; }
+.adjust-spectrum-axis line { stroke: var(--line-strong); vector-effect: non-scaling-stroke; }
+.adjust-spectrum-axis text { fill: var(--ink-2); font-size: var(--fs-small); }
+.adjust-spectrum-curve { stroke: var(--accent); stroke-width: 1.5; fill: none; vector-effect: non-scaling-stroke; }
+
+@media (max-width: 480px) {
+  .adjust-control > input { max-width: 100%; }
+  .adjust-control > select { max-width: 100%; }
+  .adjust-settings > .adjust-row > span { flex-basis: 100%; }
+}

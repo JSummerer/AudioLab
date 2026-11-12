@@ -8,6 +8,7 @@ from typing import Any
 
 from .media.export import FORMATS
 from .recipes.base import eq_bands, section_eq
+from .recipes.calibration import retained
 
 _RECIPE_KEYS = ('club', 'live', 'music', 'voice')
 _LEVELS = 'target_lufs tp_ceiling_db bass_db sample_rate'
@@ -179,9 +180,12 @@ def _params(value: Any) -> dict[str, Any]:
     return params
 
 
-def report_details(report: dict) -> dict[str, Any]:
+def report_details(report: dict, *, keep_calibration: bool = False) -> dict[str, Any]:
     """Expose only the resolved settings and applied audio steps of a renderer report."""
-    return {'params': _params(report.get('params')), 'applied': _applied(report)}
+    details = {'params': _params(report.get('params')), 'applied': _applied(report)}
+    if keep_calibration and (calibration := retained(report.get('calibration'))):
+        details['calibration'] = calibration
+    return details
 
 
 def snapshot(options: dict, result: dict) -> dict[str, Any] | None:
@@ -219,6 +223,8 @@ def snapshot(options: dict, result: dict) -> dict[str, Any] | None:
         advanced['section_eq'] = sections
     metrics = _mapping(result.get('metrics'))
     bandwidth = preview_bandwidth(_mapping(result.get('analysis')).get('bandwidth'))
+    auto = _fields(report, choices={'auto_compressor': ('off', 'glue', 'leveler')})
+    calibration = retained(report.get('calibration'))
     return {
         'requested': {**requested, 'advanced': advanced},
         'resolved': {
@@ -226,6 +232,8 @@ def snapshot(options: dict, result: dict) -> dict[str, Any] | None:
             'params': _params(report.get('params')),
             'decisions': _decisions(result.get('decisions')),
             **({'bandwidth': bandwidth} if bandwidth is not None else {}),
+            **auto,
+            **({'calibration': calibration} if calibration is not None else {}),
         },
         'applied': _applied(report.get('applied')),
         'metrics': {k: _fields(metrics.get(k), numbers=_METRICS) for k in ('before', 'after')},

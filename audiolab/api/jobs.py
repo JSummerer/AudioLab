@@ -469,7 +469,7 @@ def media(state: State, job_id: str, key: str):
 @router.get('/api/jobs/{job_id}/pcm/{key}')
 def media_pcm(state: State, job_id: str, key: str, offset: int = 0, frames: int = 0):
     job = state.job_or_404(job_id)
-    p = (job.result or {}).get('_media', {}).get(key) if key in ('original', 'enhanced') else None
+    p = (job.result or {}).get('_media', {}).get(key) if key in ('original', 'enhanced', 'saved') else None
     if not p or not Path(p).is_file():
         raise HTTPException(404, 'Preview not available.')
     return serve_pcm(Path(p), offset, frames, state.pcm_stop)

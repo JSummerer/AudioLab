@@ -1,5 +1,42 @@
 # Changelog
 
+## Unreleased
+
+Source changes after beta 6; not included in the packaged beta.
+
+Visual adjustment workspace (2026-11-12):
+- Library's optional Adjust workspace brings passage selection, graphical and numeric EQ, section
+  fades, saved drafts and paired auditions together. Saved settings and edited settings re-render the
+  same original passage; Original and actual exported-version comparison remain available.
+- New versions retain bounded calibration for contextual auditions. Target-only changes reuse the
+  whole-recording gain where supported. EQ/dynamics auditions remain estimates: full Apply reanalyzes
+  and verifies a new version, preserving earlier outputs. Auto can clear an explicit compression choice;
+  old versions without its provenance require a full Apply for that reset.
+- Exact audition spectra use both channels' energy and declare their range, resolution and gain basis.
+  New versions retain a bounded original-level overview for passage selection. Historical tone charts
+  are labelled as relative, coarse observations; misleading automatic section-EQ proposals are withheld.
+- EQ graph, fields and text share server precision. Section fades agree at the minimum length, and
+  section creation shows any scope added around an audition. Zero-phase bells retain the existing DSP;
+  magnitude similarity to a conventional bell does not imply the same transient response.
+- Adjust says when both audition sides leave out the saved version's whole-recording peak correction
+  and explains that Apply can change their levels and difference. Passage auditions no longer blame
+  peak limiting for their intended difference from the loudness target, and dragging a section edge
+  stops where it stays valid while invalid bounds or fades withhold full-strength notes. An audition
+  left open when the window closes is removed at the next start instead of staying in Activity for
+  the retention period.
+
+Rendering and comparison fixes (2026-11-11):
+- Preview changes with unchanged settings plays an available saved export, preserving the full render's
+  processing and codec effects. Changed settings still produce an explicitly labelled section estimate.
+- Stereo checks cover the whole recording. Automatic mono bass skips recordings with an eligible
+  out-of-phase bass passage, even if the overall correlation is positive; an explicit On remains possible.
+- Adaptive low-mid control leaves events touching the start or end alone when a complete rise and return
+  cannot be observed. Section EQ reuses disk-backed buffers on long renders, and AI stem processing's
+  low-mid bypass explanation stays correct when Section EQ is also used.
+- Comparing Library versions disables volume matching when the selected export's measurement is
+  unavailable. Check the result uses the finished file without looking up the original website or
+  carrying over the original's names, cover, duration or tracklist.
+
 ## 2.4.0b6 (2026-11-09, public beta)
 
 - Check and Enhance show a tone timeline for recordings longer than 3 minutes: how deep bass, mids, top end

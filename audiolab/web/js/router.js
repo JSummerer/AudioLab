@@ -1,4 +1,4 @@
-// Tiny hash router: #/new · #/activity · #/job/<id> · #/library[/<entry id>] · #/settings[/<section>].
+// Tiny hash router: #/new · #/activity · #/job/<id> · #/library[/<entry id>] · #/adjust/<entry id> · #/settings[/<section>].
 //
 // Views stay mounted; the router shows one at a time and calls its hooks:
 //   view = { el, heading, show(arg, { same }), hide(), scrollPerArg?, fallback? }
@@ -25,6 +25,7 @@ let stamp = 0; // bumps on every route change
 const depth = () => (Number.isInteger(history.state?.depth) ? history.state.depth : null);
 
 export const jobPath = (id) => `#/job/${encodeURIComponent(id)}`;
+export const adjustPath = (id) => `#/adjust/${encodeURIComponent(id)}`;
 export const settingsPath = (section) => (section ? `#/settings/${encodeURIComponent(section)}` : '#/settings');
 
 export function register(name, view) { views.set(name, view); }

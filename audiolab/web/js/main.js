@@ -11,6 +11,7 @@ import { newView, loadUrl, setFiles, setTask, useJobSource, normalizeUrl, focusL
 import { activityView } from './views/activity.js';
 import { jobView } from './views/job/index.js';
 import { libraryView } from './views/library.js';
+import { adjustView } from './views/adjust.js';
 import { settingsView } from './views/settings.js';
 
 // Remove query parameters from the address bar (no reload, no history entry).
@@ -91,8 +92,8 @@ on('health', () => {
   renderCounts();
 });
 
-// Job pages belong to Activity in the sidebar.
-const NAV_OF = { job: 'activity' };
+// Job pages belong to Activity and Adjust belongs to the Library.
+const NAV_OF = { job: 'activity', adjust: 'library' };
 onRoute(({ name }) => {
   const active = NAV_OF[name] || name;
   for (const a of document.querySelectorAll('.nav-item')) {
@@ -105,7 +106,8 @@ onRoute(({ name }) => {
 document.getElementById('skipLink').addEventListener('click', (e) => {
   e.preventDefault();
   const r = currentRoute();
-  const view = { new: newView, activity: activityView, job: jobView, library: libraryView, settings: settingsView }[r?.name];
+  const view = { new: newView, activity: activityView, job: jobView, library: libraryView,
+    adjust: adjustView, settings: settingsView }[r?.name];
   (view?.heading || scroller).focus();
 });
 
@@ -269,7 +271,7 @@ onAuthRequired(() => tokenDialog(() => boot()));
 function mountViews() {
   const views = {
     new: [newView, 'viewNew'], activity: [activityView, 'viewActivity'], job: [jobView, 'viewJob'],
-    library: [libraryView, 'viewLibrary'], settings: [settingsView, 'viewSettings'],
+    library: [libraryView, 'viewLibrary'], adjust: [adjustView, 'viewAdjust'], settings: [settingsView, 'viewSettings'],
   };
   for (const [name, [view, id]] of Object.entries(views)) {
     view.mount(document.getElementById(id));

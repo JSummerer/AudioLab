@@ -1,8 +1,6 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -11,7 +9,7 @@ permissions:
 
 jobs:
   check:
-    # Keep private copies manual-only; the public beta runs on pushes and PRs.
+    # Keep private copies manual-only; the public beta runs on pull requests.
     if: github.event.repository.private == false || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false

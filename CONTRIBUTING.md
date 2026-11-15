@@ -16,7 +16,7 @@ no build step; reload the page after editing.
 
 ## Checks
 
-CI runs on public pushes to `main`, pull requests and manual starts, using Python 3.12 on macOS,
+CI runs on pull requests to the public repository and on manual starts, using Python 3.12 on macOS,
 Windows and Linux. These are generated-signal and unit/integration tests; they do not establish that
 the native UI, fresh-machine setup or optional AI work on every computer.
 CI also repeats comparison-playback regressions with the bundled FFmpeg, so an installed system

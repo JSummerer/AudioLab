@@ -538,16 +538,19 @@ def test_a_stranger_put_back_is_never_left_hidden_or_its_name_taken(tmp_path, mo
     def no_links(a, b, **kw):
         raise OSError(errno.EPERM, 'Operation not permitted')
 
+    real_replace = os.replace
+
     def replace_fails(a, b):
         (d / 'other.tmp').write_bytes(b'their file')
-        os.rename(d / 'other.tmp', b)
+        real_replace(d / 'other.tmp', b)  # saved over the placeholder (os.rename can't replace on Windows)
         raise OSError(errno.EIO, 'I/O error')
 
     monkeypatch.setattr(os, 'link', no_links)
     monkeypatch.setattr(os, 'replace', replace_fails)
-    with pytest.raises(OSError):
+    with pytest.raises(OSError) as failed:
         outputs._put_back(aside, d / 'Song.wav')
     monkeypatch.undo()
+    assert failed.value.errno == errno.EIO  # the simulated failure itself, not a slip in the simulation
     assert (d / 'Song.wav').read_bytes() == b'their file' and aside.read_bytes() == b'stranger'
 
 

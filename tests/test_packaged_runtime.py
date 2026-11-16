@@ -1,5 +1,6 @@
 """Frozen/source runtime boundaries, with no external requests, installers or models."""
 
+import hashlib
 import json
 import os
 import ssl
@@ -438,15 +439,26 @@ def test_an_undeletable_unused_archive_never_stops_the_app(monkeypatch, app_fact
     _packaged(monkeypatch)
     folder = ytdlp_update.folder()
     folder.mkdir(parents=True)
-    archive = folder / 'yt-dlp-2099.01.01.zip'
-    archive.write_bytes(b'unused')
-    folder.chmod(0o555)  # readable, not writable: the archive can't be deleted
-    try:
-        with TestClient(app_factory(), base_url='http://127.0.0.1') as client:
-            assert client.get('/api/ping').json()['ok']
-        assert archive.exists() and 'Could not delete an unused downloader update' in caplog.text
-    finally:
-        folder.chmod(0o755)
+    stuck, unused = folder / 'yt-dlp-2099.01.01.zip', folder / 'yt-dlp-2099.02.01.zip'
+    active = folder / 'yt-dlp-2099.03.01.zip'
+    for archive in (stuck, unused, active):
+        archive.write_bytes(archive.name.encode())
+    record = {'version': '2099.03.01', 'file': active.name, 'size': active.stat().st_size}
+    record['sha256'] = hashlib.sha256(active.read_bytes()).hexdigest()
+    (folder / 'active.json').write_text(json.dumps(record))
+    unlink = Path.unlink
+
+    def refuse(self, missing_ok=False):  # e.g. no permission, or open in another program on Windows
+        if self == stuck:
+            raise PermissionError(13, 'Permission denied', str(self))
+        return unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, 'unlink', refuse)  # the same failure on every system (chmod is POSIX-only)
+    with TestClient(app_factory(), base_url='http://127.0.0.1') as client:
+        assert client.get('/api/ping').json()['ok']
+    assert 'Could not delete an unused downloader update' in caplog.text
+    assert stuck.exists() and not unused.exists()  # the others are still cleaned up…
+    assert active.exists() and ytdlp_update.active(folder)['file'] == active.name  # …and the update in use stays
 
 
 def test_reveal_endpoints_open_only_fixed_app_folders(tmp_path, monkeypatch, app_factory):

@@ -1,9 +1,11 @@
 // An optional workspace for a saved Enhance version. Drafts live in this tab.
 // Auditions are short-lived jobs. Only Apply queues a new full-length export.
+// Back leads where the user came from (the Library); Render audition and Apply stay in a bar
+// along the bottom of the window while the settings scroll.
 import { h, icon, clear, clockText, fmtNum, parseClock } from '../dom.js';
 import { api } from '../api.js';
 import { segmented, switchControl, toast } from '../ui.js';
-import { adjustPath, go, jobPath } from '../router.js';
+import { adjustPath, back, go, jobPath } from '../router.js';
 import { upsertJob } from '../store.js';
 import { formatEq, sameEq } from '../eq.js';
 import { graphicalEqField } from '../eq-editor.js';
@@ -88,6 +90,9 @@ export const adjustView = {
     subtitle = h('p', { class: 'page-sub' });
     body = h('div');
     el.append(h('div', { class: 'page adjust-page' },
+      h('div', { class: 'job-bar' },
+        h('button', { type: 'button', class: 'btn btn-ghost btn-quiet btn-sm', onclick: () => back(this.fallback) },
+          icon('chevron', 16, 'ico-flip'), 'Back')),
       h('header', { class: 'page-head' }, h('div', { class: 'page-head-text' }, this.heading, subtitle)), body));
   },
 
@@ -202,7 +207,7 @@ function createWorkspace(entry, signal) {
   const applyBtn = button('Apply to full recording', apply);
   const addSectionBtn = button('Make section from audition', addSection, 'ghost');
   const toneBtn = button('Read historical tone chart', inspectTone);
-  const keep = h('a', { class: 'btn btn-ghost btn-sm', href: libraryPath(entry.id) }, 'Keep existing');
+  const keep = h('a', { class: 'btn btn-ghost btn-sm', href: libraryPath(entry.id) }, 'Keep the saved version');
   const exportLink = entry.compare_file_id ? h('a', { class: 'btn btn-key btn-sm', href: libraryPath(entry.id) },
     icon('compare', 14), 'Compare actual export') : null;
 
@@ -224,8 +229,9 @@ function createWorkspace(entry, signal) {
   markers.map((m, i) => h('option', { value: i }, `${clockText(m.start_s)} · ${m.title || 'Marker'}`))) : null;
 
   const settings = makeSettings();
-  const renderLine = h('div', { class: 'adjust-row' }, renderBtn, cancelBtn);
-  const actions = h('div', { class: 'adjust-row' }, applyBtn, keep);
+  // Always in reach: the bar along the bottom of the window (sticky), the workspace's last row.
+  const actions = h('div', { class: 'adjust-actions', role: 'group', 'aria-label': 'Audition and save' },
+    h('div', { class: 'adjust-row' }, renderBtn, cancelBtn, applyBtn, keep), applyStatus);
   const passage = h('section', { class: 'adjust-block', 'aria-labelledby': 'adjustPassageTitle' },
     h('h2', { id: 'adjustPassageTitle' }, 'Passage'),
     overview?.el,
@@ -245,11 +251,12 @@ function createWorkspace(entry, signal) {
     h('details', { class: 'disclosure adjust-block', open: light }, h('summary', null, light ? 'Loudness settings' : 'More settings'), settings),
     h('section', { class: 'adjust-block', 'aria-labelledby': 'adjustAuditionTitle' },
       h('h2', { id: 'adjustAuditionTitle' }, 'Audition'),
-      renderLine, auditionIssue, status, listen),
+      h('p', { class: 'small muted' }, 'Render audition plays the passage with your changes beside the saved version.'),
+      auditionIssue, status, listen),
     h('section', { class: 'adjust-block', 'aria-labelledby': 'adjustSaveTitle' },
       h('h2', { id: 'adjustSaveTitle' }, 'Save a version'),
-      h('p', { class: 'small muted' }, 'Apply analyzes the full original again and verifies a new export. Automatic decisions may change. Earlier versions stay in the Library.'),
-      actions, applyStatus));
+      h('p', { class: 'small muted' }, 'Apply to full recording analyzes the full original again and verifies a new export. Automatic decisions may change. Earlier versions stay in the Library.')),
+    actions);
 
   const requests = auditionRequests(path, { onState: (state) => {
     busy = state.busy;
@@ -310,13 +317,14 @@ function createWorkspace(entry, signal) {
           onChange: (value) => { draft.values[key] = value; changed(); } });
         wrap.append(h('div', { class: 'adjust-row small' }, h('span', null, label), pick));
       }
-      const sw = switchControl({ checked: (draft.values.harmonics ?? saved.harmonics) === 'on', label: 'Bass harmonics',
+      // On/off is a switch, in the same column as the pills above.
+      const harmonics = switchControl({ checked: (draft.values.harmonics ?? saved.harmonics) === 'on', label: 'Bass harmonics',
         onChange: (on) => { draft.values.harmonics = on ? 'on' : 'off'; changed(); } });
-      wrap.append(h('label', { class: 'details-toggle', for: sw.id }, sw, 'Bass harmonics'));
+      wrap.append(h('div', { class: 'adjust-row small' }, h('label', { class: 'adjust-row-label', for: harmonics.id }, 'Bass harmonics'), harmonics));
       if (saved.glue && !resolved.auto_compressor) {
         wrap.append(h('p', { class: 'small muted' }, 'Auto compression on this version requires Apply to the full recording.'));
       }
-      wrap.append(h('p', { class: 'small muted' }, 'The graph’s static context shows filters from the saved settings. Render an audition to hear changes to these controls.'));
+      wrap.append(h('p', { class: 'small muted' }, 'Render an audition to hear changes to these controls.'));
     }
     wrap.append(settingsErrors);
     return wrap;

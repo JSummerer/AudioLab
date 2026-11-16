@@ -1,6 +1,6 @@
 # AudioLab for Mac
 
-**[View beta 6 on GitHub](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b6)** · [Direct download (.dmg)](https://github.com/JSummerer/AudioLab/releases/download/v2.4.0b6/AudioLab-2.4.0b6-macOS-arm64.dmg) · public beta
+**[Download the latest release](https://github.com/JSummerer/AudioLab/releases/latest)** (AudioLab 2.5.0) · public beta
 
 No Terminal, Python installation or AudioLab account is needed. The app contains its own audio tools.
 Save / Convert, Check, the Library, and Enhance in **Volume only** or **Adaptive** mode work without the optional AI download.
@@ -26,9 +26,8 @@ See [hardware and storage](HARDWARE.md) for memory, disk, model choices and the 
 
 ## Download and install
 
-1. **Choose your download:** open the GitHub release page above and select the `.dmg` under **Assets**,
-   or use **Direct download** to start immediately. The file is named
-   **AudioLab-2.4.0b6-macOS-arm64.dmg** and normally appears in Downloads.
+1. **Choose your download:** open the latest release page above and select the `.dmg` under **Assets**.
+   The file is named like **AudioLab-2.5.0-macOS-arm64.dmg** and normally appears in Downloads.
 2. **Open the downloaded file.** In its window, drag **AudioLab.app** into **Applications**.
    Wait for Finder to finish copying, then eject the AudioLab disk image in Finder's sidebar.
 3. **Open AudioLab from Applications.** If macOS blocks it, follow the next section.
@@ -41,7 +40,7 @@ third-party source archives to install the app. AudioLab downloads optional AI i
 
 ## First opening
 
-This personal beta is **not verified by Apple** (not Developer ID signed or notarized).
+This beta is **not verified by Apple** (not Developer ID signed or notarized).
 macOS may say that Apple cannot check the app or that the developer cannot be verified.
 If you trust the download from **JSummerer/AudioLab** and want to run it:
 
@@ -65,7 +64,7 @@ local audio file and Convert or Check; AI setup is optional.
 
 AI adds **Split** and the **AI stems** mode in Enhance. You can enable or remove the add-on in Settings.
 
-1. Open **Settings → AI & system** and choose **Enable AI features**.
+1. Open **Settings → Updates & add-ons** and choose **Enable AI features**.
 2. Keep AudioLab open and connected to the internet while it downloads. Settings shows the amount
    downloaded, then **Installing** and **Checking** while it unpacks and tests the add-on.
 3. Wait for **Ready**. Split and AI stems are now available, including both **Standard** and
@@ -75,11 +74,11 @@ The download is roughly **0.6 GB**, with about **1 GB** installed. Allow extra f
 installation and audio work. A full download counter is not the end of setup: checking and unpacking
 still follow. There is no fixed installation time; it depends on your connection and Mac.
 
-| If you want to… | In Settings → AI & system |
+| If you want to… | In Settings → Updates & add-ons |
 |---|---|
 | Stop the installation | Choose **Cancel install**. A partial download is kept. |
 | Continue later | Read any error, then choose **Resume AI download** or **Retry AI install**, whichever appears. |
-| Fix an installed add-on | Choose **Repair** to reinstall and check the version used by your app. |
+| Fix a broken add-on | **Repair AI add-on** appears only when the add-on is broken. It reinstalls and checks the version used by your app. |
 | Free its disk space | Choose **Remove AI add-on** and confirm. This also removes partial downloads, models and AI caches. |
 
 Finish or cancel any running AI job before changing the add-on. Removal preserves your recordings,
@@ -92,17 +91,29 @@ short recording and the **Standard AI model**. Fine-tuned is slower. See [hardwa
 
 ## Updates
 
-1. Quit AudioLab and download a fresh `.dmg` using the link at the top of this guide.
+**Settings → Updates & add-ons → Check now** shows when a newer AudioLab exists and links to its
+release page; nothing is downloaded or installed. With **Check for updates automatically** on (off by
+default), AudioLab checks once a day while it is open. This check exists from 2.5.0 on: an older build
+(2.4.0b1–b6) is updated by downloading the new `.dmg` once, as below. To update, replace the app yourself:
+
+1. Quit AudioLab and download a fresh `.dmg` from the [latest release](https://github.com/JSummerer/AudioLab/releases/latest).
 2. Open the `.dmg` and drag **AudioLab.app** into the same **Applications** folder as your existing
    copy. Choose **Replace** when Finder asks.
-3. Eject the disk image and open the new app from that folder. Confirm **2.4.0b6** in **Settings → About**.
+3. Eject the disk image and open the new app from that folder. Confirm the new version in **Settings → About**.
 
 Your Library, settings and finished audio are stored outside the app and carry over when you replace
-it. App updates are manual. If macOS blocks the updated app, follow the [first-opening steps](#first-opening).
+it. macOS asks again for each new copy: follow the [first-opening steps](#first-opening) (**Open Anyway**).
 
-Beta 5 reuses an existing compatible **AI 1.0.0** installation. You can check its status in
-**Settings → AI & system**. **Update AI add-on** appears when an app version needs a different add-on.
-The app's audio and link tools update with the app.
+The downloader for web links (yt-dlp) updates inside the app. When links start failing, choose
+**Update downloader** in **Settings → Updates & add-ons**; a job that failed because the site changed
+offers the same button. AudioLab never updates it by itself. It fetches yt-dlp's newest stable release
+from GitHub, checks its size, checksum and that it starts, and keeps the copy built into the app as the
+fallback: **Use built-in version** goes back to it while an update is in use or after one failed to
+start. A newer app's built-in downloader is used whenever it is newer than your update. The audio
+engine (ffmpeg) updates only with the app.
+
+AudioLab 2.5.0 reuses an existing **AI 1.0.0** installation (unchanged since 2.4.0b2). You can check its status in
+**Settings → Updates & add-ons**. **Update AI add-on** appears when an app version needs a different add-on.
 
 If you also use a [source installation](INSTALLATION.md#install-from-source), quit one copy before
 opening the other; they normally share app data.
@@ -112,7 +123,7 @@ opening the other; they normally share app data.
 **Just remove the app:** quit AudioLab, then move **AudioLab.app** from Applications to Trash.
 This keeps your recordings, Library and settings for a possible reinstall.
 
-**Remove optional AI too:** before quitting, use **Settings → AI & system → Remove AI add-on**.
+**Remove optional AI too:** before quitting, use **Settings → Updates & add-ons → Remove AI add-on**.
 This removes its software, models, cache and partial downloads, but preserves recordings and Library.
 
 **Remove app data as well:** before quitting, use **Settings → About → Open app data** and **Open logs**.
@@ -127,7 +138,8 @@ If AudioLab no longer opens, use Finder's **Go → Go to Folder…** for the def
 
 For a custom data location, use the actual folder shown by the app. Its logs are in `logs/` beneath it.
 **Your finished audio is yours to keep:** normally in `Music/AudioLab`, or your chosen output folder.
-Do not remove it as part of app cleanup. Preserve output first if you chose to save it inside app data.
+Do not remove it as part of app cleanup. Current versions refuse an output folder inside app data; if
+an older version saved output there, preserve it first.
 
 <details>
 <summary>Optional cleanup of macOS-managed files</summary>
@@ -154,9 +166,9 @@ Older source installations have [separate cleanup notes](INSTALLATION.md#uninsta
 |---|---|
 | macOS blocks the first opening | Follow [First opening](#first-opening). If **Open Anyway** is unavailable on a managed Mac, ask its administrator. |
 | The app still will not open, or says it is damaged | Check the chip/macOS requirement above. Keep the exact message and [report it](https://github.com/JSummerer/AudioLab/issues/new?template=bug_report.md); do not disable macOS protections. |
-| AI download or installation stops | Check your connection and free disk space. Read the message in **AI & system**, then Resume or Retry. If it fails again, include the error in a report. |
-| Split or AI stems is unavailable | Enable AI and wait for **Ready**. If already installed, read the reason and use **Repair**. Version 2.4.0b1 needs an app update first. |
-| A link fails | Check for a newer app release, or use a local audio file. Supported sites can change. |
+| AI download or installation stops | Check your connection and free disk space. Read the message in **Updates & add-ons**, then Resume or Retry. If it fails again, include the error in a report. |
+| Split or AI stems is unavailable | Enable AI and wait for **Ready**. If already installed, read the reason and use **Repair AI add-on** when it appears. Version 2.4.0b1 needs an app update first. |
+| A link fails | Choose **Update downloader** (offered on the failed job, or in **Settings → Updates & add-ons**), or use a local audio file. Supported sites can change. |
 | A job needs too much memory or disk | Try a shorter recording or switch to Volume only or Adaptive in Enhance. |
 
 For a failed job, choose **Copy details for a bug report**. For other problems, use
@@ -167,20 +179,23 @@ may be personal. Never share passwords, cookies or access tokens.
 
 ## Files and privacy
 
-Audio is processed on your Mac. Web links need network access to their source; enabling AI downloads
-its software and both models. The app uses a local server for its own window.
+Audio is processed on your Mac. Web links need network access to their source. AudioLab contacts
+GitHub when you click **Check now** or **Update downloader**, or install the AI add-on (its software and
+both models); with **Check for updates automatically** on, it also checks once a day. GitHub then
+sees your IP address; nothing else is sent. The app uses a local server for its own window.
 
 | Data | Default location |
 |---|---|
 | Finished audio and saved covers | `~/Music/AudioLab`, or your choice in **Settings → Files** |
 | Settings, jobs, Library and kept originals | `~/Library/Application Support/AudioLab` |
 | Audio-tool caches and temporary runtime files | The app-data folder's `cache/` subfolder |
+| Downloader updates | The app-data folder's `downloader/` subfolder |
 | Optional AI software, models, caches and partial downloads | The app-data folder's `ai/` subfolder |
 | App logs | `~/Library/Logs/AudioLab` |
 
-**Settings → About** opens the actual app-data and log folders. Working data includes uploaded copies,
-processing intermediates and Check reports. Kept originals support full-length comparison and live
-separately in `library/originals/` under app data. Download a separate copy of any Check report you
+**Settings → About** opens the actual app-data and log folders. Job files in app data include uploaded
+copies, processing intermediates and Check reports. Kept originals support full-length comparison and
+Adjust, and live separately in `library/originals/` under app data. Download a separate copy of any Check report you
 want to retain after clearing jobs.
 
 **Settings → Storage** can clear finished jobs or explicitly delete kept originals. Removing a Library
@@ -188,5 +203,5 @@ entry keeps output files unless you choose to move them to the Trash; its kept o
 other entry uses it, as the dialog explains. Copies saved through a download dialog stay wherever you saved them.
 
 For what was tested and remaining beta limitations, see the
-[release notes](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b6).
+[release notes](https://github.com/JSummerer/AudioLab/releases/latest).
 Build contributors: see the [macOS packaging guide](../packaging/macos/README.md).

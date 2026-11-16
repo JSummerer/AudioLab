@@ -109,6 +109,67 @@ def test_export_tracks_sample_accurate(noise_set, tmp_path):
     assert again[0]['name'] == '01 - Artist A - Opening (2).wav'
 
 
+def test_track_cuts_seek_into_a_master_without_moving_a_sample(tmp_path, monkeypatch):
+    """Cutting the Enhance master (24-bit FLAC, written like recipes.chain) or an uploaded WAV decodes only
+    from just before each track, yet every track file is byte-identical to one cut from a decode of the
+    whole file (with a cover embedded too)."""
+    sr = 48000
+    rng = np.random.default_rng(3)
+    master, upload, cover = tmp_path / 'master.flac', tmp_path / 'upload.wav', tmp_path / 'cover.jpg'
+    audio = (rng.standard_normal((25 * sr, 2)) * 0.2).astype(np.float32)
+    sf.write(master, audio, sr, subtype='PCM_24')
+    sf.write(upload, audio, sr, subtype='PCM_16')
+    run_ffmpeg(['-f', 'lavfi', '-i', 'color=c=red:s=64x64', '-frames:v', '1', str(cover)])
+    tracks = [
+        {'n': 1, 'title': 'One', 'start_s': 0.0, 'end_s': 7.3371},
+        {'n': 2, 'title': 'Two', 'start_s': 7.3371, 'end_s': 19.99999},
+        {'n': 3, 'title': 'Three', 'start_s': 19.99999, 'end_s': 26.0},  # open-ended: runs to the end
+    ]
+    seeks = []
+    real_run = export.run_ffmpeg
+    monkeypatch.setattr(export, 'run_ffmpeg', lambda args, **kw: (seeks.append('-ss' in args), real_run(args, **kw)))
+
+    def cut(src, fmt, folder, **kw):
+        return [Path(o['path']).read_bytes() for o in export.export_tracks(src, tracks, tmp_path / folder, fmt, **kw)]
+
+    cases = [
+        (master, 'flac24', {}),
+        (master, 'wav16', {'sample_rate': 44100}),
+        (master, 'aac_256', {'cover': cover}),
+        (upload, 'mp3_320', {'cover': cover}),
+    ]
+    for src, fmt, kw in cases:
+        seeks.clear()
+        sought = cut(src, fmt, f'seek-{src.suffix}-{fmt}', **kw)
+        assert seeks == [False, True, True], fmt  # the first track starts at 0: nothing to skip
+        with monkeypatch.context() as m:
+            m.setattr(export, '_SEEK_EXACT', frozenset())  # the old way: decode from the start
+            whole = cut(src, fmt, f'whole-{src.suffix}-{fmt}', **kw)
+        assert len(sought) == 3 and sought == whole, fmt
+
+
+def test_track_cuts_carry_their_full_files_trim_and_nothing_else(tmp_path, monkeypatch):
+    master = tmp_path / 'master.flac'
+    sf.write(master, (np.random.default_rng(4).standard_normal((6 * 48000, 2)) * 0.2).astype(np.float32), 48000)
+    tracks = [{'n': 1, 'title': 'One', 'start_s': 0.0, 'end_s': 3.0}, {'n': 2, 'title': 'Two', 'start_s': 3.0}]
+    commands = []
+    real_run = export.run_ffmpeg
+    monkeypatch.setattr(export, 'run_ffmpeg', lambda args, **kw: (commands.append(args), real_run(args, **kw))[1])
+
+    def cut(folder, **kw):
+        commands.clear()
+        export.export_tracks(master, tracks, tmp_path / folder, 'mp3_320', **kw)
+        return [args[:-1] for args in commands]  # the staging name at the end is random
+
+    plain, trimmed = cut('plain'), cut('trimmed', trim_db=0.61)
+    assert not any('volume' in a for args in plain for a in args)  # no trim: the command is as before
+    assert len(trimmed) == len(plain) == 2
+    for before, after in zip(plain, trimmed):
+        af = after.index('-af')
+        assert after[af + 1] == before[af + 1].replace('asetpts=PTS-STARTPTS', 'asetpts=PTS-STARTPTS,volume=-0.61dB')
+        assert after[:af] + after[af + 2 :] == before[:af] + before[af + 2 :]
+
+
 def test_export_tracks_tags_and_long_names(noise_set, tmp_path):
     from mutagen.id3 import ID3
 
@@ -149,6 +210,37 @@ def test_commit_without_hard_links(tmp_path, monkeypatch):
     final = export._commit(staging, folder / 'song.mp3')
     assert final.name == 'song (2).mp3' and final.read_text() == 'new'
     assert (folder / 'song.mp3').read_text() == 'existing' and not staging.exists()
+
+
+def test_place_file_leaves_no_partial_and_keeps_its_source_when_it_fails(tmp_path, monkeypatch):
+    folder, src = tmp_path / 'out', tmp_path / 'download.webm'
+    src.write_bytes(b'downloaded audio')
+    real_replace = os.replace
+
+    def no_cross_drive_rename(a, b):
+        if Path(a) == src:
+            raise OSError(18, 'Invalid cross-device link')
+        return real_replace(a, b)
+
+    def disk_full(a, b):
+        Path(b).write_bytes(b'half')
+        raise OSError(28, 'No space left on device')
+
+    monkeypatch.setattr(export.os, 'replace', no_cross_drive_rename)
+    monkeypatch.setattr(export.shutil, 'copy2', disk_full)
+    for move in (False, True):  # a copy, and a move to another drive
+        with pytest.raises(OSError):
+            export.place_file(src, folder / 'Song.webm', move=move)
+        assert list(folder.iterdir()) == [] and src.read_bytes() == b'downloaded audio'
+    monkeypatch.undo()
+
+    def no_free_name(staging, dst):
+        raise AudioLabError('Could not find a free file name for Song.webm.')
+
+    monkeypatch.setattr(export, '_commit', no_free_name)
+    with pytest.raises(AudioLabError):
+        export.place_file(src, folder / 'Song.webm', move=True)  # renamed on the same drive, then given back
+    assert list(folder.iterdir()) == [] and src.read_bytes() == b'downloaded audio'
 
 
 @pytest.mark.skipif(os.name == 'nt', reason='Windows copies ffmpeg instead of linking it')
@@ -776,8 +868,8 @@ def test_download_errors_by_kind():
     # something unknown: plain words, yt-dlp's text only as the detail — and no automatic downloader update
     e = youtube._friendly_error('ERROR: [foo] bar: Something odd happened (code 7)', 'u')
     assert str(e) == "The download didn't work." and e.fix is None
-    assert e.detail == 'Something odd happened (code 7)' and 'Downloads & sign-in' in e.hints[-1]
-    assert youtube._UPDATE_HINT == 'Update the downloader: Settings → Downloads & sign-in → "Update downloader".'
+    assert e.detail == 'Something odd happened (code 7)' and 'Updates & add-ons' in e.hints[-1]
+    assert youtube._UPDATE_HINT == 'Update the downloader: Settings → Updates & add-ons → "Update downloader".'
 
 
 def test_unknown_download_error_does_not_update_the_downloader(tmp_path, monkeypatch):

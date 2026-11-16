@@ -2,8 +2,11 @@
 four stems (vocals, drums, bass, other)."""
 
 import math
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 from ..context import TaskContext
 from ..errors import AudioLabError, ToolMissingError
@@ -24,16 +27,60 @@ STEM_LABELS = {
 
 SAFE_PEAK = 10 ** (-0.3 / 20)  # −0.3 dBFS
 
+# The passes after the separation read and write whole float stems (GBs for a long set), so each block
+# checks for Cancel. They do what ai.separation's mix_stems/stems_peak do, which can't take a cancel check.
 
-def _scaled(src: Path, gain: float, dst: Path) -> Path:
-    """Stream `src` × `gain` into a float WAV (RF64 when large)."""
+
+def _blocks(path: Path, check_cancel: Callable[[], None]) -> Iterator[np.ndarray]:
     import soundfile as sf
 
-    info = sf.info(str(src))
-    with sf.SoundFile(
-        str(dst), 'w', samplerate=info.samplerate, channels=info.channels, subtype='FLOAT', format='RF64'
-    ) as out:
-        for blk in sf.blocks(str(src), blocksize=1 << 18, dtype='float32', always_2d=True):
+    for blk in sf.blocks(str(path), blocksize=1 << 18, dtype='float32', always_2d=True):
+        check_cancel()
+        yield blk
+
+
+def _writer(dst: Path, like: Path):
+    """A float WAV with the length, rate and channels of `like`; RF64 only when it could pass 4 GB
+    (as ai.separation writes them: a plain WAV also plays as the stem preview's fallback)."""
+    import soundfile as sf
+
+    info = sf.info(str(like))
+    big = info.frames * info.channels * 4 > 3_900_000_000
+    return sf.SoundFile(
+        str(dst),
+        'w',
+        samplerate=info.samplerate,
+        channels=info.channels,
+        subtype='FLOAT',
+        format='RF64' if big else 'WAV',
+    )
+
+
+def _peak(path: Path, check_cancel: Callable[[], None]) -> float:
+    """Highest absolute sample (linear)."""
+    return max((float(np.abs(blk).max()) for blk in _blocks(path, check_cancel) if blk.size), default=0.0)
+
+
+def _mixed(paths: list[Path], dst: Path, check_cancel: Callable[[], None]) -> tuple[Path, float]:
+    """Sum stems of one length and rate (drums + bass + other = the instrumental), not clipped; returns
+    the file and its peak (measured while writing it, so nobody reads it again for that)."""
+    peak = 0.0
+    with _writer(dst, paths[0]) as out:
+        for blocks in zip(*(_blocks(p, check_cancel) for p in paths)):
+            n = min(b.shape[0] for b in blocks)
+            acc = np.zeros((n, blocks[0].shape[1]), dtype=np.float32)
+            for b in blocks:
+                acc += b[:n]
+            if n:
+                peak = max(peak, float(np.abs(acc).max()))
+            out.write(acc)
+    return dst, peak
+
+
+def _scaled(src: Path, gain: float, dst: Path, check_cancel: Callable[[], None]) -> Path:
+    """Stream `src` × `gain` into a float WAV."""
+    with _writer(dst, src) as out:
+        for blk in _blocks(src, check_cancel):
             out.write(blk * gain)
     return dst
 
@@ -69,7 +116,7 @@ def stages(options: dict[str, Any], source: dict[str, Any]):
 
 
 def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
-    from ..ai.separation import mix_stems, separate, stems_peak
+    from ..ai.separation import separate
 
     opts = ctx.options
     acq = common.acquire(ctx, source, ctx.stage('acquire'), task='separate', quality='best')
@@ -84,16 +131,19 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
             'warning', f'Separation check: the stems do not add up perfectly ({sep.get("residual_db")} dB residual).'
         )
 
+    check = ctx.check_cancel
     if opts['mode'] == 'karaoke':
+        p(100, 'Mixing the instrumental…')
         rest = [v for k, v in stems.items() if k != 'vocals']
-        instrumental = mix_stems(rest, common.scratch_dir(ctx) / 'instrumental.wav')
+        instrumental, peak = _mixed(rest, common.scratch_dir(ctx) / 'instrumental.wav', check)
         wanted = {'vocals': stems['vocals'], 'instrumental': instrumental}
+        peak = max(peak, _peak(stems['vocals'], check))
     else:
         wanted = {k: stems[k] for k in ('vocals', 'drums', 'bass', 'other') if k in stems}
+        peak = max((_peak(v, check) for v in wanted.values()), default=0.0)
 
     # Stems are float and may peak above 0 dBFS (parts can cancel each other in the mix).
     # One shared gain for all stems keeps them clip-free AND still summing to the mix.
-    peak = stems_peak(list(wanted.values()))
     if peak > SAFE_PEAK:
         gain = SAFE_PEAK / peak
         ctx.note(
@@ -101,7 +151,7 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
             f'Turned all stems down by {20 * math.log10(1 / gain):.1f} dB together '
             f'so none of them clips (they still add up to the original).',
         )
-        wanted = {k: _scaled(v, gain, common.scratch_dir(ctx) / f'safe_{k}.wav') for k, v in wanted.items()}
+        wanted = {k: _scaled(v, gain, common.scratch_dir(ctx) / f'safe_{k}.wav', check) for k, v in wanted.items()}
 
     p = ctx.stage('export', 'Saving the stems…')
     title = sanitize_filename(acq.title)

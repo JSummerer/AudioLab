@@ -1,15 +1,16 @@
 // New view — the source: a pasted link (looked up via /api/probe), a playlist to
 // pick from, one file, several files (one job each), or an earlier job's source
-// ("do more with this"). Renders the card under the link field, with the name
-// (names.js) and cover image (cover.js) tools for one link or file.
+// ("do more with this"). Renders the card under the link field; the name (names.js) and
+// cover image (cover.js) tools for one link or file sit under More options (options.js).
+// A link from another page (a deep link) is only put into the field (offerLink).
 import { h, icon, clear, fmtDuration, fmtBytes, confidenceWords } from '../../dom.js';
 import { api } from '../../api.js';
 import { appName } from '../../store.js';
 import { toast, callout, meter, setMeter, led } from '../../ui.js';
 import { signInButton } from '../../actions.js';
-import { state, refs, redraw, definePart, isFileLike, focusIn, focusStart, isMediaFile, tooBig, MAX_FILES } from './state.js';
-import { shownName, metaPayload, nameTools, nameEditor } from './names.js';
-import { coverTools, syncCoverPreview, setCover, isImageFile, takesCover } from './cover.js';
+import { state, refs, redraw, definePart, isFileLike, focusIn, focusStart, isMediaFile, tooBig, autoTask, MAX_FILES } from './state.js';
+import { shownName, metaPayload } from './names.js';
+import { syncCoverPreview, setCover, isImageFile, takesCover } from './cover.js';
 import { measureFile, setTracklist } from './tracks.js';
 
 let probeCtl = null;
@@ -41,6 +42,7 @@ export function loadUrl(text) {
   probeCtl = new AbortController();
   const ctl = probeCtl;
   state.source = { kind: 'probing', url: link };
+  autoTask('url');
   redraw();
   api('/api/probe', { method: 'POST', json: { url: link }, signal: ctl.signal })
     .then((probe) => {
@@ -61,11 +63,32 @@ export function loadUrl(text) {
     });
 }
 
+/**
+ * A link sent by another page (`/?url=…`): put into the link field, not looked up. Any website can
+ * open that address, so nothing is requested from this computer until the user presses Load.
+ */
+export function offerLink(text) {
+  probeCtl?.abort();
+  probeCtl = null;
+  const value = String(text || '').trim();
+  if (refs.input) refs.input.value = value;
+  state.source = value ? { kind: 'offered', url: value } : null;
+  redraw();
+}
+
+/** A paste into the link field: looked up at once, except while a link from another page waits
+ *  there — then Load stays the only thing that starts a lookup. */
+export function pasteLink(text) {
+  if (state.source?.kind === 'offered') offerLink(text);
+  else loadUrl(text);
+}
+
 function setFile(file) {
   if (!file) return;
   probeCtl?.abort();
   if (refs.input) refs.input.value = '';
   state.source = { kind: 'file', file };
+  autoTask('file');
   measureFile(state.source);
   if (state.download.format === 'original' || state.download.format === 'video') state.download.format = 'mp3';
   redraw();
@@ -115,6 +138,7 @@ export function setFiles(list) {
   probeCtl?.abort();
   if (refs.input) refs.input.value = '';
   state.source = { kind: 'files', items };
+  if (!adding) autoTask('file');
   if (['original', 'video'].includes(state.download.format)) state.download.format = 'mp3';
   redraw();
   focusStart();
@@ -144,7 +168,7 @@ export function useJobSource(job, task, { again = false, file = null } = {}) {
   if (file) src.sourceFile = { id: file.id, name: file.name };
   if (typeof o.split_tracks === 'boolean') src.splitTracks = o.split_tracks;
   state.source = src;
-  if (task) state.task = task;
+  if (task) Object.assign(state, { task, taskPicked: true });
   if (again) applyOptions(previous.task, o);
   if (isFileLike() && ['original', 'video'].includes(state.download.format)) state.download.format = 'mp3';
   if (typeof o.tracklist === 'string') setTracklist(src, o.tracklist);
@@ -195,7 +219,7 @@ export function clearSource() {
 // ---------------------------------------------------------------------------
 // The card
 // ---------------------------------------------------------------------------
-function sourceCard({ thumb, iconName, title, meta, extra, removable = true, rename = null, cover = null }) {
+function sourceCard({ thumb, iconName, title, meta, extra, removable = true }) {
   const thumbBox = h('div', { class: 'source-thumb' });
   if (thumb) {
     const img = h('img', { src: thumb, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' });
@@ -204,18 +228,13 @@ function sourceCard({ thumb, iconName, title, meta, extra, removable = true, ren
   } else {
     thumbBox.append(icon(iconName, 26));
   }
-  const editing = !!rename?.editing;
-  // The name and cover tools: one row under the text (under the whole card when narrow).
-  const tools = [rename && !editing ? nameTools(rename) : null, cover ? coverTools(cover) : null].flat().filter(Boolean);
-  return h('div', { class: ['source-card', editing && 'is-editing'] },
+  return h('div', { class: 'source-card' },
     thumbBox,
     h('div', { class: 'source-text' },
       h('div', { class: 'source-title' }, title),
       meta ? h('div', { class: 'source-meta' }, meta) : null,
       extra),
-    removable ? h('button', { type: 'button', class: 'icon-btn source-remove', 'aria-label': 'Remove this source', onclick: clearSource }, icon('close', 16)) : null,
-    tools.length ? h('div', { class: 'source-tools' }, tools) : null,
-    editing ? nameEditor(rename) : null);
+    removable ? h('button', { type: 'button', class: 'icon-btn source-remove', 'aria-label': 'Remove this source', onclick: clearSource }, icon('close', 16)) : null);
 }
 
 function guessLine(guess) {
@@ -237,13 +256,15 @@ function fileIcon(name = '', type = '') {
 function renderSource() {
   syncCoverPreview();
   const src = state.source;
-  // Don't rebuild under someone typing a name (health/settings events re-render).
-  if (src?.editing && refs.source.contains(document.activeElement) && document.activeElement.closest('.name-edit')) return;
   const el = clear(refs.source);
   if (!src) return;
   switch (src.kind) {
     case 'invalid':
       el.append(callout('warning', 'That doesn’t look like a link', 'Paste the full address from your browser, for example https://www.youtube.com/watch?v=…'));
+      break;
+    case 'offered':
+      el.append(callout('info', 'Press Load to look up this link',
+        'Another page sent it here. Nothing is looked up until you press Load.'));
       break;
     case 'probing':
       el.append(sourceCard({ iconName: 'link', title: 'Looking up the link…', meta: src.url, extra: meter(0, { idle: true, label: 'Looking up' }) }));
@@ -262,7 +283,7 @@ function renderSource() {
       el.append(sourceCard({
         thumb: p.thumbnail, iconName: 'video', title: name.title || src.url,
         meta: metaJoin(name.artist, fmtDuration(p.duration_s), p.is_live ? 'Live stream' : null),
-        extra: guessLine(p.guess), rename: src, cover: src,
+        extra: guessLine(p.guess),
       }));
       if (p.is_live) el.append(callout('warning', 'This is a live stream', 'Live streams can only be saved after they end.'));
       break;
@@ -276,7 +297,6 @@ function renderSource() {
       el.append(sourceCard({
         iconName: fileIcon(src.file.name, src.file.type), title: renamed ? name.title : src.file.name,
         meta: metaJoin(renamed ? name.artist : null, renamed ? src.file.name : 'File on this computer', fmtBytes(src.file.size)),
-        rename: src, cover: src,
       }));
       break;
     }
@@ -291,7 +311,7 @@ function renderSource() {
         meta: src.sourceFile
           ? metaJoin(name.artist, 'Result of an earlier job', src.sourceFile.name, fmtDuration(j.source?.duration_s))
           : metaJoin(name.artist, 'From an earlier job', j.source?.kind === 'file' ? j.source?.name : null, fmtDuration(j.source?.duration_s)),
-        extra: guessLine(j.result?.classification), rename: src, cover: src,
+        extra: guessLine(j.result?.classification),
       }));
       break;
     }

@@ -16,6 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from audiolab import library, system, util
+from audiolab import outputs as attempt_outputs
 from audiolab.api import create_app
 from audiolab.errors import AudioLabError, Cancelled
 from audiolab.jobs import CANCELLED, DONE, FAILED, RUNNING, JobManager
@@ -129,6 +130,7 @@ def result_runner(original, outputs):
         output = SETTINGS.output_dir / f'{job.id}.wav'
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_bytes(b'tiny generated result')
+        attempt_outputs.created_file(output, os.lstat(output))  # as media.export notes a file it gives its name
         outputs.append(output)
         return {
             'headline': 'Done',
@@ -139,14 +141,14 @@ def result_runner(original, outputs):
     return runner
 
 
-@pytest.mark.parametrize('phase', ['hash', 'copy', 'cleanup'])
-def test_cancel_during_library_preparation_is_effective(tmp_path, monkeypatch, phase):
+@pytest.mark.parametrize('phase', ['hash', 'copy', 'cleanup', 'quit'])
+def test_cancel_during_library_preparation_keeps_the_finished_result(tmp_path, monkeypatch, phase):
     original = tmp_path / 'source.wav'
     original.write_bytes(b'generated' * 150_000)  # two streamed blocks, no real audio
     outputs = []
     entered, release = threading.Event(), threading.Event()
     first = True
-    if phase == 'hash':
+    if phase in ('hash', 'quit'):
         sha1 = library.hashlib.sha1
 
         class PausedHash:
@@ -173,7 +175,7 @@ def test_cancel_during_library_preparation_is_effective(tmp_path, monkeypatch, p
         monkeypatch.setattr(util.os, 'link', no_link)
         copy = library.link_or_copy
 
-        def paused_copy(src, dst, check_cancel):
+        def paused_copy(src, dst, check_cancel, **kw):
             calls = 0
 
             def check():
@@ -185,7 +187,7 @@ def test_cancel_during_library_preparation_is_effective(tmp_path, monkeypatch, p
                     assert release.wait(5)
                 check_cancel()
 
-            return copy(src, dst, check)
+            return copy(src, dst, check, **kw)
 
         monkeypatch.setattr(library, 'link_or_copy', paused_copy)
     else:
@@ -210,15 +212,23 @@ def test_cancel_during_library_preparation_is_effective(tmp_path, monkeypatch, p
     try:
         assert entered.wait(5)
         assert manager.public(job.id)['message'] == 'Finishing…'
-        response = client.post(f'/api/jobs/{job.id}/cancel', headers={'X-AudioLab-Token': 't'})
-        assert response.status_code == 200 and response.json()['message'] == 'Cancelling…'
+        if phase == 'quit':  # the app is closed and waits its usual few seconds for the worker
+            closing = threading.Thread(target=manager.shutdown)
+            closing.start()
+            wait_for(lambda: manager._contexts[job.id].cancelled)
+        else:
+            response = client.post(f'/api/jobs/{job.id}/cancel', headers={'X-AudioLab-Token': 't'})
+            assert response.status_code == 200 and response.json()['message'] == 'Cancelling…'
         release.set()
-        wait_for(lambda: manager.get(job.id).status == CANCELLED)
-        assert library.get(job.id) is None and list(library.originals_dir().iterdir()) == []
-        assert original.is_file() and all(path.is_file() for path in outputs)
-        manager.retry(job.id)
+        # The task had returned: its result is complete and stands, whatever Cancel or quitting stops in the
+        # Library step.
         wait_for(lambda: manager.get(job.id).status == DONE)
-        assert library.get(job.id)['original'] and all(path.is_file() for path in outputs)
+        assert original.is_file() and outputs and all(path.is_file() for path in outputs)
+        if phase == 'cleanup':  # the Library step was already through: nothing was left to stop
+            assert library.get(job.id)['original']
+        else:
+            assert library.get(job.id) is None and list(library.originals_dir().iterdir()) == []
+            assert 'Not added to the Library' in ' '.join(manager.get(job.id).result['warnings'])
     finally:
         release.set()
         manager.shutdown()
@@ -333,9 +343,9 @@ def test_cancelled_publication_preserves_shared_original_and_output(tmp_path, mo
         contents = kept.read_bytes()
         copy = library.link_or_copy
 
-        def pause_after_staging(*args):
+        def pause_after_staging(*args, **kw):
             assert args[0] == kept  # reuse the kept file on its own volume rather than copying again
-            staged = copy(*args)
+            staged = copy(*args, **kw)
             entered.set()
             assert release.wait(5)
             return staged
@@ -345,10 +355,10 @@ def test_cancelled_publication_preserves_shared_original_and_output(tmp_path, mo
         assert entered.wait(5)
         manager.cancel(second.id)
         release.set()
-        wait_for(lambda: manager.get(second.id).status == CANCELLED)
+        wait_for(lambda: manager.get(second.id).status == DONE)  # finished; only left out of the Library
         assert library.get(second.id) is None and library.get(first.id) == entry
         assert list(library.originals_dir().iterdir()) == [kept] and kept.read_bytes() == contents
-        assert original.is_file() and all(path.is_file() for path in outputs)
+        assert original.is_file() and outputs[0].is_file() and outputs[1].is_file()
     finally:
         release.set()
         manager.shutdown()
@@ -418,15 +428,22 @@ def test_shutdown_during_library_preparation_cannot_publish_late(tmp_path, monke
     try:
         assert entered.wait(5)
         manager.shutdown(timeout=0)
-        assert manager.get(job.id).status == CANCELLED
-        manager.delete(job.id)
+        # The task had returned complete files: the job finished (no "Try again" to make duplicates),
+        # only without its Library entry; the stalled worker can't add one later.
+        assert manager.get(job.id).status == DONE
+        assert 'Not added to the Library' in ' '.join(manager.get(job.id).result['warnings'])
         release.set()
         for thread in manager._threads:
             thread.join(5)
         assert not any(thread.is_alive() for thread in manager._threads)
-        assert not manager.job_dir(job.id).exists() and library.get(job.id) is None
-        assert list(library.originals_dir().iterdir()) == []
-        assert original.is_file() and all(path.is_file() for path in outputs)
+        assert library.get(job.id) is None and list(library.originals_dir().iterdir()) == []
+        assert (
+            manager.get(job.id).result['warnings'].count('Not added to the Library. The saved files are complete.') == 1
+        )
+        again = manager_at(tmp_path)
+        again._load()
+        assert again.get(job.id).status == DONE  # so after a restart, too
+        assert original.is_file() and outputs and all(path.is_file() for path in outputs)
     finally:
         release.set()
         manager.shutdown()

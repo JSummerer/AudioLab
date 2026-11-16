@@ -25,3 +25,15 @@ def isolated_settings(tmp_path, monkeypatch):
     SETTINGS._settings = None
     yield tmp_path
     SETTINGS._settings = None
+
+
+@pytest.fixture(autouse=True)
+def no_github(monkeypatch):
+    """The update code (update check, downloader update) never reaches GitHub from a test: every request goes through
+    `updates.open_github`, which fails the test here. Tests that need an answer patch it or `updates.fetch_json`."""
+    from audiolab import updates
+
+    def refuse(url, accept=''):
+        pytest.fail(f'A test tried to contact GitHub: {url}')  # BaseException: no `except Exception` hides it
+
+    monkeypatch.setattr(updates, 'open_github', refuse)

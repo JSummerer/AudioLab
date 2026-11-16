@@ -16,10 +16,12 @@ import re
 import shutil
 import struct
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+from .. import outputs
 from ..context import Progress
 from ..errors import AudioLabError
 from ..util import sanitize_filename, unique_path
@@ -461,6 +463,20 @@ def _check_encoder(spec: FormatSpec) -> None:
         )
 
 
+# Containers whose timestamps count samples from 0: a track cut may seek there (see `transcode`).
+_SEEK_EXACT = frozenset(('.flac', '.wav', '.wave', '.aif', '.aiff'))
+_SEEK_PREROLL_S = 1.0
+
+
+def _seek_exact(src: Path, info: dict) -> bool:
+    """A WAV/FLAC/AIFF that really holds PCM or FLAC (ffmpeg goes by the content, not the name) and
+    starts at 0 (ffmpeg names no start for WAV): there -copyts keeps the very timestamps a decode from
+    the start has."""
+    codec = str(info.get('audio_codec') or '')
+    pcm = codec == 'flac' or codec.startswith('pcm_')
+    return src.suffix.lower() in _SEEK_EXACT and pcm and not info.get('start_s')
+
+
 def _staging_for(dst: Path) -> Path:
     """Hidden, per-call temp name next to `dst` (two jobs with the same title never share it);
     the real extension stays last so ffmpeg picks the right muxer."""
@@ -469,43 +485,75 @@ def _staging_for(dst: Path) -> Path:
 
 def place_file(src: Path, dst: Path, move: bool = False) -> Path:
     """Copy/move `src` to `dst` without ever replacing an existing file.
-    Returns the path actually used (may be 'name (2).ext')."""
+    Returns the path actually used (may be 'name (2).ext'). On failure nothing is left next to `dst`,
+    and a moved `src` is where it was (across drives it is removed only once the copy is in place)."""
     src, dst = Path(src), Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
     staging = _staging_for(dst)
-    if move:
-        try:
-            os.replace(src, staging)
-        except OSError:  # different filesystem
+    renamed = copied = False
+    try:
+        if move:
+            try:
+                os.replace(src, staging)
+                renamed = True
+            except OSError:  # different filesystem
+                pass
+        if not renamed:
             shutil.copy2(src, staging)
-            src.unlink(missing_ok=True)
-    else:
-        shutil.copy2(src, staging)
-    return _commit(staging, dst)
+            copied = True
+        final = _commit(staging, dst)
+    except BaseException:
+        if renamed:
+            try:
+                os.replace(staging, src)  # give the source back
+            except OSError:
+                pass
+        staging.unlink(missing_ok=True)
+        raise
+    if move and copied:
+        src.unlink(missing_ok=True)
+    return final
 
 
 def _commit(staging: Path, dst: Path) -> Path:
-    """Atomically move a finished temp file to a collision-free final name."""
+    """Atomically move a finished temp file to a collision-free final name, noted as made by the
+    running job attempt (outputs.created_file: a failed or cancelled attempt removes it again). The
+    identity is taken from the temp file before it has the final name; the link or rename keeps it."""
+    before = os.lstat(staging)
     for _ in range(1000):
         final = unique_path(dst)
         try:
             os.link(staging, final)  # fails if `final` appeared meanwhile
-            staging.unlink()
-            return final
         except FileExistsError:
             continue
         except OSError:  # no hard links (exFAT/FAT USB sticks, some shares)
-            try:  # reserve the name atomically, then move onto it
-                os.close(os.open(final, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            try:  # reserve the name atomically, then move onto it (see outputs._put_back for the residual)
+                placed = outputs.placeholder(final)
             except FileExistsError:
                 continue
             try:
                 os.replace(staging, final)
             except OSError:
-                final.unlink(missing_ok=True)  # give the reserved (empty) name back
+                outputs.drop_placeholder(final, placed)  # give the reserved (empty) name back
                 raise
-            return final
+        else:
+            try:
+                staging.unlink()
+            except OSError:  # the file has its name: a failure here must not make a second one
+                pass
+        outputs.created_file(final, before)
+        return final
     raise AudioLabError(f'Could not find a free file name for {dst.name}.')
+
+
+# A lossy encoder rebuilds the waveform, so its peaks can land above the master's (often by 0.2–1 dB on
+# loud masters). One re-encode turned down by the measured excess plus this margin brings them back under.
+TRIM_MARGIN_DB = 0.1
+TRIM_MAX_DB = 2.0  # beyond this the file is kept as encoded, with the check's warning
+
+# Measures a staged export: `check(path, progress)` -> a reading with at least `ceiling_dbtp`,
+# `true_peak_dbtp` and `ceiling_met` (media.verification.measure_export's shape).
+Check = Callable[[Path, Progress], dict]
 
 
 def transcode(
@@ -519,9 +567,34 @@ def transcode(
     sample_rate: int | None = None,
     start_s: float | None = None,
     end_s: float | None = None,
+    trim_db: float = 0.0,
 ) -> Path:
     """Convert `src` into format `fmt` at `dst`. Never overwrites: returns the
-    path actually written (may carry a ' (2)' suffix).
+    path actually written (may carry a ' (2)' suffix). See `_transcode`."""
+    return _transcode(src, dst, fmt, tags, cover, progress, duration_s, sample_rate, start_s, end_s, trim_db)['path']
+
+
+def _transcode(
+    src: Path,
+    dst: Path,
+    fmt: str,
+    tags: dict[str, str] | None = None,
+    cover: Path | None = None,
+    progress: Progress | None = None,
+    duration_s: float | None = None,
+    sample_rate: int | None = None,
+    start_s: float | None = None,
+    end_s: float | None = None,
+    trim_db: float = 0.0,
+    check: Check | None = None,
+) -> dict:
+    """Convert `src` into format `fmt` at `dst`: {'path', 'verification', 'trim_db'}.
+
+    `trim_db` turns the audio down by that many dB (track cuts get their full file's trim).
+    `check` measures the staged file before it gets its name. When a lossy file's peaks come out above
+    the ceiling, it is encoded once more from `src`, turned down by the excess plus TRIM_MARGIN_DB (at
+    most TRIM_MAX_DB), and checked again; that version replaces the first before anything is saved.
+    `verification` is the reading of the file as saved, `trim_db` the gain taken off in all (0.0: none).
 
     `cover`: the JPEG to embed (in formats supported by AudioLab). None = no picture: a picture `src`
     carries is never copied on its own — whether there is one is the caller's choice (`common.cover_art`
@@ -529,7 +602,9 @@ def transcode(
 
     `start_s`/`end_s` cut a sample-accurate excerpt (atrim on the decoded audio:
     input-side seeking lands up to ~10 ms off in WebM/M4A, and an output-side -ss
-    would also drop the cover frame)."""
+    would also drop the cover frame). WAV/FLAC/AIFF timestamps count samples from 0, so there
+    decoding starts just before the cut instead of at the beginning; -copyts keeps those absolute
+    timestamps, and the same atrim cuts at the same sample."""
     progress = progress or Progress.null()
     spec = resolve_format(fmt)
     _check_encoder(spec)
@@ -540,12 +615,14 @@ def transcode(
     info = probe_media(src)
     if duration_s is None:
         duration_s = info.get('duration_s')
-    trim = []
+    trim, seek = [], []
     if start_s or end_s:
         start = max(0.0, float(start_s or 0))
         trim = [f'atrim=start={start:.6f}' + (f':end={float(end_s):.6f}' if end_s else ''), 'asetpts=PTS-STARTPTS']
         if duration_s:
             duration_s = max(0.1, (float(end_s) if end_s else duration_s) - start)
+        if _seek_exact(src, info) and start > 2 * _SEEK_PREROLL_S:
+            seek = ['-copyts', '-ss', f'{start - _SEEK_PREROLL_S:.6f}']
 
     rate = sample_rate
     if spec.fixed_rate:
@@ -558,8 +635,6 @@ def transcode(
         resample.append(str(int(rate)))
     if spec.sample_fmt:
         resample += [f'osf={spec.sample_fmt}', 'dither_method=triangular']
-    chain = trim + (['aresample=' + ':'.join(resample)] if resample else [])
-    afilter = ['-af', ','.join(chain)] if chain else []
 
     # Global tags are copied from the source and then overridden here; an empty value ('') removes
     # a tag (e.g. the user cleared the artist). Per-stream tags (Ogg/Opus keep them on the stream,
@@ -569,11 +644,14 @@ def transcode(
         if v is not None:
             meta += ['-metadata', f'{k}={v}']
 
-    staging = _staging_for(dst)
+    staging, retry = _staging_for(dst), _staging_for(dst)
     big_wav = spec.ext == '.wav' and _pcm_bytes(spec, info, rate, duration_s) > _RIFF_LIMIT
 
-    def build(art: bool) -> list[str]:
-        args = ['-i', str(src)]
+    def build(art: bool, target: Path, gain_db: float) -> list[str]:
+        gain = [f'volume={gain_db:.2f}dB'] if gain_db else []
+        chain = trim + gain + (['aresample=' + ':'.join(resample)] if resample else [])
+        afilter = ['-af', ','.join(chain)] if chain else []
+        args = [*seek, '-i', str(src)]
         if art:  # always a JPEG from cover_jpeg: embedded as it is
             args += ['-i', str(cover), '-map', '0:a:0', '-map', '1:v:0', '-c:v', 'copy']
         else:
@@ -594,22 +672,39 @@ def transcode(
             args += ['-movflags', '+faststart']
         if big_wav:  # a plain RIFF header cannot describe 4 GB or more: the file would come out broken
             args += ['-rf64', 'auto']
-        args.append(str(staging))
+        args.append(str(target))
         return args
 
-    art = bool(spec.cover and cover and Path(cover).is_file())
-    without_cover = False
-    try:
+    def encode(target: Path, art: bool, gain_db: float, step: Progress) -> bool:
+        """Write `target`; False when the cover had to be left out."""
         try:
-            run_ffmpeg(build(art), progress=progress, duration_s=duration_s, what=f'{spec.label} export')
+            run_ffmpeg(build(art, target, gain_db), progress=step, duration_s=duration_s, what=f'{spec.label} export')
         except AudioLabError:
             if not art:
                 raise
-            staging.unlink(missing_ok=True)  # cover muxing failed: keep the audio, drop the art
-            run_ffmpeg(build(False), progress=progress, duration_s=duration_s, what=f'{spec.label} export')
-            without_cover = True
-        if not staging.is_file() or staging.stat().st_size == 0:
+            target.unlink(missing_ok=True)  # cover muxing failed: keep the audio, drop the art
+            run_ffmpeg(build(False, target, gain_db), progress=step, duration_s=duration_s, what=f'{spec.label} export')
+            art = False
+        if not target.is_file() or target.stat().st_size == 0:
             raise AudioLabError(f'{spec.label} export produced an empty file.')
+        return art
+
+    art = bool(spec.cover and cover and Path(cover).is_file())
+    verification = None
+    try:
+        with_art = encode(staging, art, -trim_db, progress.sub(0, 50) if check else progress)
+        if check:
+            step = progress.sub(50, 75)
+            step(0, f'Checking the saved {spec.label}…')
+            verification = check(staging, step)
+            peak, ceiling = verification.get('true_peak_dbtp'), verification.get('ceiling_dbtp')
+            if spec.kind == 'lossy' and verification.get('ceiling_met') is False and None not in (peak, ceiling):
+                excess = round(peak - ceiling + TRIM_MARGIN_DB, 2)
+                if 0 < excess <= TRIM_MAX_DB:
+                    trim_db = round(trim_db + excess, 2)
+                    with_art = encode(retry, with_art, -trim_db, progress.sub(75, 90))
+                    verification = check(retry, progress.sub(90, 100))
+                    os.replace(retry, staging)  # the turned-down version is the one that gets saved
         path = _commit(staging, dst)
         if big_wav:
             progress.note(
@@ -617,12 +712,12 @@ def transcode(
                 f'{path.name} is larger than 4 GB, so it was saved as RF64 (long-file WAV). Some players and '
                 'USB sticks formatted FAT32 cannot take it; FLAC or a lower sample rate keeps it smaller.',
             )
-        if without_cover:
+        if art and not with_art:
             progress.note('warning', f'Saved {path.name} without cover art. The picture could not be added.')
-        return path
+        return {'path': path, 'verification': verification, 'trim_db': trim_db}
     finally:
-        if staging.exists():
-            staging.unlink(missing_ok=True)
+        staging.unlink(missing_ok=True)
+        retry.unlink(missing_ok=True)
 
 
 def export(
@@ -634,13 +729,15 @@ def export(
     cover: Path | None = None,
     progress: Progress | None = None,
     sample_rate: int | None = None,
+    check: Check | None = None,
 ) -> list[dict[str, object]]:
     """Write `master` in every requested format into `out_dir`.
 
     Names are '<basename>.<ext>'; when two requested formats share an
     extension (e.g. AAC and ALAC → .m4a) the short format tag is appended:
     '<basename> [ALAC].m4a'. Existing files are never replaced. `cover`: the JPEG to
-    embed; None = no picture (see `transcode`).
+    embed; None = no picture (see `transcode`). With `check`, each output also has its
+    `verification` and `trim_db` (see `_transcode`).
     """
     progress = progress or Progress.null()
     master, out_dir = Path(master), Path(out_dir)
@@ -660,7 +757,7 @@ def export(
         step = progress.sub(100.0 * i / n, 100.0 * (i + 1) / n)
         step(0, f'Saving {spec.label} ({i + 1}/{n})…')
         name = f'{base} [{spec.short}]{spec.ext}' if ext_count[spec.ext] > 1 else f'{base}{spec.ext}'
-        path = transcode(
+        made = _transcode(
             master,
             out_dir / name,
             spec.key,
@@ -669,7 +766,9 @@ def export(
             progress=step,
             duration_s=duration,
             sample_rate=sample_rate,
+            check=check,
         )
+        path = made['path']
         outputs.append(
             {
                 'format': spec.key,
@@ -678,6 +777,7 @@ def export(
                 'path': str(path),
                 'size_bytes': path.stat().st_size,
                 'kind': 'audio',
+                **({'verification': made['verification'], 'trim_db': made['trim_db']} if check else {}),
             }
         )
     progress(100)
@@ -693,9 +793,11 @@ def export_tracks(
     cover: Path | None = None,
     progress: Progress | None = None,
     sample_rate: int | None = None,
+    trim_db: float = 0.0,
 ) -> list[dict[str, object]]:
     """Cut `src` into `tracks` ([{n, title, start_s, end_s}], see youtube.make_tracks) and
-    save each one as 'NN - <title>.<ext>' in format `fmt`.
+    save each one as 'NN - <title>.<ext>' in format `fmt`, turned down by `trim_db` like the full
+    file of that format (`_transcode`; tracks are not checked themselves).
 
     `tags` describe the whole set: its title becomes the album, its artist the album
     artist; a track titled 'Artist - Track' gets its own artist. Tracks that start past
@@ -739,6 +841,7 @@ def export_tracks(
             sample_rate=sample_rate,
             start_s=start,
             end_s=end,
+            trim_db=trim_db,
         )
         outputs.append(
             {

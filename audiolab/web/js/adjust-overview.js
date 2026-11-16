@@ -4,6 +4,13 @@ import { sectionFullStrength } from './section-eq.js';
 const SVG = 'http://www.w3.org/2000/svg';
 const button = (label, onclick) => h('button', { type: 'button', class: 'btn btn-ghost btn-sm', onclick }, label);
 const clamp = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
+const FLOOR_DB = -60; // the bottom of the overview: quieter peaks draw nothing
+
+/** A sample peak (0–1) as its height in the lane (0–1) on a dB scale, so a quiet recording still shows its shape. */
+export function peakHeight(peak) {
+  if (!(peak > 0)) return 0;
+  return clamp(1 - (20 * Math.log10(Math.min(peak, 1))) / FLOOR_DB, 0, 1);
+}
 
 /** An original peak envelope and two separate time lanes. Numeric controls mirror every edit. */
 export function adjustmentOverview(duration, { onPassage, onSection, onPick, sectionControls }) {
@@ -56,7 +63,7 @@ export function adjustmentOverview(duration, { onPassage, onSection, onPick, sec
       const end = Math.min((i + 1) * peaks.bin_duration_s, peaks.duration_s);
       if (!(end > rangeStart && begin < rangeEnd && Number.isFinite(peak))) return;
       const center = xAt((Math.max(rangeStart, begin) + Math.min(rangeEnd, end)) / 2) * 10;
-      const size = 23 * clamp(peak, 0, 1);
+      const size = 23 * peakHeight(peak);
       commands.push(`M${center.toFixed(2)} ${(24 - size).toFixed(2)}v${(size * 2).toFixed(2)}`);
     });
     const path = document.createElementNS(SVG, 'path');
@@ -169,7 +176,7 @@ export function adjustmentOverview(duration, { onPassage, onSection, onPick, sec
       if (!Array.isArray(data?.peaks) || !(data.bin_duration_s > 0) || data.basis !== 'original_sample_peak') return;
       peaks = data;
       drawWave();
-      basis.textContent = `Original sample peaks across both channels · ${fmtNum(data.bin_duration_s, 2)} s per bin.`;
+      basis.textContent = `Original sample peaks across both channels, in dB down to −${-FLOOR_DB} dB · ${fmtNum(data.bin_duration_s, 2)} s per bin.`;
     },
   };
 }

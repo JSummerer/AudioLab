@@ -92,7 +92,7 @@ def _run_task(task: str, value: str, options: dict[str, Any], args) -> int:
             try:
                 meta = youtube.probe(source['url'])
             except AudioLabError as e:
-                if is_packaged() or e.fix != 'update_downloader' or not SETTINGS.get().auto_update_downloader:
+                if e.fix != 'update_downloader' or not youtube.auto_fix_downloader():
                     raise
                 print('The site seems to have changed — updating the downloader and trying again…', file=sys.stderr)
                 if not youtube.self_repair_update():
@@ -296,7 +296,7 @@ def cmd_install_ai(args) -> int:
     if is_packaged():
         from .errors import AudioLabError
 
-        raise AudioLabError('Open AudioLab Settings → AI & system to install or remove the optional AI add-on.')
+        raise AudioLabError('Open AudioLab Settings → Updates & add-ons to install or remove the optional AI add-on.')
 
     cmd = install_command()
     print('Installing AI software (torch + demucs). Model files download on first use…')

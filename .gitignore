@@ -9,14 +9,12 @@ dist/
 .pytest_cache/
 .ruff_cache/
 
-# Local agent instructions, notes and handoffs (not part of the public source snapshot)
-AGENTS.md
-CLAUDE.md
+# Machine-specific agent notes, local tool state and the packaging build workspace
 CLAUDE.local.md
+.claude/
 .agents/
 .codex/
 .work/
-docs/PLAN.md
 
 # Local credentials and browser cookies
 .env

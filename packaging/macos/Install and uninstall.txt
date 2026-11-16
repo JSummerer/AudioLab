@@ -1,4 +1,4 @@
-AudioLab 2.4.0b6 — Mac beta
+AudioLab 2.5.0 — Mac beta
 
 For Apple silicon Macs with macOS 14 or later.
 Check Apple menu > About This Mac for your chip and macOS version.
@@ -22,28 +22,34 @@ Do not disable Gatekeeper or run commands that remove security protections.
 The core app includes Save/Convert, Check and Volume only/Adaptive Enhance.
 
 OPTIONAL AI
-Open Settings > AI & system and choose Enable AI features for Split and AI stems
-enhancement. This optional download includes its own runtime and both model
-choices. Once installed,
+Open Settings > Updates & add-ons and choose Enable AI features for Split and
+AI stems enhancement. This optional download includes its own runtime and both
+model choices. Once installed,
 local audio works offline. No Terminal, Python, Homebrew or uv setup is needed.
 Keep AudioLab open during setup. Settings shows download progress, then
 Installing and Checking. Wait for Ready before starting an AI job. A full
 download counter is not the end of setup; unpacking and checks still follow.
 Allow extra disk space for installation and audio work. Minimum hardware and
 long-recording performance are not yet established.
-Cancel install keeps a partial download; Resume continues it. Repair reinstalls
-the compatible version. Update AI add-on follows the app's release catalog.
+Cancel install keeps a partial download; Resume continues it. Repair AI add-on
+appears only when the add-on is broken and reinstalls the compatible version.
+Update AI add-on follows the app's release catalog.
 Remove AI add-on clears its owned runtime, models, cache and partial downloads
 after confirmation; your recordings, Library and settings stay. Finish or
 cancel AI jobs before updating or removing it. Shared/source packages stay.
 AI installation is available from 2.4.0b2 onward; update an older 2.4.0b1 app first.
 
 UPDATE
-Quit AudioLab and replace AudioLab.app with the newer copy from GitHub Releases.
+Settings > Updates & add-ons > Check now shows when a newer AudioLab exists and
+links to its release page. The app finds updates but does not install them:
+quit AudioLab and replace AudioLab.app with the newer copy from GitHub Releases.
 Choose Replace in the same Applications folder, eject the disk image, then reopen
-and confirm 2.4.0b6 in Settings > About. Your recordings, Library and settings
-carry over. Beta 5 reuses a compatible AI 1.0.0 installation. App updates
-are manual.
+and confirm 2.5.0 in Settings > About. macOS asks again for each new copy
+(Open Anyway, as above). Your recordings, Library and settings carry over.
+2.5.0 reuses a compatible AI 1.0.0 installation.
+The downloader for web links updates inside the app: Settings > Updates &
+add-ons > Update downloader. Use built-in version goes back to the copy in the
+app. The audio engine updates only with the app.
 
 UNINSTALL
 Quit AudioLab and move AudioLab.app to the Trash.

@@ -61,15 +61,19 @@ def unique_path(path: Path, folder: bool = False) -> Path:
         n += 1
 
 
-def link_or_copy(src: Path, dst: Path, check_cancel: Callable[[], None] | None = None) -> Path:
+def link_or_copy(src: Path, dst: Path, check_cancel: Callable[[], None] | None = None, *, link: bool = True) -> Path:
     """Hard-link `src` as `dst` (no extra space; re-runs share their input), copy where links are
-    impossible (another volume, FAT/exFAT). Replaces `dst` without writing through an old link."""
+    impossible (another volume, FAT/exFAT). Replaces `dst` without writing through an old link.
+    `link=False` always copies: for a file the user owns outside the data folder, which a kept original
+    must never share bytes with (editing that file in place would silently change the original)."""
     src, dst = Path(src), Path(dst)
     tmp = dst.with_name(f'.{dst.name}.{uuid.uuid4().hex}.link-tmp')
     check = check_cancel or (lambda: None)
     try:
         check()
         try:
+            if not link:
+                raise OSError('a real copy was asked for')
             os.link(src, tmp)
         except OSError:
             if check_cancel is None:
@@ -85,6 +89,9 @@ def link_or_copy(src: Path, dst: Path, check_cancel: Callable[[], None] | None =
         tmp.unlink(missing_ok=True)
     return dst
 
+
+# What file managers leave in a folder: one holding only these counts as empty.
+FOLDER_JUNK = frozenset(('.DS_Store', 'Thumbs.db', 'desktop.ini', '.directory'))
 
 # File types browsers can usually play in the plain players (comparing decodes on the server).
 PLAYABLE_EXT = frozenset(('.mp3', '.m4a', '.wav', '.flac', '.opus', '.ogg', '.mp4', '.webm', '.aac'))

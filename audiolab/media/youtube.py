@@ -398,11 +398,46 @@ def ytdlp_cmd(sign_in: bool = False) -> list[str]:
     return cmd
 
 
-_UPDATE_HINT = 'Update the downloader: Settings → Downloads & sign-in → "Update downloader".'
+_UPDATE_HINT = 'Update the downloader: Settings → Updates & add-ons → "Update downloader".'
+# The packaged app fetches and runs a new yt-dlp only on a click: with this off, a "site changed" failure there
+# offers the "Update downloader" button instead of updating by itself.
+PACKAGED_AUTO_FIX = False
+
+
+def update_supported() -> bool:
+    """`POST /api/system/update-downloader` can update yt-dlp: pip/uv in a source install, the app-owned update
+    (media/ytdlp_update.py) in the packaged app."""
+    return True
+
+
+def auto_fix_downloader() -> bool:
+    """A 'site changed' failure may update the downloader by itself and retry once."""
+    if not SETTINGS.get().auto_update_downloader or not update_supported():
+        return False
+    return PACKAGED_AUTO_FIX or not runtime.is_packaged()
 
 
 def _update_hint() -> str:
-    return 'Install a newer AudioLab app to update its built-in downloader.' if runtime.is_packaged() else _UPDATE_HINT
+    return _UPDATE_HINT if update_supported() else 'Install a newer AudioLab app to update its built-in downloader.'
+
+
+_BUILTIN_HINT = (
+    'If this started after a downloader update, go back: Settings → Updates & add-ons → "Use built-in version".'
+)
+
+
+def _with_way_back(hints: list[str]) -> list[str]:
+    """Errors that point at the downloader also name the way back while the packaged app runs a downloaded
+    update: one can import fine and still break at run time, and nothing rolls it back by itself."""
+    if _UPDATE_HINT not in hints or not runtime.is_packaged():
+        return hints
+    from . import ytdlp_update
+
+    try:
+        updated = ytdlp_update.state()['source'] == 'updated'
+    except Exception:  # noqa: BLE001 - only a hint; never hide the real error behind another one
+        updated = False
+    return [*hints, _BUILTIN_HINT] if updated else hints
 
 
 _SIGN_IN_HINT = (
@@ -476,7 +511,7 @@ def _friendly_error(stderr: str, url: str, signed_in: bool = False) -> DownloadE
     raw = re.sub(r'^\[[^\]]+\]\s*[\w-]+:\s*', '', raw)[:300]
 
     def e(msg, hints=None, fix=None):
-        return DownloadError(msg, hints=hints, fix=fix, detail=raw or None)
+        return DownloadError(msg, hints=_with_way_back(hints or []), fix=fix, detail=raw or None)
 
     browser = sign_in_browser() if signed_in else ''  # this run used the sign-in
     name = BROWSERS.get(browser, '')
@@ -657,7 +692,7 @@ def _friendly_error(stderr: str, url: str, signed_in: bool = False) -> DownloadE
             'Check that the link opens in your browser, and try again later.',
             _update_hint()
             if runtime.is_packaged()
-            else 'If it keeps happening, update the downloader: Settings → Downloads & sign-in → "Update downloader".',
+            else 'If it keeps happening, update the downloader: Settings → Updates & add-ons → "Update downloader".',
         ],
     )
 
@@ -705,7 +740,7 @@ def probe(url: str, progress: Progress | None = None) -> dict[str, Any]:
     except (json.JSONDecodeError, ValueError) as e:
         raise DownloadError(
             'The downloader returned unreadable information for this link.',
-            hints=[_update_hint()],
+            hints=_with_way_back([_update_hint()]),
             fix='update_downloader',
         ) from e
     progress(100)
@@ -949,7 +984,9 @@ def _download(
     if 'larger than max-filesize' in (res.stdout + res.stderr_tail).lower():
         raise _friendly_error('larger than max-filesize', norm)
     raise DownloadError(
-        'The download finished but no file was produced.', hints=['Try again.', _update_hint()], fix='update_downloader'
+        'The download finished but no file was produced.',
+        hints=_with_way_back(['Try again.', _update_hint()]),
+        fix='update_downloader',
     )
 
 
@@ -1105,12 +1142,12 @@ def download_thumbnail(thumb_url: str, dest_jpg: Path, progress: Progress | None
 # Self-update
 # ---------------------------------------------------------------------------
 def update_ytdlp(progress: Progress | None = None) -> dict[str, Any]:
-    """Upgrade yt-dlp (+ its YouTube helpers) inside AudioLab's environment."""
+    """Upgrade yt-dlp (+ its YouTube helpers): pip/uv in AudioLab's environment, or in the packaged app its
+    app-owned update in the data folder (the built-in copy stays the fallback)."""
     if runtime.is_packaged():
-        raise AudioLabError(
-            'The downloader is built into this AudioLab app.',
-            hints=['Install a newer AudioLab app to update it. Your Library and output files stay in place.'],
-        )
+        from . import ytdlp_update
+
+        return ytdlp_update.install_latest(progress)
     progress = progress or Progress.null()
     before = ytdlp_version()
     progress(5, 'Updating the downloader…')
@@ -1169,7 +1206,7 @@ def self_repair_update() -> tuple[str, str] | None:
     else None. A job that waited here while another job ran the update gets that
     update's result. Deliberately not cancellable: killing pip mid-install can leave
     no downloader at all."""
-    if runtime.is_packaged():
+    if runtime.is_packaged() and not PACKAGED_AUTO_FIX:
         return None
     generation = _last_repair.get('generation', 0)
     called = time.monotonic()

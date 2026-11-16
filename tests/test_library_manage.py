@@ -324,6 +324,7 @@ def test_a_result_file_as_the_next_jobs_source(tmp_path):
         assert new.source['kind'] == 'file' and new.title == 'Song (Enhanced)'
         assert Path(new.source['path']).parent == m.input_dir(new.id)
         assert Path(new.source['path']).read_bytes() == Path(old.result['files'][0]['path']).read_bytes()
+        assert Path(new.source['path']).samefile(old.result['files'][0]['path'])  # a link: no full copy for a Check
         assert check('f9').status_code == 404
         Path(old.result['files'][1]['path']).unlink()
         assert check('f1').status_code == 410

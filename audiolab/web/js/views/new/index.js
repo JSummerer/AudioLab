@@ -7,12 +7,12 @@ import { h, icon } from '../../dom.js';
 import { store, on } from '../../store.js';
 import { closeInfo } from '../../ui.js';
 import { state, refs, redraw, TASKS, rememberedFormats } from './state.js';
-import { loadUrl, setFiles, useJobSource, normalizeUrl } from './source.js';
+import { loadUrl, offerLink, pasteLink, setFiles, useJobSource, normalizeUrl } from './source.js';
 import './options.js';
 import './start.js';
 import './sleeve.js';
 
-export { loadUrl, setFiles, useJobSource, normalizeUrl };
+export { loadUrl, offerLink, setFiles, useJobSource, normalizeUrl };
 
 let lastDefaults = {};
 
@@ -33,7 +33,7 @@ export const newView = {
         input,
         h('button', { type: 'submit', class: 'btn btn-key' }, 'Load')));
     form.addEventListener('submit', (e) => { e.preventDefault(); loadUrl(input.value); });
-    input.addEventListener('paste', () => setTimeout(() => { if (input.value.trim()) loadUrl(input.value); }, 0));
+    input.addEventListener('paste', () => setTimeout(() => { if (input.value.trim()) pasteLink(input.value); }, 0));
     // A link dropped on the field replaces what's in it and loads (other text is inserted as usual).
     input.addEventListener('drop', (e) => {
       const dt = e.dataTransfer;
@@ -47,7 +47,7 @@ export const newView = {
     Object.assign(refs, {
       input,
       source: h('div', { class: 'source-slot', 'aria-live': 'polite' }),
-      tiles: h('div', { class: 'tiles', role: 'group', 'aria-label': 'What do you want to do?' }),
+      tiles: h('div', { class: 'tiles', role: 'radiogroup', 'aria-labelledby': 'taskLabel' }),
       options: h('div', { class: 'options' }),
       action: h('div', { class: 'action-row', tabindex: '-1' }),
       sleeve: h('div', { class: 'sleeve' }),
@@ -71,7 +71,7 @@ export const newView = {
               h('span', { class: 'source-alt-note' }, 'or drop them anywhere on this window')),
             refs.source),
           h('section', { class: 'step' },
-            h('h2', { class: 'step-label' }, 'What do you want to do?'),
+            h('h2', { class: 'step-label', id: 'taskLabel' }, 'What do you want to do?'),
             refs.tiles),
           refs.options),
         h('aside', { class: 'sleeve-panel', 'aria-label': 'What you get' }, refs.sleeve, refs.action))));
@@ -88,7 +88,9 @@ export const newView = {
 
 /** Pre-select a task (deep links). Unknown keys are ignored. */
 export function setTask(task) {
-  if (!TASKS.some((t) => t.key === task) || state.task === task) return;
+  if (!TASKS.some((t) => t.key === task)) return;
+  state.taskPicked = true;
+  if (state.task === task) return;
   state.task = task;
   redraw();
 }

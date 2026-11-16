@@ -68,8 +68,8 @@ function playbackNotice() {
   return h('span', { class: 'muted small', role: 'status', 'aria-live': 'polite', hidden: true });
 }
 
-/** Stems: one row per stem with play/stop and its download. */
-export function stemRows(jobId, previews, files) {
+/** Stems: one row per stem with play/stop and its download (`download: false` in the local app: Show in Finder instead). */
+export function stemRows(jobId, previews, files, { download = true } = {}) {
   const rows = [];
   const playback = rowPlayback(rows, 16);
 
@@ -87,7 +87,7 @@ export function stemRows(jobId, previews, files) {
       btn,
       h('div', { class: 'stem-name' }, h('strong', null, label), file ? h('span', { class: 'muted small' }, file.name) : null, row.notice),
       h('div', { class: 'stem-bars', 'aria-hidden': 'true' }, ...Array.from({ length: 5 }, () => h('i'))),
-      file ? h('a', { class: 'btn btn-ghost btn-sm', href: fileUrl(jobId, file.id), download: file.name, 'aria-label': `Download ${label}` }, icon('download', 14), h('span', { class: 'dl-text' }, 'Download')) : null);
+      file && download ? h('a', { class: 'btn btn-ghost btn-sm', href: fileUrl(jobId, file.id), download: file.name, 'aria-label': `Download ${label}` }, icon('download', 14), h('span', { class: 'dl-text' }, 'Download')) : null);
     rows.push(row);
     list.append(row.el);
   }
@@ -114,8 +114,8 @@ export function filePlayer(jobId, file) {
   return wrap;
 }
 
-/** Tracks cut from a long recording: play each inline, download each. */
-export function trackRows(jobId, files) {
+/** Tracks cut from a long recording: play each inline, download each (not with `download: false`). */
+export function trackRows(jobId, files, { download = true } = {}) {
   const rows = [];
   const playback = rowPlayback(rows, 14);
 
@@ -133,7 +133,7 @@ export function trackRows(jobId, files) {
       h('span', { class: 'track-n num' }, String(n).padStart(2, '0')),
       h('div', { class: 'stem-name' }, h('strong', { title: label }, label), h('span', { class: 'muted small', title: f.name }, f.name), row.notice),
       h('span', { class: 'track-len num' }, fmtDuration(length)),
-      h('a', { class: 'btn btn-ghost btn-sm', href: fileUrl(jobId, f.id), download: f.name, 'aria-label': `Download ${label}` }, icon('download', 14), h('span', { class: 'track-dl-text' }, 'Download')));
+      download ? h('a', { class: 'btn btn-ghost btn-sm', href: fileUrl(jobId, f.id), download: f.name, 'aria-label': `Download ${label}` }, icon('download', 14), h('span', { class: 'track-dl-text' }, 'Download')) : null);
     rows.push(row);
     list.append(row.el);
   });

@@ -96,6 +96,24 @@ test('a transient poll error retries the audition without resubmitting', async (
   requests.dispose();
 });
 
+test('a failed audition says why with its first hint and offers no result', async () => {
+  const states = [];
+  const requests = auditionRequests('/api/library/entry', {
+    onState: (state) => states.push(state), delay: async () => {},
+    request: async (path, options) => {
+      if (path.endsWith('/preview')) return { id: 'work', status: 'queued' };
+      if (options?.method === 'DELETE') return {};
+      return { id: 'work', status: 'failed',
+        error: { message: 'Could not align this audition.', hints: ['Try a WAV or FLAC original.', 'Second hint.'] } };
+    },
+  });
+  await requests.start({ start_s: 0, duration_s: 5, advanced: {} });
+  const last = states.at(-1);
+  assert.equal(last.message, 'Could not align this audition. Try a WAV or FLAC original.');
+  assert.equal(last.job, undefined);
+  requests.dispose();
+});
+
 test('opposing stereo has the same mean power as in-phase stereo', () => {
   const frames = 48000;
   const peakBin = 128;

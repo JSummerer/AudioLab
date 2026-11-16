@@ -299,7 +299,7 @@ def test_enhance_result_has_an_excerpt_and_no_difference(tmp_path, monkeypatch):
     assert sorted(r['_media']) == ['enhanced', 'original']
     assert r['excerpt'] == {'start_s': 0.0, 'duration_s': 8.0}  # shorter than 45 s: all of it
     assert 'difference_db' not in r['metrics'] and r['metrics']['before']['lufs'] is not None
-    assert any(s.startswith('Volume only') for s in r['summary'])
+    assert any(s.startswith('Changed only the volume') for s in r['summary'])
 
     # Light says "the sound was not changed" only when the safety limiter didn't touch a peak.
     kind, recipe = {'label': 'Music', 'confidence_label': 'high'}, RECIPES['music']
@@ -308,8 +308,8 @@ def test_enhance_result_has_an_excerpt_and_no_difference(tmp_path, monkeypatch):
         {'integrated_lufs': -14.0, 'true_peak_dbtp': -1.0},
     )
     for engaged, line in (
-        (False, 'Volume only — the sound itself was not changed.'),
-        (True, 'Volume only, plus a safety limiter on a few peaks.'),
+        (False, 'Changed only the volume; the sound itself is untouched.'),
+        (True, 'Changed only the volume, and kept a few peaks from distorting (a safety limiter).'),
     ):
         report = {'params': {'volume_only': True}, 'limiter': {'engaged': engaged, 'max_gr_db': 1.9}}
         lines = _summary(kind, recipe, True, before, after, report, tmp_path, [])

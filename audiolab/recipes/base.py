@@ -20,6 +20,27 @@ import math
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from ..ai import MODELS
+
+# What Enhance accepts (tasks.enhance validates against these; the Library's saved copy is kept to them).
+QUALITIES = ('light', 'standard', 'best')  # light = volume only
+ADVANCED_CHOICES = {
+    'glue': ('on', 'off'),
+    'hf_restore': ('on', 'off'),
+    'mono_bass': ('on', 'off'),
+    'denoise': ('off', 'light', 'strong'),
+    'deess': ('auto', 'off', 'strong'),
+    'adaptive_lowmid': ('auto', 'off', 'strong'),
+    'harmonics': ('on', 'off'),
+}
+# The values of ChainParams' text fields (and of a report's automatic compressor).
+PARAM_CHOICES = {
+    'denoise': ('off', 'light', 'strong'),
+    'compressor': ('off', 'glue', 'leveler'),
+    'ai_stage': ('none', 'stem_eq', 'voice_isolate'),
+    'ai_model': tuple(MODELS),
+}
+
 SAMPLE_RATES = (44100, 48000, 96000)
 
 
@@ -611,7 +632,7 @@ def _apply_overrides(key: str, prof: dict, adv: dict, p: ChainParams, d: _Decisi
             'set by you' + (f' — softened by up to {DEESS_STRONG_DB:.0f} dB' if c == 'strong' else ''),
         )
     model = adv.get('model')
-    if isinstance(model, str) and model in ('htdemucs', 'htdemucs_ft'):
+    if isinstance(model, str) and model in MODELS:
         p.ai_model = model
 
 

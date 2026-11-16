@@ -44,8 +44,8 @@ export function graphicalEqField({ bands = [], savedBands = [], context = {}, la
     'Drag bands or use the arrow keys to move them. Use the fields for exact values.');
   const text = eqField({ id: `${id}-text`, text: draftState?.text ?? formatEq(draft.bands), label: `${label} as text`, onInput: editText });
   text.textarea.addEventListener('blur', endSession);
-  const textPanel = h('details', { class: 'eq-editor-text', open: draftState?.textOpen },
-    h('summary', null, 'EQ text or APO filters'), text.el);
+  const textPanel = h('details', { class: 'eq-editor-text disclosure', open: draftState?.textOpen },
+    h('summary', null, 'Type or paste EQ values'), text.el);
   const numbers = h('div', { class: 'eq-editor-bands' });
   const path = svg('path', { class: 'eq-plot-response' });
   const contextPath = svg('path', { class: 'eq-plot-context' });
@@ -62,7 +62,7 @@ export function graphicalEqField({ bands = [], savedBands = [], context = {}, la
   const responseNote = h('span', { class: 'small' });
   const contextLabel = h('span', { class: 'eq-editor-context-label small', hidden: true });
   const showContext = h('input', { type: 'checkbox', onchange: draw });
-  const contextChoice = h('label', { class: 'small eq-editor-choice' }, showContext, 'Show static context');
+  const contextChoice = h('label', { class: 'small eq-editor-choice' }, showContext, 'Also show the version’s other filters');
   const add = button('Add band', () => {
     if (draft.bands.length >= EQ_MAX_BANDS) return;
     change({ ...draft, bands: [...draft.bands, { hz: 1000, db: 0, q: 1 }] });
@@ -248,7 +248,7 @@ export function graphicalEqField({ bands = [], savedBands = [], context = {}, la
     contextChoice.hidden = fixed.length === 0;
     const showFixed = showContext.checked && fixed.length > 0;
     contextLabel.hidden = !showFixed;
-    const contextNames = [fixed.length > other.length && 'saved static filters', other.length && 'global EQ'].filter(Boolean);
+    const contextNames = [fixed.length > other.length && 'the version’s fixed filters', other.length && 'the global EQ'].filter(Boolean);
     contextLabel.textContent = `With ${contextNames.join(' and ')}`;
     contextPath.style.display = showFixed ? '' : 'none';
     const frequencies = responseFrequencies([...effective, ...(showFixed ? other : [])]);

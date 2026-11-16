@@ -9,6 +9,7 @@ import sys
 import tarfile
 import threading
 import time
+import urllib.error
 import urllib.request
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -108,6 +109,21 @@ def server():
         def do_GET(self):
             raw_range = self.headers.get('Range')
             state.requests.append(raw_range)
+            if state.mode in (404, 410):
+                self.send_error(state.mode)
+                return
+            if state.mode == 'trickle':  # a slow but alive connection: one byte at a time
+                self.send_response(200)
+                self.send_header('Content-Length', len(state.blob))
+                self.end_headers()
+                try:
+                    for i in range(len(state.blob)):
+                        self.wfile.write(state.blob[i : i + 1])
+                        self.wfile.flush()
+                        time.sleep(0.01)
+                except OSError:
+                    pass
+                return
             start = int(raw_range.removeprefix('bytes=').removesuffix('-')) if raw_range else 0
             if state.mode == 'ignore_range':
                 start = 0
@@ -265,14 +281,14 @@ def test_cancel_preserves_only_resumable_download_and_retry_succeeds(setup, serv
     @contextmanager
     def cancel_after_read(request):
         with original(request) as response:
-            read = response.read
+            read = response.read1  # the installer reads what has arrived, so a cancel is seen promptly
 
             def read_and_cancel(count):
                 result = read(count)
                 setup.manager.cancel()
                 return result
 
-            response.read = read_and_cancel
+            response.read1 = read_and_cancel
             yield response
 
     setup.manager._open = cancel_after_read
@@ -970,3 +986,47 @@ def test_output_changed_during_install_blocks_activation_and_cleanup(setup, serv
     assert (setup.manager.root / 'active.json').read_bytes() == receipt
     assert (output / 'recording.wav').read_bytes() == b'keep output'
     assert 'overlaps' in '\n'.join(setup.manager.log)
+
+
+def test_pack_installed_by_todays_app_stays_ready_when_only_the_catalog_url_changes(setup, server):
+    connect(setup, server)
+    assert finish(setup.manager)
+    receipt = json.loads((setup.manager.root / 'active.json').read_text())
+    assert receipt['catalog']['url'] == URL  # the receipt format written by the 2.4.0b6 app: the whole catalog
+    moved = dict(setup.catalog, url=URL.replace('ai-1.0.0', 'ai-1.0.0-moved'))
+    setup.path.write_text(json.dumps(moved))
+    restarted = managed.ManagedAI(setup.manager.data_dir, setup.path)
+    state = restarted.status()
+    assert state['available'] and state['state'] == 'ready' and state['version'] == '1.0.0'
+    assert finish(restarted) and len(server.requests) == 1  # no second 570 MB download
+    setup.path.write_text(json.dumps(dict(moved, sha256='0' * 64)))  # a different pack is still a different pack
+    assert managed.ManagedAI(setup.manager.data_dir, setup.path).status()['state'] == 'incompatible'
+
+
+@pytest.mark.parametrize('failure', [404, 410, 'offline'])
+def test_missing_asset_and_no_network_are_explained_in_plain_words(setup, server, failure):
+    connect(setup, server)
+    if failure == 'offline':
+
+        def offline(request):
+            raise urllib.error.URLError(OSError(8, 'nodename nor servname provided, or not known'))
+
+        setup.manager._open = offline
+    else:
+        server.mode = failure
+    assert not finish(setup.manager)
+    log = '\n'.join(setup.manager.log)
+    expected = 'No internet connection' if failure == 'offline' else 'no longer available'
+    assert expected in log and 'HTTP Error' not in log and 'urlopen' not in log
+
+
+def test_cancel_ends_a_slow_download_promptly(setup, server):
+    use_archive(setup, server, [('AudioLabAI', os.urandom(4096), tarfile.REGTYPE)])  # ~40 s at one byte per 10 ms
+    server.mode = 'trickle'
+    assert setup.manager.start(lambda ok: None)
+    time.sleep(0.3)
+    started = time.monotonic()
+    setup.manager.cancel()
+    setup.manager._thread.join(timeout=5)
+    assert not setup.manager.running and time.monotonic() - started < 2
+    assert 'stopped' in '\n'.join(setup.manager.log)

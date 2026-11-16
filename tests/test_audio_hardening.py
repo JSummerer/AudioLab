@@ -44,11 +44,11 @@ def test_compression_report_distinguishes_running_from_actually_reducing_levels(
     assert report['compressor']['engaged'] is engaged
     if engaged:
         assert report['compressor']['max_gr_db'] > 0
-        assert any('Compressed louder moments' in step for step in report['steps'])
+        assert any(step.startswith('Gently evened out the loudest moments (') for step in report['steps'])
     else:
         assert report['compressor']['max_gr_db'] == 0
         assert report['compressor']['skip_reason'] == 'no measurable gain reduction'
-        assert 'Compression made no measurable level change' in report['steps']
+        assert 'Left the dynamics as they were (compression made no measurable level change)' in report['steps']
 
 
 class _VirtualAudio:

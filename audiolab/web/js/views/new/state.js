@@ -23,10 +23,13 @@ export const TASKS = [
  * One link or file also carries what the user added to it: `meta` (names.js), `cover`
  * (cover.js), `tracklist` + `splitTracks` (tracks.js).
  * The per-task option objects survive switching tasks and leaving the view.
+ * `taskPicked`: the user chose the task (a tile, a deep link, "do more with this"); until then a
+ * file starts on Enhance and a link on Save (autoTask).
  */
 export const state = {
   source: null,
   task: 'download',
+  taskPicked: false,
   download: { format: 'mp3', embed_cover: true },
   enhance: { recipe: 'auto', quality: 'standard', formats: new Set(['mp3_320', 'wav16']), embed_cover: true, advanced: {} },
   separate: { mode: 'karaoke', format: 'wav16', model: 'auto' },
@@ -48,6 +51,8 @@ export function definePart(name, render) { renderers[name] = render; }
 export function redraw(...names) {
   for (const name of names.length ? names : PARTS) renderers[name]?.();
   if (names.length && !names.includes('sleeve') && (names.includes('source') || names.includes('action'))) renderers.sleeve?.();
+  // A changed choice can change what Start does ("Retry 1 failed file" or all files): its words follow.
+  if (names.length && !names.includes('action')) renderers.actionLabel?.();
 }
 
 // The formats last started per task, kept in this browser with the Settings default they were
@@ -100,9 +105,15 @@ export function tooBig(file) {
   return mb && file?.size > mb * 1024 * 1024 ? `larger than the ${fmtBytes(mb * 1024 * 1024)} limit` : null;
 }
 
+/** The task a new source starts on unless the user picked one: Enhance for files, Save for links. */
+export function autoTask(kind) {
+  if (!state.taskPicked) state.task = kind === 'file' ? 'enhance' : 'download';
+}
+
+/** Focus a control of the source card or the options (the name and cover tools live under More options). */
 export function focusIn(selector, { select = false } = {}) {
   setTimeout(() => {
-    const el = refs.source?.querySelector(selector);
+    const el = refs.source?.querySelector(selector) || refs.options?.querySelector(selector);
     el?.focus({ preventScroll: true });
     if (select) el?.select?.();
   }, 0);

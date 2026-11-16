@@ -89,7 +89,7 @@ local AudioLab. With a token these checks are off (the token already blocks both
   "excerpt": {"start_s": 112.0, "duration_s": 45.0},                  // enhance: where the excerpt is in the song
                                                                       // (a loud passage; a 1/25 s step) — see below
   "summary": ["Detected a DJ set — 1 h 58 min with a steady 126 BPM beat.",
-              "Made it 2.7 dB louder (−15.2 → −12.5 LUFS) without clipping.", "…"],   // plain language, novice-facing
+              "Made it louder without clipping (+2.7 dB: −15.2 → −12.5 LUFS).", "…"],   // plain language, novice-facing
   "classification": {"type": "dj_set", "label": "DJ set / club mix", "confidence": 0.86,
                      "reasons": ["1 h 58 min long", "steady 126 BPM beat", "title mentions 'Boiler Room'"]},
   "recipe": {"key": "club", "name": "Club / DJ set"},
@@ -105,6 +105,10 @@ local AudioLab. With a token these checks are off (the token already blocks both
   "warnings": ["…"]
 }
 ```
+
+Each `summary` line (and each `applied.steps` entry) is a plain sentence a novice understands, optionally followed
+by the technical detail in one trailing bracket with no brackets inside it, e.g. "Made it louder (+8.2 dB: −25.2 →
+−17.0 LUFS)." The page hides that trailing bracket unless Show details is on.
 
 **Enhance excerpts** (`previews` `original`/`enhanced`, media and PCM keys of the same names): the same 45 s
 (or the whole recording, when shorter) of the original and the result, 48 kHz WAVs at their **true relative
@@ -160,8 +164,16 @@ ceiling_dbtp, ceiling_met, tolerance_db, message}`. Status is `verified` (peak w
 `warning` (ceiling missed), or `unverified` (measurement failed). A complete decode measures
 integrated loudness at the file's rate and estimates true peak at 192 kHz; `tolerance_db` is 0.05.
 Loudness is `null` below the meter's gate or without a complete 400 ms block; a silent peak is `null`.
-For `unverified`, the readings and `ceiling_met` are `null`. Failures/misses also enter `warnings`;
-the saved file is retained, without automatic re-encoding. Split tracks are not individually checked.
+For `unverified`, the readings and `ceiling_met` are `null`. Each file is checked before it gets its
+name. A lossy file (MP3, AAC, Opus) whose peaks come out above the ceiling is encoded once more from the
+same master, turned down by the excess plus 0.1 dB (at most 2 dB), and checked again. Only that version is
+saved, `verification` describes it, and `summary` gets a line such as "Turned the MP3 down slightly so its
+peaks stay under the limit (-0.6 dB; encoding raises peaks)." A miss that remains (a lossless file, or a
+lossy one more than 2 dB over) and a failed measurement keep the saved file; their `message` (also in
+`warnings`) follows the summary-line shape, e.g. "The MP3 file goes over the peak ceiling, even after it
+was turned down. For more room, use a lower peak ceiling or a lossless format (-0.84 dBTP after saving,
+turned down 0.6 dB; ceiling -1.00 dBTP)." `message` is null for a verified file. Split tracks are not
+individually checked.
 `metrics.after` still describes the master, before export; the checks are measurements at creation,
 not proof that a file has not been edited later or that every decoder will produce identical peaks.
 
@@ -297,7 +309,7 @@ automatically replacing the saved file.
 
 | Method & path | Body / query | Response |
 |---|---|---|
-| `GET /api/ping` | – | `{"ok": true}` — liveness check, never needs a token |
+| `GET /api/ping` | – | `{"ok": true, "instance": "<opaque id of this running app>"}` — liveness check, never needs a token. `instance` is random per launch and carries no path: a second launch reuses a running app only when its ping echoes the id recorded for it |
 | `GET /api/health` | – | Health (below) |
 | `GET /api/settings` | – | Settings |
 | `PUT /api/settings` | partial Settings JSON | Settings. `400` with detail (nothing is changed) for an invalid value: `output_dir` not a full path ("Enter a full folder path, for example ~/Music/AudioLab.") or not writable, a switch that isn't `true`/`false` (also `"true"`/`"false"`, `1`/`0`), a format key not in Health `formats`, an empty `enhance_formats`, another fixed choice that isn't listed below. Unknown keys are ignored. Works while the current output folder is unreachable |
@@ -332,7 +344,9 @@ automatically replacing the saved file.
 | `POST /api/reveal-output` | – | `{"ok": true}` opens the output root folder — made first when it doesn't exist yet (before the first result). It can't be made (`health.output_dir_ok` false, e.g. a drive that isn't connected) → `400` "The output folder isn't available: …" with hints |
 | `POST /api/reveal-data` | – | `{"ok": true}` opens AudioLab's app data folder (Library, settings, kept originals and caches). Local mode only; `403` remotely. The target is fixed: no client-supplied path is used |
 | `POST /api/reveal-logs` | – | `{"ok": true}` opens AudioLab's logs folder. Local mode only; `403` remotely, `400` if the logs folder does not exist. The target is fixed: no client-supplied path is used. No files are deleted |
-| `POST /api/system/update-downloader` | – | `{"ok", "before", "after", "message"}` (takes ~10–60 s). When `health.downloader.update_supported` is false, returns `400` with instructions to replace the app, before any package installer is started |
+| `POST /api/system/update-downloader` | – | `{"ok", "before", "after", "message"}` (takes ~10–60 s). A source install upgrades yt-dlp with pip/uv. The packaged app fetches yt-dlp's newest stable release from GitHub, checks its size, checksum and that it starts, then uses it from the app data folder (the built-in copy stays in the app as the fallback); there it is local only (`403` remotely). Already newest: `ok: true` with `before == after`. A failed fetch or check: `ok: false` with a plain `message`; the downloader in use is unchanged |
+| `DELETE /api/system/downloader` | – | Packaged app only (`400` in a source install), local only (`403` remotely): stops using the downloaded update and goes back to the downloader built into the app. Returns the `downloader` object of Health |
+| `POST /api/system/check-updates` | – | Checks GitHub now for a newer AudioLab release and yt-dlp's newest stable release (usually about a second, at most ~30 s) and returns the `updates` object of Health. Works whether or not `check_updates` is on. A failed check is not an HTTP error: `updates.error` holds a plain message. Also refreshes `downloader.latest` and publishes a `system` event. Nothing is downloaded or installed |
 | `POST /api/system/install-ai` | Optional JSON `{"repair": true}` | `{"ok": true}` starts or resumes installation of the compatible AI add-on; managed installs with `repair: true` re-download/reverify even an installed version. Watch `system` events / health. Source mode keeps its package installer. When `health.ai.install_supported` is false, returns `400` with the reason before any installer starts |
 | `POST /api/system/cancel-ai` | – | Requests cancellation of a managed install; downloaded partial data stays resumable. Watch health until `installing` is false. Source installations do not use the managed lifecycle |
 | `DELETE /api/system/ai` | – | Returns the updated managed AI status after removing only owned runtime, models, caches and partial downloads. Rejects while AI installation or an AI job holds the operation lock. Does not remove output, Library, settings, source packages or shared caches |
@@ -357,9 +371,14 @@ detail.
 ### Health
 ```jsonc
 {
-  "app": "AudioLab", "version": "2.4.0b6", "local": true, "packaged": false,
+  "app": "AudioLab", "version": "2.5.0", "local": true, "packaged": false,
   "ffmpeg": {"ok": true, "version": "7.1", "source": "system" | "bundled", "error": null},
-  "downloader": {"ok": true, "version": "2026.08.19", "age_days": 47, "update_supported": true},
+  "downloader": {"ok": true, "version": "2026.08.19", "age_days": 47, "update_supported": true,
+                 "source": "bundled" | "updated" | "environment", "bundled_version": "2026.08.19" | null,
+                 "latest": "2026.10.26" | null, "fallback": false},
+  "updates": {"enabled": false, "checking": false, "checked_at": 1763300000.0 | null, "error": null,
+              "app": {"latest": "2.5.1" | null, "available": true,
+                      "url": "https://github.com/JSummerer/AudioLab/releases/tag/v2.5.1" | null}},
   "ai": {"available": false, "device": null, "reason": "AI pack not installed", "install_supported": true, "installing": false,
          "install_log": "…last lines…"},
   "output_dir": "/Users/me/Music/AudioLab", "output_dir_ok": true, "data_dir": "…", "logs_dir": "…",
@@ -389,8 +408,7 @@ the UI's file picker and drop check use this one list.
 connected): show a notice pointing to Settings → Files. Settings still load and save; jobs that write files fail
 before they start ("The output folder isn't available: …"); Check still works.
 `packaged`: the self-contained core app, with its own Python runtime, FFmpeg, Deno and downloader.
-`downloader.update_supported` remains false: replacing the app updates its downloader. AI has its own
-capability: `ai.install_supported`, independent of `packaged`. It is true only when the packaged build
+AI has its own capability: `ai.install_supported`, independent of `packaged`. It is true only when the packaged build
 has a compatible pinned add-on catalog; never offer installation based on the platform flag alone.
 An installed healthy managed add-on sets `ai.available: true`, enabling Split and Best enhancement.
 Source installs keep their existing pip/uv maintenance behavior. The published 2.4.0b1 binary predates
@@ -419,8 +437,36 @@ Cancel retains the partial archive; remove clears it. A new app can select a dif
 version. Install, repair and removal share an operation lock with AI jobs; readiness is published only
 after archive validation, extraction and worker probing succeed. No arbitrary URL/version is accepted
 from the UI. The managed runtime includes both supported model choices and uses them offline.
-`downloader.age_days` is calculated from its version date. In the packaged app, the version is read through
-the actual downloader worker. yt-dlp's cache is always under `<data>/cache/yt-dlp`; packaged Deno and temporary
+Downloader fields:
+
+| Field | Meaning |
+|---|---|
+| `ok`, `version` | The downloader works, and the version that actually runs (in the packaged app read through the downloader worker, so a downloaded update or a fallback shows here) |
+| `age_days` | Days since `version` was released (its versions are dates) |
+| `update_supported` | `POST /api/system/update-downloader` can update it: a source install with pip/uv, the packaged app with its app-owned update |
+| `source` | Packaged app: `bundled` (the copy built into the app runs) or `updated` (a downloaded update runs). Source install: `environment` |
+| `bundled_version` | Packaged app: the version built into the app; `null` in a source install |
+| `latest` | yt-dlp's newest stable release seen by the last check or update, or `null` before one ran. Compare with `version` to offer "Update downloader" |
+| `fallback` | Packaged app: a downloaded update could not start, so the built-in copy runs instead (offer "Update downloader" or "Use built-in version"). Always `false` in a source install |
+
+The packaged app uses a downloaded update only when it is newer than the built-in copy, so installing a newer
+app makes an older update unused. Updates live in `<data>/downloader/`. "Use built-in version" only switches the
+update off; archives no longer in use are deleted at the next app start (a downloader that is still running may
+read its archive until then). It is refused (`400`, plain message) while an update is being installed.
+
+Updates (`updates`), read from the last check only — `GET /api/health` never contacts the network:
+
+| Field | Meaning |
+|---|---|
+| `enabled` | The `check_updates` setting: AudioLab checks by itself at most once a day while it is open (a failed check also waits a day; "Check now" works any time) |
+| `checking` | A check is running |
+| `checked_at` | Unix time of the last finished check, or `null` (never checked) |
+| `error` | Plain-language reason the last check failed (e.g. no connection), else `null` |
+| `app.latest` | Newest AudioLab release that applies to this build, or `null`. A beta build (`…bN`, `…rcN`) also considers betas; a final build only final releases |
+| `app.available` | `app.latest` is newer than `version` |
+| `app.url` | The release page of `app.latest` on `https://github.com/JSummerer/AudioLab/releases/tag/…`, else `null`. Open it in the browser; AudioLab never downloads or installs the app itself |
+
+`downloader.age_days` is calculated from its version date. yt-dlp's cache is always under `<data>/cache/yt-dlp`; packaged Deno and temporary
 files also use `<data>/cache`, and direct HTTPS uses bundled certificate data.
 `data_dir` and `logs_dir` identify the fixed reveal targets. The two reveal actions only open folders: they do
 not uninstall the app or delete data. Optional manual deletion of app data also removes Library entries,
@@ -429,12 +475,12 @@ settings and kept originals; output files at their existing locations are separa
 ### Settings
 `{"output_dir", "download_format", "enhance_formats": [..], "separate_format", "ui_mode": "simple|advanced",
 "theme": "auto|light|dark", "keep_work_files": false, "embed_cover": true, "keep_originals": true,
-"reuse_originals": true, "auto_update_downloader": true,
+"reuse_originals": true, "auto_update_downloader": true, "check_updates": false,
 "cookies_browser": "" | "firefox" | "chrome" | "edge" | "brave" | "safari" | "chromium" | "opera" | "vivaldi",
 "locked": ["output_dir"]}`
 (`ui_mode`: the UI's "Show all options by default" — `advanced` = "More options" open and job details shown until
 the user opens or closes them. Name kept for compatibility.)
-(`keep_originals`: "Keep originals for comparing" — Enhance results keep their original in the Library
+(`keep_originals`: "Keep originals" — Enhance results keep their original in the Library
 (see Library); off = new results keep none, their entry has `original.kept: false`; already kept ones stay.
 Split results no longer keep one (those kept before 2.4 stay until deleted).)
 (`reuse_originals`: "Reuse kept originals" — a link job (not Video) whose recording already has a kept original
@@ -449,8 +495,14 @@ login) is it retried once with the sign-in, paced (yt-dlp `--sleep-requests`/`--
 can block accounts that download a lot. Only offered when `health.local`; Firefox needs no OS prompt. Errors that
 need it carry `"fix": "use_cookies"`.)
 (`locked` lists keys pinned by environment variables — show them read-only.)
-(`auto_update_downloader`: retained as a preference across app replacements. It is effective only when
-`health.downloader.update_supported` is true; the packaged app never attempts an in-place package update.)
+(`auto_update_downloader`: "Fix the downloader automatically" — in a source install, a link that fails because
+the site changed updates yt-dlp once and retries. The packaged app does not fetch a new downloader without a
+click: there the failure carries `"fix": "update_downloader"` so the UI offers "Update downloader". Retained as a
+preference across app replacements.)
+(`check_updates`: "Check for updates automatically" — off by default. On: while open, AudioLab asks GitHub at most once a day for
+the newest AudioLab release and yt-dlp's newest stable release (see `updates` and `downloader.latest` in Health).
+Nothing is downloaded or installed by the check. Off: AudioLab contacts GitHub only when the user clicks "Check now"
+(`POST /api/system/check-updates`), "Update downloader" or an AI install action.)
 
 ### Probe
 ```jsonc
@@ -659,7 +711,7 @@ event: removed
 data: {"ids": ["j_…"]}
 
 event: system
-data: {"ai": {…}, "downloader": {…}}   when an install/update changes health
+data: {"ai": {…}, "downloader": {…}, "updates": {…}}   when an install, update or update check changes health
 
 : ping                           every 15 s
 ```
@@ -668,5 +720,6 @@ and new ones get `503` until the server is gone.
 
 ## Deep links
 
-The UI understands `/?url=<link>` (loads the link, as if pasted) and `&task=download|enhance|separate|analyze`
-(pre-selects the task). Settings offers a **"Send to AudioLab" bookmarklet** built on this.
+The UI understands `/?url=<link>` and `&task=download|enhance|separate|analyze`. It opens New with the link in the
+link field and the task pre-selected, but looks nothing up until the user presses **Load**: any web page can send the
+browser to this address, so a deep link alone never starts a request from the user's computer.

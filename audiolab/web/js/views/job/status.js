@@ -151,7 +151,7 @@ export function cancelledView(job, ctx) {
   const said = job.message && !GENERIC_CANCEL.test(job.message) ? job.message : null;
   return [
     callout('info', 'Cancelled',
-      said || 'This job was stopped before it finished. Files that were already finished stay in your output folder.',
+      said || 'This job was stopped before it finished. The files it had saved so far were removed; your earlier results are untouched.',
       h('div', { class: 'callout-actions' }, retryButton(job, true), changeButton(job, false))),
     footer(job),
     journalBlock(job, ctx),

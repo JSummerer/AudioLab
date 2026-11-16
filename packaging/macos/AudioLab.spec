@@ -20,6 +20,14 @@ INVENTORY['validate_deno'](NOTICES, DENO)
 VERSION = runpy.run_path(str(ROOT / 'audiolab/__init__.py'))['__version__']
 SHORT_VERSION = VERSION.split('b', 1)[0]
 
+# Standard modules nothing in the app imports yet, frozen anyway so that a downloaded downloader update
+# (audiolab/media/ytdlp_update.py) which starts using one still runs. The modules Python 3.13 removed are left
+# out: yt-dlp supports 3.13, so it cannot depend on them.
+DOWNLOADER_STDLIB = [
+    'cProfile', 'compileall', 'filecmp', 'graphlib', 'imaplib', 'mailbox', 'modulefinder', 'pickletools',
+    'poplib', 'profile', 'pstats', 'pyclbr', 'sched', 'shelve', 'symtable', 'tabnanny', 'trace', 'wave', 'zipapp',
+] + collect_submodules('curses') + collect_submodules('dbm')
+
 datas = [
     (str(ROOT / 'audiolab/web'), 'audiolab/web'),
     (str(ROOT / 'audiolab/assets'), 'audiolab/assets'),
@@ -43,6 +51,7 @@ a = Analysis(
         + collect_submodules('yt_dlp', filter=lambda name: not name.startswith('yt_dlp.__pyinstaller'))
         + ['uvicorn.logging', 'uvicorn.loops.auto', 'uvicorn.protocols.http.auto',
            'uvicorn.protocols.websockets.auto', 'uvicorn.lifespan.on', 'webview.platforms.cocoa']
+        + DOWNLOADER_STDLIB
     ),
     excludes=['torch', 'torchaudio', 'demucs', 'mutagen', 'imageio_ffmpeg',
               'pytest', '_pytest', 'pluggy', 'iniconfig', 'pygments', 'ruff',

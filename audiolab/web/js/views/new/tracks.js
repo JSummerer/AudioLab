@@ -29,6 +29,18 @@ export function tracksOffered() {
 
 const pasted = (src) => (src?.tracklist?.text.trim() ? src.tracklist : null);
 
+const LONG_S = 600; // longer recordings (a DJ set, a concert) show Tracks up front
+
+/**
+ * Tracks up front, beside the other choices: when the link has chapters, the recording is long,
+ * or a tracklist is already there (it may hold Start up, so it never sits in a folded panel).
+ * Otherwise Tracks waits under More options.
+ */
+export function tracksUpFront() {
+  const src = state.source;
+  return linkTracks(src).length >= 2 || !!pasted(src) || (lengthOf(src) || 0) > LONG_S;
+}
+
 /** What the job would cut by: a pasted list once it checks out, else the link's own tracks. */
 export function knownTracks() {
   const src = state.source;
@@ -82,6 +94,8 @@ export function measureFile(src) {
     if (Number.isFinite(audio.duration) && audio.duration > 0) {
       src.duration_s = audio.duration;
       if (pasted(src)) check(src);
+      // A long recording brings Tracks out from under More options.
+      else if (state.source === src && audio.duration > LONG_S) redraw('options');
     }
     audio.removeAttribute('src');
     done();
@@ -91,7 +105,7 @@ export function measureFile(src) {
 }
 
 function lengthOf(src) {
-  const s = src.kind === 'url' ? src.probe?.duration_s : src.kind === 'file' ? src.duration_s : src.job?.source?.duration_s;
+  const s = src?.kind === 'url' ? src.probe?.duration_s : src?.kind === 'file' ? src.duration_s : src?.job?.source?.duration_s;
   return s > 0 ? s : undefined;
 }
 
@@ -197,6 +211,9 @@ function refresh(src) {
 function onInput(src, text) {
   const tl = src.tracklist;
   tl.text = text;
+  // A pasted list can hold Start up, so it never waits folded away: Tracks moves up front
+  // (renderOptions keeps the caret in the box).
+  if (text.trim() && ui?.ta.closest('.more-body')) redraw('options');
   clearTimeout(timer);
   ctl?.abort();
   if (!text.trim()) {

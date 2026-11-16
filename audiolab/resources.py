@@ -8,8 +8,8 @@ concrete alternatives instead of crashing the machine.
 The conservative memory model is calibrated on the earlier in-memory float32 DSP chain (Oct 2026:
 2.07 GB peak for 10 min, 3.72 GB for 30 min): ~3.8x one full-length stereo
 float32 array (1.38 GB per hour at 48 kHz) + 1.3 GB fixed; AI stages are
-windowed and add roughly 1 GB. Long Enhance now uses disk-backed working buffers;
-keep the old RAM gate until representative long-run measurements justify lowering it.
+windowed and add roughly 1 GB. That model still applies up to DISK_BACKED_AFTER_SECONDS;
+beyond it, Standard and Light Enhance are sized by their disk-backed render (`estimate_peak_bytes`).
 """
 
 import shutil
@@ -60,8 +60,24 @@ def disk_free_bytes(path: Path) -> int:
         return 0
 
 
+# Above DISK_BACKED_AFTER_SECONDS a Standard or Light render keeps its working arrays in memory-mapped
+# scratch files (dsp.scratch). Measured 16 Nov 2026 on a 48 GB Apple silicon Mac, default Enhance of
+# generated 44.1 kHz music: 10 min (in memory) 1.71 GB peak footprint / 1.74 GB max RSS; 20 min 1.13 / 2.30 GB;
+# 60 min 1.24 / 4.73 GB. The footprint grows about 0.17 GB per hour; the RSS on top of it is pages of the mapped
+# scratch files, which are treated as reclaimable (the system writes them back to disk). So past the boundary
+# the estimate is the one at the boundary plus this much per hour, about 3x the measured growth.
+DISK_BACKED_BYTES_PER_HOUR = GB // 2
+
+
 def estimate_peak_bytes(duration_s: float, task: str, quality: str = 'standard', sr: int = 48000) -> int:
     """Conservative peak-RAM estimate for one job."""
+    if task == 'enhance' and quality in ('standard', 'light'):
+        from .dsp.scratch import DISK_BACKED_AFTER_SECONDS
+
+        if duration_s > DISK_BACKED_AFTER_SECONDS:
+            longer_h = (duration_s - DISK_BACKED_AFTER_SECONDS) / 3600
+            at_boundary = estimate_peak_bytes(DISK_BACKED_AFTER_SECONDS, task, quality, sr)
+            return at_boundary + int(longer_h * DISK_BACKED_BYTES_PER_HOUR)
     stereo_array = max(1, int(duration_s * sr)) * BYTES_PER_STEREO_FRAME_F32
     # Factors measured on Apple Silicon (Oct 2026): 60 min Standard 7.2 GB, Light 2.5–4.5 GB,
     # 2 h Check 3.8 GB peak RSS.
@@ -95,6 +111,45 @@ def estimate_disk_bytes(duration_s: float, task: str, quality: str = 'standard')
     return int(hours * per_hour * GB + 0.25 * GB) + scratch
 
 
+OUTPUT_MARGIN_BYTES = GB // 2  # covers, tags, container overhead (FLAC can exceed PCM by a fraction of 1 %)
+MASTER_RATE = 48000  # Enhance delivers this unless `advanced.sample_rate` says otherwise; stems are made at it
+
+
+def format_bytes_per_s(key: str, rate: int) -> float:
+    """At most this many bytes per second of audio in format `key` delivered at `rate`: the bitrate of a
+    lossy format; the PCM size for lossless ones (FLAC and ALAC compress, never by a negative amount)."""
+    from .media.export import FORMATS
+
+    spec = FORMATS[key]
+    args = list(spec.codec_args)
+    if spec.kind == 'lossy' and '-b:a' in args:
+        return int(args[args.index('-b:a') + 1].rstrip('k')) * 1000 / 8
+    rate = spec.fixed_rate or min(rate, spec.max_rate or rate)
+    return rate * 2 * (2 if spec.sample_fmt == 's16' else 3)
+
+
+def estimate_output_bytes(duration_s: float, task: str, options: dict | None) -> int | None:
+    """What a job leaves in the output folder (no scratch), from its validated options: Enhance every
+    selected format plus the first one again as Tracks, Split two or four stems. None when that isn't known
+    (no options, Save, an unknown format): then the output folder needs as much as the working folder."""
+    seconds = max(0.0, duration_s)
+    if task == 'analyze':
+        return 0  # Check writes nothing there
+    try:
+        if task == 'enhance' and options is not None:
+            rate = int((options.get('advanced') or {}).get('sample_rate') or MASTER_RATE)
+            formats = list(options.get('formats') or [])
+            if options.get('split_tracks') and formats:
+                formats.append(formats[0])  # tasks.enhance cuts the first format into "Tracks"
+            return int(seconds * sum(format_bytes_per_s(k, rate) for k in formats)) if formats else None
+        if task == 'separate' and options is not None:
+            stems = 2 if options.get('mode') == 'karaoke' else 4
+            return int(seconds * stems * format_bytes_per_s(options.get('format') or 'wav16', MASTER_RATE))
+    except (KeyError, ValueError, TypeError):
+        return None
+    return None
+
+
 def preflight(
     duration_s: float | None,
     work_dir: Path,
@@ -102,11 +157,13 @@ def preflight(
     quality: str = 'standard',
     device: str | None = None,
     output_dir: Path | None = None,
+    options: dict | None = None,
 ) -> dict[str, object]:
     """Raise ResourceGuardError (with hints) if the job would not fit; return the guard report.
 
     `duration_s` may be None when unknown (then only disk headroom is checked). An output folder that
-    can't be written to (a drive that isn't connected) stops every task that writes there (not Check)."""
+    can't be written to (a drive that isn't connected) stops every task that writes there (not Check).
+    `options` (the job's validated options) let the output folder's check count only the results."""
     if output_dir is not None and task != 'analyze' and not system.folder_writable(output_dir):
         raise AudioLabError(
             f"The output folder isn't available: {output_dir}.",
@@ -167,13 +224,19 @@ def preflight(
                 )
 
     need = estimate_disk_bytes(duration_s or 600.0, task, quality) + int(LIMITS.min_free_disk_gb * GB)
-    for label, path in (('working folder', work_dir), ('output folder', output_dir)):
+    # The output folder only receives the results; never ask it for more than the working folder needs.
+    results = estimate_output_bytes(duration_s or 600.0, task, options)
+    out_need = need if results is None else min(need, results + OUTPUT_MARGIN_BYTES)
+    checks = [('working folder', work_dir, need)]
+    if task != 'analyze':
+        checks.append(('output folder', output_dir, out_need))
+    for label, path, needed in checks:
         if path is None:
             continue
         free = disk_free_bytes(path)
         report[f'disk_free_{label.split()[0]}_bytes'] = free
-        if free and need > free:
-            reasons.append(f'The {label} needs about {human_bytes(need)} free, but only {human_bytes(free)} is left.')
+        if free and needed > free:
+            reasons.append(f'The {label} needs about {human_bytes(needed)} free, but only {human_bytes(free)} is left.')
             hints.append('Free up some disk space and try again.')
 
     if reasons:

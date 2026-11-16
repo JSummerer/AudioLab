@@ -12,12 +12,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .. import APP_NAME, __version__
+from .. import APP_NAME, __version__, outputs
 from ..context import Progress, TaskContext
 from ..errors import AudioLabError, storage_error
 from ..media import export, ffmpeg, youtube
 from ..resources import preflight
-from ..runtime import is_packaged
 from ..settings import SETTINGS, validate_output_location
 from ..util import PLAYABLE_EXT, human_bytes, human_duration, link_or_copy, sanitize_filename, unique_path
 
@@ -94,6 +93,8 @@ def acquire(
     overrides (`options.meta`) used for file names and tags, an own cover image (`source._cover`)
     and a pasted tracklist (`options.tracklist`, replaces chapters / the description's list —
     checked again now that the real length is known)."""
+    if task != 'analyze':  # before any lookup or download: a saved folder that settings now refuse fails here
+        validate_output_location(SETTINGS.output_dir)
     acq = _acquire(ctx, source, progress, task, quality, video)
     meta = ctx.options.get('meta') or {}
     if meta.get('title'):
@@ -144,7 +145,7 @@ def _acquire(
         try:
             return _acquire_url(ctx, source, progress, task, quality, video, device)
         except AudioLabError as e:
-            if is_packaged() or e.fix != 'update_downloader' or not SETTINGS.get().auto_update_downloader:
+            if e.fix != 'update_downloader' or not youtube.auto_fix_downloader():
                 raise
             progress(2, 'Updating the downloader and trying again…')
             update = youtube.self_repair_update()
@@ -189,7 +190,7 @@ def _acquire(
     ctx.note(
         'decision',
         'Resource check passed',
-        preflight(duration, ctx.work_dir, task, quality, device, SETTINGS.output_dir),
+        preflight(duration, ctx.work_dir, task, quality, device, SETTINGS.output_dir, options=ctx.options),
     )
     name = source.get('name') or path.name
     clean = youtube.clean_title(Path(name).stem)
@@ -239,7 +240,13 @@ def decode(ctx: TaskContext, acq: Acquired, progress: Progress) -> dict[str, Any
             'decision',
             'Resource check passed (after decoding)',
             preflight(
-                acq.duration_s, ctx.work_dir, acq.task or 'enhance', acq.quality, ai_device(), SETTINGS.output_dir
+                acq.duration_s,
+                ctx.work_dir,
+                acq.task or 'enhance',
+                acq.quality,
+                ai_device(),
+                SETTINGS.output_dir,
+                options=ctx.options,
             ),
         )
     return info
@@ -442,6 +449,7 @@ def output_folder(name: str, parent: Path | None = None) -> Path:
         root.mkdir(parents=True, exist_ok=True)
         folder = unique_path(root / sanitize_filename(name, room=40), folder=True)
         folder.mkdir(parents=True)
+        outputs.created_folder(folder)  # a failed or cancelled attempt removes what it made (no-op outside one)
         return folder
     except OSError as e:
         raise storage_error(e) or AudioLabError(
@@ -512,7 +520,7 @@ def _acquire_url(
     ctx.note(
         'decision',
         'Resource check passed',
-        preflight(duration, ctx.work_dir, task, quality, device, SETTINGS.output_dir),
+        preflight(duration, ctx.work_dir, task, quality, device, SETTINGS.output_dir, options=ctx.options),
     )
     dest = scratch_dir(ctx) / 'download'
     dl = progress.sub(5, 100)
@@ -614,18 +622,28 @@ def split_into_tracks(
     progress: Progress,
     start: int,
     sample_rate: int | None = None,
+    trim_db: float = 0.0,
 ) -> tuple[list[dict[str, Any]], Path | None]:
     """`split_tracks`: cut `src` into the link's tracks (chapters or the description's
     tracklist) inside a new folder `folder_name` under `parent`. Returns Result.files
     entries (ids from f<start>, with group/track/start_s/end_s) and the folder —
-    ([], None) when the source has no usable tracklist."""
+    ([], None) when the source has no usable tracklist. `trim_db`: dB the tracks are turned
+    down by, the same as their format's full file (media.export)."""
     tracks = acq.metadata.get('tracks') or []
     if not tracks:
         progress(100)
         return [], None
     folder = output_folder(folder_name, parent=parent)
     outputs = export.export_tracks(
-        src, tracks, folder, fmt, tags=tags, cover=cover, progress=progress, sample_rate=sample_rate
+        src,
+        tracks,
+        folder,
+        fmt,
+        tags=tags,
+        cover=cover,
+        progress=progress,
+        sample_rate=sample_rate,
+        trim_db=trim_db,
     )
     if not outputs:
         folder.rmdir()

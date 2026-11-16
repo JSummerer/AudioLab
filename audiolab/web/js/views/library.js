@@ -1,17 +1,18 @@
 // Library (#/library[/<entry id>]): finished results grouped by recording, newest first or
 // largest first, searchable by title and artist. Each recording is a sleeve row (cover, title,
-// credits), then its versions (Saved, Enhanced, Stems…): a head line with the full-length
-// comparison with the kept original, Adjust and Compare versions, the rest (Show in
-// Finder, Open job, Keep only, Remove — files stay unless the user opts in to the Trash) in a ⋯ menu,
-// then the files — play, download, or "Moved or deleted" when a file is gone. A kept original is
-// AudioLab's own copy, shared by the versions of one recording, and can be deleted per recording
-// here or all at once in Settings → Storage.
+// credits, and a ⋯ menu: Add a version from a file, Delete the kept original), then its versions
+// (Saved, Enhanced, Stems…): a head line with the full-length comparison with the kept original,
+// Adjust, Compare versions and — in the app on this computer — Show in Finder, the rest (Open job,
+// Keep only, Remove — files stay unless the user opts in to the Trash) in a ⋯ menu, then the files —
+// play, download (not in the local app: they are in the output folder), or "Moved or deleted" when
+// a file is gone. A kept original is AudioLab's own copy, shared by the versions of one recording,
+// and can be deleted per recording here or all at once in Settings → Storage.
 // One player is open at a time. The list is fetched on show and when a job finishes;
 // cards are kept and only rebuilt when their data changes, so a player keeps going
 // through a reload. #/library/<id> scrolls to that version and opens its comparison.
 import { h, icon, clear, append, fmtBytes, fmtDuration, fmtAgo, fmtNum, fmtSigned, shortFolder } from '../dom.js';
 import { api } from '../api.js';
-import { store, on, upsertJob } from '../store.js';
+import { store, on, upsertJob, showDetails } from '../store.js';
 import { toast, toastError, callout, confirmDialog, segmented, switchControl, menuButton, closeMenu } from '../ui.js';
 import { go, jobPath, currentRoute } from '../router.js';
 import {
@@ -20,6 +21,7 @@ import {
 } from '../compare.js';
 import { adjustLink, adjustUnavailable } from './adjust.js';
 import { PROCESSING_LABELS, LIGHT_KEYS } from './new/state.js';
+import { loudnessWord, peakVerdict } from './job/readings.js';
 import { eqSummary } from '../eq.js';
 import { sectionSummary } from '../section-eq.js';
 
@@ -195,11 +197,11 @@ function originalsSize(list) {
   return [...seen.values()].reduce((n, b) => n + b, 0);
 }
 
-/** "14 results · 9.2 GB of files · kept originals 1.1 GB" for the whole Library. */
+/** "14 results · 9.2 GB of files · 1.1 GB of originals kept for comparing" for the whole Library. */
 function totalsText(all, count) {
   const [files, originals] = [filesSize(all), originalsSize(all)];
   return [`${count} result${count === 1 ? '' : 's'}`, files ? `${fmtBytes(files)} of files` : null,
-    originals ? `kept originals ${fmtBytes(originals)}` : null].filter(Boolean).join(' · ');
+    originals ? `${fmtBytes(originals)} of originals kept for comparing` : null].filter(Boolean).join(' · ');
 }
 
 /** The recordings to show: those matching the search (title or artist), newest first or largest first. */
@@ -248,8 +250,15 @@ function groupFor(g) {
   const sig = JSON.stringify([g.title, g.artist, g.source, g.latest_at, dateText(g.latest_at), g.entries.length, cover, kept?.id, kept?.original, hint, local]);
   if (sig !== grp.sig) {
     grp.sig = sig;
-    append(clear(grp.head), [groupHead(g, grp.titleId, cover, local), kept ? originalRow(g, kept) : null,
+    // Focus comes back to the same control (the ⋯ menu's button for one of its items), as in fillCard.
+    const controls = () => [...grp.head.querySelectorAll('a, button, h2[tabindex]')].filter((n) => !n.closest('.menu'));
+    const focused = grp.head.contains(document.activeElement) ? document.activeElement : null;
+    const inMenu = !!focused?.closest('.menu');
+    if (inMenu) closeMenu();
+    const focusIndex = focused ? controls().indexOf(inMenu ? focused.closest('.menu-wrap').querySelector('button') : focused) : -1;
+    append(clear(grp.head), [groupHead(g, grp.titleId, cover, local, kept), kept ? originalRow(kept) : null,
       hint ? h('p', { class: 'lib-hint' }, hint) : null]);
+    if (focusIndex >= 0) (controls()[focusIndex] || grp.head.querySelector('.lib-title'))?.focus({ preventScroll: true });
   }
   const several = g.entries.length >= 2; // "Keep only this version"
   syncChildren(grp.list, g.entries.map((e) => cardFor(e, peers?.includes(e) ? peers : null, several).el));
@@ -261,8 +270,10 @@ const enhanceFormats = () => store.health?.formats?.enhance || [];
 /** Versions more than 1 dB apart: louder tends to win a quick listen, so point to the matched comparison. */
 function loudnessHint(versions) {
   const spread = loudnessSpread(versions.map((e) => versionLoudness(e, versionFile(e, enhanceFormats()))));
-  return spread ? `These versions differ in loudness (${fmtNum(spread.low)} to ${fmtNum(spread.high)} LUFS). `
-    + 'Louder often sounds better at first, so use Compare versions to hear them at matched volume.' : '';
+  if (!spread) return '';
+  const range = showDetails() ? ` (${fmtNum(spread.low)} to ${fmtNum(spread.high)} LUFS)` : '';
+  return `These versions differ in loudness${range}. `
+    + 'Louder often sounds better at first, so use Compare versions to hear them at matched volume.';
 }
 
 /** The recording's cover: AudioLab's own saved copy when a version has one, else the link's thumbnail. */
@@ -274,8 +285,9 @@ function coverOf(g) {
   return g.source?.thumbnail || null;
 }
 
-/** The sleeve row: cover (or a quiet square with the task's icon), title, one credits line. */
-function groupHead(g, titleId, cover, local) {
+/** The sleeve row: cover (or a quiet square with the task's icon), title, one credits line, and the
+ * recording's own ⋯ menu (Add a version from a file in the local app, Delete the kept original). */
+function groupHead(g, titleId, cover, local, kept) {
   const src = g.source || {};
   const thumb = h('div', { class: 'job-thumb lib-cover' });
   const fallback = () => icon(TASK_ICON[g.entries[0]?.task] || 'music', 24);
@@ -288,13 +300,16 @@ function groupHead(g, titleId, cover, local) {
   }
   const duration = src.duration_s || g.entries[0]?.duration_s;
   const meta = [g.artist, sourceText(src), fmtDuration(duration), dateText(g.latest_at)].filter(Boolean).join(' · ');
+  const items = [
+    local ? { label: 'Add a version from a file…', icon: 'plus', onSelect: () => importDialog(g) } : null,
+    kept ? { label: 'Delete the kept original…', icon: 'trash', onSelect: () => deleteOriginal(g, kept) } : null,
+  ].filter(Boolean);
   return h('header', { class: 'lib-head' },
     thumb,
     h('div', { class: 'lib-head-text' },
       h('h2', { class: 'lib-title', id: titleId, tabindex: '-1' }, g.title || 'Untitled'),
-      h('p', { class: 'lib-meta', title: src.kind === 'url' ? src.url : src.name || null }, meta),
-      local ? h('button', { type: 'button', class: 'btn btn-ghost btn-sm lib-add-version', onclick: () => importDialog(g) },
-        icon('plus', 14), 'Add a version from a file…') : null));
+      h('p', { class: 'lib-meta', title: src.kind === 'url' ? src.url : src.name || null }, meta)),
+    items.length ? menuButton({ label: `More actions for ${g.title || 'this recording'}`, items }) : null);
 }
 
 function sourceText(src) {
@@ -303,7 +318,7 @@ function sourceText(src) {
 }
 
 /** The kept original of a recording, one quiet line: shared by its versions, AudioLab's own copy. */
-function originalRow(g, entry) {
+function originalRow(entry) {
   const o = entry.original;
   const file = (entry.files || []).find((f) => f.id === 'original');
   const facts = [codecName(o.codec, o.format) || (o.format || '').toUpperCase(), fmtBytes(o.size_bytes)]
@@ -311,15 +326,12 @@ function originalRow(g, entry) {
   const what = ['Original kept for comparing', ...facts].join(' · ');
   return h('div', { class: 'lib-original' },
     h('p', { class: 'lib-original-text' },
-      h('strong', null, what), ` — in ${store.health?.app || 'AudioLab'}’s own data, not your output folder.`),
+      h('strong', null, what), ' — in app data, not your output folder.'), // Settings → About calls it "App data"
     h('div', { class: 'lib-original-actions' },
       h('a', {
         class: 'btn btn-ghost btn-sm', href: libraryFileUrl(entry.id, 'original', { download: true }),
         download: file?.name || true, 'aria-label': 'Download the original copy',
-      }, icon('download', 14), 'Download'),
-      h('button', {
-        type: 'button', class: 'btn btn-ghost btn-danger-text btn-sm', onclick: () => deleteOriginal(g, entry),
-      }, icon('trash', 14), 'Delete original copy')));
+      }, icon('download', 14), 'Download')));
 }
 
 // ---------------------------------------------------------------------------
@@ -330,7 +342,8 @@ function originalRow(g, entry) {
  * or null; `several`: its recording has other versions too (for "Keep only this version").
  */
 function cardFor(entry, peers = null, several = false) {
-  const sig = JSON.stringify([entry, peers?.map((e) => e.id), several]);
+  // Show details (plain words or LUFS in the version line) is part of what a card shows.
+  const sig = JSON.stringify([entry, peers?.map((e) => e.id), several, showDetails(), !!store.health?.local]);
   let c = cards.get(entry.id);
   if (c) Object.assign(c, { peers, several }); // the latest copies, for the picker
   if (c && c.sig === sig) return c;
@@ -502,14 +515,18 @@ const OWN_SETTINGS = {
   model: 'AI model',
 };
 const shortNum = (v) => String(Number(Number(v).toFixed(1))).replace('-', '−');
+// Loudness in words ("Normal volume"); the number in LUFS with "Show details" (Settings).
+const volumeText = (lufs) => (showDetails() ? `${shortNum(lufs)} LUFS` : `${loudnessWord(lufs)} volume`);
+const PEAK_WORDS = { Safe: 'peaks safe', 'Little headroom': 'little headroom', Clipping: 'clipping' };
 
 function versionFacts(entry) {
   if (entry.task === 'import') {
     // A file the user brought in: what was measured over the whole file.
     const m = entry.measured || {};
     const lufs = Number.isFinite(m.integrated_lufs) ? m.integrated_lufs : entry.loudness?.result_lufs;
-    return [Number.isFinite(lufs) ? `${shortNum(lufs)} LUFS` : null,
-      Number.isFinite(m.true_peak_dbtp) ? `true peak ${fmtSigned(m.true_peak_dbtp, 1)} dBTP` : null].filter(Boolean).join(' · ');
+    const tp = Number.isFinite(m.true_peak_dbtp) ? m.true_peak_dbtp : null;
+    const peak = tp == null ? null : showDetails() ? `true peak ${fmtSigned(tp, 1)} dBTP` : PEAK_WORDS[peakVerdict(tp).word];
+    return [Number.isFinite(lufs) ? volumeText(lufs) : null, peak].filter(Boolean).join(' · ');
   }
   const p = entry.processing;
   if (entry.task !== 'enhance' || !p) return '';
@@ -517,7 +534,7 @@ function versionFacts(entry) {
   const full = !params.volume_only; // Volume only sets the level and nothing else
   const rate = Number(params.sample_rate);
   const facts = [
-    Number.isFinite(params.target_lufs) ? `${shortNum(params.target_lufs)} LUFS` : null,
+    Number.isFinite(params.target_lufs) ? volumeText(params.target_lufs) : null,
     full ? COMPRESSION[params.compressor] : null,
     full && Array.isArray(params.eq_bands) && params.eq_bands.length ? 'custom EQ' : null,
     rate > 0 && rate !== 48000 ? `${shortNum(rate / 1000)} kHz` : null,
@@ -540,13 +557,14 @@ function fileRow(c, entry, f) {
   } else {
     const play = f.playable ? h('button', {
       type: 'button', class: 'btn btn-ghost btn-sm lib-play', 'aria-controls': c.stage.id,
-      dataset: { label }, onclick: () => togglePlayer(c, f.id),
+      dataset: { label }, onclick: (e) => togglePlayer(c, f.id, e),
     }) : null;
     if (play) {
       c.toggles.set(f.id, play);
       playLabel(play, false);
     }
-    actions = [play, h('a', {
+    // In the app on this computer the file is already in the output folder: Show in Finder (above).
+    actions = [play, store.health?.local ? null : h('a', {
       class: 'btn btn-ghost btn-sm', href: libraryFileUrl(entry.id, f.id, { download: true }), download: f.name,
       'aria-label': `Download ${label}`,
     }, icon('download', 14), h('span', { class: 'dl-text' }, 'Download'))];
@@ -593,9 +611,12 @@ function entryActions(c, entry) {
     c.toggles.set('versions', b);
     btns.push(b);
   }
+  // On this computer: the way to the files (there are no per-file downloads).
+  if (store.health?.local && (entry.files || []).some((f) => f.exists && f.kind !== 'original')) {
+    btns.push(h('button', { type: 'button', class: 'btn btn-key btn-sm', onclick: () => revealEntry(entry) }, icon('folder', 15), REVEAL_LABEL));
+  }
   // The rarer actions: one menu per version.
   btns.push(menuButton({ label: 'More actions', items: [
-    store.health?.local ? { label: REVEAL_LABEL, icon: 'folder', onSelect: () => revealEntry(entry) } : null,
     entry.job_exists ? { label: 'Open job', icon: 'arrow', onSelect: () => go(jobPath(entry.job_id)) } : null,
     c.several ? { label: 'Keep only this version', icon: 'check', onSelect: () => keepOnly(entry) } : null,
     { label: 'Remove from Library', icon: 'trash', onSelect: () => removeEntry(entry) },
@@ -644,6 +665,8 @@ function togglePlayer(c, what, event) {
     attachPlayer(c);
     p.play(); // still inside the click: Safari only lets a user gesture start sound
   }
+  // Opened by a click: bring the player into view (it opens under the version's files).
+  if (event && player?.stage) player.stage.scrollIntoView?.({ block: 'nearest' });
   updateToggles();
 }
 

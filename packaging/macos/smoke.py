@@ -8,6 +8,7 @@ import io
 import json
 import math
 import os
+import shutil
 import socket
 import struct
 import subprocess
@@ -15,6 +16,7 @@ import threading
 import time
 import urllib.request
 import wave
+import zipfile
 from pathlib import Path
 
 LOWMID_SECONDS = 16
@@ -160,6 +162,37 @@ def check_library_workflow(base: str, fixture: Path) -> dict:
     }
 
 
+def check_downloader_updates(run, data: Path, bundled: str) -> None:
+    """The frozen downloader mode with stand-in update builds (offline): a newer one runs, a broken or older one
+    falls back to the built-in copy. The update folder is removed afterwards so later checks use the built-in copy."""
+    folder = data / 'downloader'
+
+    def install(version: str, broken: bool = False) -> None:
+        code = "raise ImportError('broken update')\n" if broken else f'def main(argv):\n    print({version!r})\n'
+        blob = io.BytesIO()
+        with zipfile.ZipFile(blob, 'w') as archive:
+            archive.writestr('yt_dlp/__init__.py', code)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f'yt-dlp-{version}.zip').write_bytes(blob.getvalue())
+        record = {
+            'version': version,
+            'file': f'yt-dlp-{version}.zip',
+            'sha256': hashlib.sha256(blob.getvalue()).hexdigest(),
+            'size': len(blob.getvalue()),
+        }
+        (folder / 'active.json').write_text(json.dumps(record))
+        (folder / 'failed.json').unlink(missing_ok=True)
+
+    install('2099.01.01')
+    assert run('downloader-update', '--audiolab-downloader', '--version').strip() == '2099.01.01'
+    install('2099.01.02', broken=True)
+    assert run('downloader-broken-update', '--audiolab-downloader', '--version').strip() == bundled
+    assert json.loads((folder / 'failed.json').read_text())['version'] == '2099.01.02'
+    install('2000.01.01')
+    assert run('downloader-older-update', '--audiolab-downloader', '--version').strip() == bundled
+    shutil.rmtree(folder)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('app', type=Path)
@@ -198,7 +231,7 @@ def main() -> None:
             )
         )
     run('version', '--version')
-    run('downloader', '--audiolab-downloader', '--version')
+    check_downloader_updates(run, root / 'data', run('downloader', '--audiolab-downloader', '--version').strip())
     run('doctor', 'doctor', '--report')
     for fmt in ('mp3', 'm4a', 'flac', 'wav', 'opus'):
         run(f'convert-{fmt}', 'download', str(tone), '--format', fmt, '--json')
@@ -259,10 +292,13 @@ def main() -> None:
                     time.sleep(0.1)
             assert health['packaged'] and health['ffmpeg']['ok']
             assert health['ffmpeg']['source'] == 'bundled'
-            assert health['downloader']['ok'] and not health['downloader']['update_supported']
+            downloader = health['downloader']
+            assert downloader['ok'] and downloader['update_supported'] and downloader['bundled_version']
+            assert downloader['source'] == 'bundled' and not downloader['fallback']
+            assert health['updates']['checked_at'] is None and not health['updates']['enabled']  # no request unasked
             assert not health['ai']['available'] and health['ai']['install_supported']
             assert health['ai']['managed'] and health['ai']['download_bytes'] > 0
-            for route in ('/', '/js/main.js', '/js/quick-preview.js', '/css/tokens.css'):
+            for route in ('/', '/js/main.js', '/js/views/adjust.js', '/css/tokens.css'):
                 with urllib.request.urlopen(base + route, timeout=5) as response:
                     assert response.status == 200 and response.read()
             (root / 'health.json').write_text(json.dumps(health, indent=2) + '\n')

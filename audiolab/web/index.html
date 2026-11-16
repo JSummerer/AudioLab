@@ -16,8 +16,8 @@
   <link rel="stylesheet" href="css/adjust.css">
   <link rel="stylesheet" href="css/eq-editor.css">
   <link rel="stylesheet" href="css/settings.css">
-  <!-- A collapsed sidebar is applied before first paint; js/main.js does the rest. -->
-  <script>try { if (localStorage.getItem('audiolab.sidebar') === 'collapsed') document.documentElement.dataset.sidebar = 'collapsed'; } catch { /* expanded */ }</script>
+  <!-- A collapsed sidebar (remembered, or a window under 1000 px) is applied before first paint; js/main.js does the rest. -->
+  <script>try { if (matchMedia('(max-width: 999px)').matches || localStorage.getItem('audiolab.sidebar') === 'collapsed') document.documentElement.dataset.sidebar = 'collapsed'; } catch { /* expanded */ }</script>
   <script type="module" src="js/main.js"></script>
 </head>
 <body>
@@ -53,7 +53,7 @@
       </nav>
 
       <div class="sidebar-foot">
-        <button type="button" class="status-chip" id="aiChip" title="AI features">
+        <button type="button" class="status-chip" id="aiChip" title="AI features" aria-label="AI add-on status — AI settings">
           <span class="led" aria-hidden="true"></span>
           <span class="status-chip-text">Checking…</span>
         </button>
@@ -76,8 +76,8 @@
   <div id="dropOverlay" class="drop-overlay" hidden>
     <div class="drop-target">
       <span class="ico-slot" data-icon="upload"></span>
-      <strong>Drop to load</strong>
-      <span>Audio or video — MP3, WAV, FLAC, M4A, MP4 and more. Several files make one job each.</span>
+      <strong id="dropTitle">Drop to load</strong>
+      <span id="dropNote">Audio or video — MP3, WAV, FLAC, M4A, MP4 and more. Several files make one job each.</span>
     </div>
   </div>
 

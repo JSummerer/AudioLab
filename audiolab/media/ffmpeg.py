@@ -237,6 +237,7 @@ def run_ffmpeg(
 # ---------------------------------------------------------------------------
 _DURATION_RE = re.compile(r'Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)')
 _BITRATE_RE = re.compile(r'Duration:.*?bitrate:\s*(\d+)\s*kb/s')
+_START_RE = re.compile(r'Duration:[^\n]*?, start:\s*(-?\d+(?:\.\d+)?)')
 _STREAM_RE = re.compile(r'Stream #\d+:\d+(?:\[[^\]]*\])?(?:\([^)]*\))?:\s*(Audio|Video):\s*([^\s,]+)(.*)')
 _CHANNEL_WORDS = {
     'mono': 1,
@@ -256,6 +257,7 @@ def probe_media(path: Path, progress: Progress | None = None) -> dict[str, objec
     """Describe a media file by parsing `ffmpeg -i` (works without ffprobe)."""
     info: dict[str, object] = {
         'duration_s': None,
+        'start_s': None,
         'has_audio': False,
         'has_video': False,
         'has_cover': False,
@@ -288,6 +290,9 @@ def probe_media(path: Path, progress: Progress | None = None) -> dict[str, objec
     m = _BITRATE_RE.search(text)
     if m:
         info['bitrate_kbps'] = int(m.group(1))
+    m = _START_RE.search(text)
+    if m:
+        info['start_s'] = float(m.group(1))  # the first timestamp (0 in WAV/FLAC/AIFF; not always elsewhere)
     for line in text.splitlines():
         sm = _STREAM_RE.search(line)
         if not sm:

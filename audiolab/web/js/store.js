@@ -301,6 +301,14 @@ export function taskLabel(job) {
   }
 }
 
+/** Enhance destinations by what people own, not codec names: New's "Save for" and Settings → Enhance saves. */
+export const ENHANCE_PRESETS = [
+  ['mp3_320', 'Small files, plays anywhere'],
+  ['wav16', 'USB stick, TV & car'],
+  ['alac16', 'iPhone & Apple Music'],
+  ['flac24', 'Archive'],
+];
+
 /**
  * What a format's (i) card says: the server's facts (Health `formats[].facts`, the one
  * source of this text). `coverOn`: a cover would be embedded now — then a format that

@@ -1,6 +1,6 @@
 # Install AudioLab
 
-**Trying the Mac app? Start with the [Mac setup guide](MACOS.md).** It covers the direct download,
+**Trying the Mac app? Start with the [Mac setup guide](MACOS.md).** It covers the download,
 first opening, optional AI, updates and removal without Terminal commands.
 
 Choose the self-contained **Mac app** for everyday testing on Apple silicon, or install from
@@ -16,18 +16,19 @@ share app data for the same computer user; quit one before opening the other.
 The initial binary target is **macOS 14 or later on Apple silicon (arm64)**. No Python installation,
 Terminal setup or Apple developer account is required. Intel support is not yet qualified.
 
-Download the [**v2.4.0b6 Mac app**](https://github.com/JSummerer/AudioLab/releases/download/v2.4.0b6/AudioLab-2.4.0b6-macOS-arm64.dmg).
+Download the `.dmg` from the [**latest release**](https://github.com/JSummerer/AudioLab/releases/latest).
 Open it, drag **AudioLab.app** into **Applications**, eject the image and open the app from Applications.
 This is the only file testers need. **Source code (zip)** is for the separate source setup below.
 
 This beta uses ad-hoc signing and is not Apple Developer ID signed or notarized. For the expected
 first-opening warning, use the [Mac guide's graphical Open Anyway steps](MACOS.md#first-opening).
 That guide also covers updates, storage and uninstall. The
-[release notes](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b6) describe testing and beta limitations.
+[release notes](https://github.com/JSummerer/AudioLab/releases/latest) describe testing and beta limitations.
 
-The **2.4.0b6** app includes **Save / Convert**, **Check**, and **Volume only/Adaptive Enhance**, plus the
+The **2.5.0** app includes **Save / Convert**, **Check**, and **Volume only/Adaptive Enhance**, plus the
 Library. Settings offers the [optional managed AI download](#optional-ai) for Split and AI stems Enhance.
-The main app and its downloader update by replacing the app.
+You update the app by replacing it; **Settings → Updates & add-ons** says when a newer version exists and
+updates the downloader inside the app.
 
 ## Install from source
 
@@ -102,11 +103,11 @@ The older **2.4.0b1** app has no AI installer; replace it with the newer app fir
 
 ### Packaged Mac app
 
-Open **Settings → AI & system → Enable AI features**. When a compatible add-on is available for
-that app build, Settings shows its download and installed-file sizes. These describe the release
-asset, not the RAM needed to process audio. Allow additional free space for downloading, unpacking
+Open **Settings → Updates & add-ons → Enable AI features**. When a compatible add-on is available for
+that app build, Settings shows its download size before installing and the disk space it uses afterwards.
+These describe the release asset, not the RAM needed to process audio. Allow additional free space for downloading, unpacking
 and audio intermediates; no fixed download-size or minimum-RAM promise applies to every release.
-Betas 5 and 6 use the same AI 1.0.0 add-on as beta 4. It is about **570 MB to download** and **1.02 GB installed**.
+2.5.0 uses the same AI 1.0.0 add-on as the 2.4.0 betas. It is about **570 MB to download** and **1.02 GB installed**.
 
 The optional download is self-contained: it includes its own AI runtime and both **Standard** and
 **Fine-tuned** model choices. AudioLab verifies the download and tests the runtime before enabling
@@ -116,7 +117,8 @@ shared tools or adopt their model caches.
 
 Settings shows progress and recent error details. **Cancel install** stops work and keeps a partial
 download for **Resume AI download**. Retry a failed installation after checking your connection and
-free space. **Repair** reinstalls and verifies the compatible add-on. **Update AI add-on** appears
+free space. **Repair AI add-on** appears only when an installed add-on is broken; it reinstalls and
+verifies the compatible version. **Update AI add-on** appears
 when the app's bundled release catalog specifies another version; the app never silently chooses
 an arbitrary latest add-on. A build without a compatible catalog explains why installation is
 unavailable.
@@ -163,9 +165,10 @@ describes Fine-tuned as roughly four times slower than Standard.
 ## Update AudioLab
 
 For the **Mac app**, follow [Replace the app](MACOS.md#updates): quit, install the newer DMG's app
-and reopen. Its downloader updates with the app. Check **Settings → AI & system**
-for any compatible AI add-on update after replacing the app. Source packages and shared caches are
-not changed by the packaged AI updater.
+and reopen. **Settings → Updates & add-ons → Check now** says when a newer app exists. The downloader
+updates inside the app (**Update downloader**); the audio engine updates with the app. Check the same
+section for any compatible AI add-on update after replacing the app. Source packages and shared caches
+are not changed by the packaged AI updater.
 
 For a **source installation**:
 
@@ -179,7 +182,8 @@ Settings and Library normally live outside the source folder. If output or data 
 the old project, preserve those files before deleting it. Docker's example also puts output inside
 the project. A Git checkout can instead be updated in place and its launcher rerun. The launcher
 refreshes base dependencies when `pyproject.toml` changes; use `--with-ai` for changed AI requirements.
-Source mode's **Update downloader** updates the link-handling tool, not AudioLab itself.
+In the Mac app and source installations alike, **Update downloader** updates only the link-handling
+tool (yt-dlp), not AudioLab itself, and **Check now** links to a newer AudioLab release when one exists.
 
 ## Troubleshooting
 
@@ -191,7 +195,7 @@ Source mode's **Update downloader** updates the link-handling tool, not AudioLab
 | The source Mac shortcut cannot open | The project may have moved. Run `AudioLab.command` in its current location. |
 | The source Python environment is broken | With AudioLab stopped, run `bash start.sh --reinstall`; Windows: `.\start.bat --reinstall`. This recreates `.venv`; enable AI afterwards if needed. |
 | The browser did not open | Use the address printed in the source terminal. Keep it running; the port can vary. |
-| Split or AI stems Enhance is unavailable | Update an older 2.4.0b1 app first. In the Mac app, open Settings → AI & system to install, resume or repair the add-on and inspect errors. Source users can enable the existing AI package installer. |
+| Split or AI stems Enhance is unavailable | Update an older 2.4.0b1 app first. In the Mac app, open Settings → Updates & add-ons to install, resume or repair the add-on and inspect errors. Source users can enable the existing AI package installer. |
 | The output folder is unavailable | Reconnect its drive or choose another folder in Settings → Files. |
 | A result plays elsewhere but not here | Codec support varies. Open the result in your usual player or export MP3/WAV. |
 
@@ -213,7 +217,7 @@ any source shortcut. Keep originals and Library data if you want them after rein
 | Same — Windows | `%LOCALAPPDATA%\AudioLab` |
 | Same — Linux | `~/.local/share/audiolab`, or under `XDG_DATA_HOME` |
 | App logs — macOS | `~/Library/Logs/AudioLab` |
-| Managed packaged AI software, models and partial downloads | The app-data folder’s `ai/` subfolder; use Settings → AI & system → Remove AI add-on |
+| Managed packaged AI software, models and partial downloads | The app-data folder’s `ai/` subfolder; use Settings → Updates & add-ons → Remove AI add-on |
 | Source-mode AI weights | Hugging Face and/or Torch caches, usually under `~/.cache`; may be shared |
 
 Removing app data loses history and kept original copies. Output files are never removed automatically.

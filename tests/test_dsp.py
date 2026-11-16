@@ -11,7 +11,7 @@ import soundfile as sf
 from audiolab.dsp.bus import glue_comp, mono_below
 from audiolab.dsp.deess import deess
 from audiolab.dsp.denoise import spectral_gate
-from audiolab.dsp.dither import add_24bit_tpdf, quantize_to_16bit
+from audiolab.dsp.dither import add_24bit_tpdf
 from audiolab.dsp.exciter import hf_restore
 from audiolab.dsp.filters import apply_sos_zero_phase, filtfilt_stream, highpass_fq, peak_fq
 from audiolab.dsp.limiter import tp_limit, true_peak_db
@@ -162,12 +162,6 @@ def test_true_peak_chunked_matches_whole_signal():
     assert abs(whole - chunked) < 0.05, (whole, chunked)
     _, info = tp_limit(x, ceiling_db=-1.5, sr=SR)
     assert info['tp_after'] <= -1.49
-
-
-def test_quantize_to_16bit():
-    x = np.array([[-0.5, 0.5], [-0.0001, 0.0001], [0.9999, -0.9999]], dtype=np.float64)
-    q = quantize_to_16bit(x, dither=True, seed=123)
-    assert q.dtype == np.int16
 
 
 def test_loudness_matches_ffmpeg_ebur128(tmp_path):

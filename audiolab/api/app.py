@@ -3,6 +3,7 @@ the route modules and the static web UI."""
 
 import asyncio
 import logging
+import secrets
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -38,6 +39,7 @@ async def _lifespan(app: FastAPI):
     )
     unsubscribe = state.manager.subscribe(state.hub.publish)
     state.manager.start()
+    state.started()  # after the instance lock: a second launch stops above and changes nothing
     threading.Thread(target=ai.ai_status, daemon=True).start()  # warm the (slow) torch import
     yield
     unsubscribe()
@@ -75,15 +77,14 @@ def create_app(local: bool = True, token: str | None = None, manager: JobManager
     """`local`: runs on this computer (folders can be opened, browser-safety checks when there
     is no token). `token`: required on /api requests when set. `manager`: inject a JobManager
     (tests); by default one is created for the data folder."""
+    # No interactive docs: FastAPI's page loads its scripts from a CDN onto this origin, which would give
+    # them the whole API. docs/API.md is the contract; tests read the schema through app.openapi().
     app = FastAPI(
-        title=APP_NAME,
-        version=__version__,
-        lifespan=_lifespan,
-        docs_url='/api/docs',
-        openapi_url='/api/openapi.json',
-        redoc_url=None,
+        title=APP_NAME, version=__version__, lifespan=_lifespan, docs_url=None, redoc_url=None, openapi_url=None
     )
     app.state.audiolab = AppState(local, token, manager)
+    # Answered by /api/ping: a second launch reuses a running app only when its record names this one.
+    app.state.instance_id = secrets.token_urlsafe(9)
     install_guard(app, local, token)
     app.add_exception_handler(AudioLabError, _audiolab_error)
     app.add_exception_handler(OSError, _unexpected_error)  # answered here, not re-raised to the server

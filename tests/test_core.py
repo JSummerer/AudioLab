@@ -166,7 +166,7 @@ def test_cancel_kills_attached_process(tmp_path):
 # ---------------------------------------------------------------- preflight
 def test_preflight(tmp_path):
     one_h, two_h = estimate_peak_bytes(3600, 'enhance'), estimate_peak_bytes(7200, 'enhance')
-    assert two_h > one_h and two_h - one_h > 0.5 * one_h  # grows with length (+ fixed overhead)
+    assert two_h > one_h  # grows with length (slowly: a long render works in files, see test_guards)
     assert estimate_peak_bytes(3600, 'enhance', 'best') > one_h
     assert estimate_peak_bytes(7200, 'download') < estimate_peak_bytes(60, 'enhance') * 10
     rep = preflight(180.0, tmp_path, 'download')
@@ -358,6 +358,25 @@ def test_restart_marks_interrupted_jobs(tmp_path):
     assert (root / kept.id / 'work' / 'scratch').is_dir()
 
 
+def test_restart_trusts_only_a_job_named_like_its_folder(tmp_path):
+    import json
+    from dataclasses import asdict
+
+    from audiolab.jobs import Job
+
+    root, victim = tmp_path / 'jobs', tmp_path / 'library'
+    victim.mkdir()
+    (victim / 'entry.json').write_text('{}')
+    for name, job_id in (('j_20260101_000000_aaaaaa', '../library'), ('j_20260101_000001_bbbbbb', 'j_x')):
+        job = Job(id=job_id, task='analyze', source={}, options={}, status='done', finished_at=time.time())
+        (root / name).mkdir(parents=True)
+        (root / name / 'job.json').write_text(json.dumps(asdict(job)))
+    m = new_manager(root)
+    m._load()
+    assert m.list() == [] and m.clear_finished() == []  # loaded, "Clear finished" would remove <data>/library
+    assert (victim / 'entry.json').is_file()
+
+
 def test_restart_discards_adjust_auditions_left_by_a_closed_window(tmp_path):
     import json
     from dataclasses import asdict
@@ -383,6 +402,270 @@ def test_restart_discards_adjust_auditions_left_by_a_closed_window(tmp_path):
         assert m.get(jobs[name].id) is None and not (root / jobs[name].id).exists(), name
     for name in ('legacy', 'apply'):  # the older preview dialog's jobs and ordinary jobs keep normal retention
         assert m.get(jobs[name].id).status == 'done' and (root / jobs[name].id / 'work' / 'previews').is_dir(), name
+
+
+def test_a_failed_attempt_removes_only_the_files_it_made(tmp_path):
+    from audiolab.media import export
+    from audiolab.tasks import common
+
+    out, src = tmp_path / 'out', tmp_path / 'render.wav'
+    out.mkdir()
+    src.write_bytes(b'result')
+    theirs = out / 'Song.wav'
+    theirs.write_bytes(b'the user file of that name')
+    made = []
+
+    def runner(job, ctx):
+        made.append(export.place_file(src, out / 'Song.wav'))  # 'Song (2).wav': never over theirs
+        if job.options.get('fail'):
+            other = export.place_file(src, out / 'Other.wav')
+            other.unlink()
+            other.write_bytes(b'put there by the user meanwhile')  # same name, not the file this attempt made
+            stems = common.output_folder('Song (Stems)', parent=out)
+            made.append(export.place_file(src, stems / 'Song - Vocals.wav'))
+            (stems / '.DS_Store').write_bytes(b'Finder looked in')  # counts as empty
+            kept = common.output_folder('Song (Tracks)', parent=out)
+            (kept / 'notes.txt').write_text('the user saved this here meanwhile')
+            raise AudioLabError('Export failed.')
+        return {'headline': 'Done'}
+
+    m = JobManager(runner=runner, stages_for=lambda job: STAGES, root=tmp_path / 'jobs', workers=1)
+    m.start()
+    try:
+        failed = m.submit('analyze', {'kind': 'url', 'url': 'u'}, {'fail': True})
+        wait_for(lambda: m.get(failed.id).status == 'failed')
+        assert made[0].name == 'Song (2).wav' and not made[0].exists()
+        assert not made[1].parent.exists()  # its own folder goes once empty
+        assert (out / 'Song (Tracks)' / 'notes.txt').is_file()  # one holding something else stays
+        assert theirs.read_bytes() == b'the user file of that name'
+        assert (out / 'Other.wav').read_bytes() == b'put there by the user meanwhile'
+        done = m.submit('analyze', {'kind': 'url', 'url': 'u'}, {})
+        wait_for(lambda: m.get(done.id).status == 'done')
+        assert made[2] == made[0] and made[2].read_bytes() == b'result'  # a retry gets the name back, kept
+    finally:
+        m.shutdown()
+    outside = export.place_file(src, out / 'Free.wav')  # not in a job attempt: nothing notes or removes it
+    assert outside.is_file()
+
+
+def test_output_cleanup_never_takes_a_stranger_for_its_own(tmp_path, monkeypatch):
+    from audiolab import outputs
+    from audiolab.media import export
+
+    out, src = tmp_path / 'out', tmp_path / 'render.wav'
+    out.mkdir()
+    src.write_bytes(b'result')
+    created, real_link, real_rename = outputs.Created(), os.link, os.rename
+
+    def link_then_swap(a, b, **kw):  # someone else's file takes the name the instant it is published
+        real_link(a, b, **kw)
+        os.unlink(b)
+        Path(b).write_bytes(b'stranger 1')
+
+    with outputs.recording(created):
+        with monkeypatch.context() as m:
+            m.setattr(os, 'link', link_then_swap)
+            swapped = export.place_file(src, out / 'Swapped.wav')
+        mine = export.place_file(src, out / 'Mine.wav')
+        stems = out / 'Stems'
+        stems.mkdir()
+        outputs.created_folder(stems)
+
+    def swap_then_rename(a, b):  # replaced between the identity check and the move aside
+        if Path(a) == mine:
+            os.unlink(a)
+            Path(a).write_bytes(b'stranger 2')
+        real_rename(a, b)
+
+    stems.rename(out / 'Stems moved')  # the attempt's folder moved away, an empty one made at its name
+    stems.mkdir()
+    monkeypatch.setattr(os, 'rename', swap_then_rename)
+    created.discard()
+    monkeypatch.undo()
+    assert swapped.read_bytes() == b'stranger 1' and mine.read_bytes() == b'stranger 2'
+    assert sorted(p.name for p in out.iterdir()) == ['Mine.wav', 'Stems', 'Stems moved', 'Swapped.wav']
+
+    # A drive without hard links: the stranger goes back under a name claimed only if free, so another file
+    # that takes the name at the last moment, after any check, is never replaced.
+    created = outputs.Created()
+    with outputs.recording(created):
+        last = export.place_file(src, out / 'Last.wav')
+    real_open, real_lexists = os.open, os.path.lexists
+
+    def no_links(a, b, **kw):
+        raise OSError(errno.EPERM, 'Operation not permitted')
+
+    def swap_then_rename_last(a, b):
+        if Path(a) == last:
+            os.unlink(a)
+            Path(a).write_bytes(b'stranger 3')
+        real_rename(a, b)
+
+    def appears(path):
+        if Path(path) == last and not real_lexists(last):
+            last.write_bytes(b'stranger 4')
+
+    monkeypatch.setattr(os, 'link', no_links)
+    monkeypatch.setattr(os, 'rename', swap_then_rename_last)
+    monkeypatch.setattr(os, 'open', lambda path, *a, **k: (appears(path), real_open(path, *a, **k))[1])
+    monkeypatch.setattr(os.path, 'lexists', lambda path: (real_lexists(path), appears(path))[0])
+    created.discard()
+    monkeypatch.undo()
+    assert last.read_bytes() == b'stranger 4' and (out / 'Last (2).wav').read_bytes() == b'stranger 3'
+    assert not [p for p in out.iterdir() if p.name.endswith('.discard')]
+
+
+def test_a_stranger_put_back_is_never_left_hidden_or_its_name_taken(tmp_path, monkeypatch):
+    from audiolab import outputs
+
+    # Every numbered name is taken: the stranger still gets a visible name.
+    full = tmp_path / 'full'
+    full.mkdir()
+    for name in ['Song.wav', *(f'Song ({n}).wav' for n in range(2, 100))]:
+        (full / name).write_bytes(b'taken')
+    aside = full / '.Song.wav.0123.discard'
+    aside.write_bytes(b'stranger')
+    outputs._put_back(aside, full / 'Song.wav')
+    (back,) = [p for p in full.iterdir() if p.read_bytes() == b'stranger']
+    assert not back.name.startswith('.') and back.suffix == '.wav' and not aside.exists()
+
+    # No hard links and the move fails after another program saved its file over the placeholder: theirs stays.
+    d = tmp_path / 'fails'
+    d.mkdir()
+    aside = d / '.Song.wav.4567.discard'
+    aside.write_bytes(b'stranger')
+
+    def no_links(a, b, **kw):
+        raise OSError(errno.EPERM, 'Operation not permitted')
+
+    def replace_fails(a, b):
+        (d / 'other.tmp').write_bytes(b'their file')
+        os.rename(d / 'other.tmp', b)
+        raise OSError(errno.EIO, 'I/O error')
+
+    monkeypatch.setattr(os, 'link', no_links)
+    monkeypatch.setattr(os, 'replace', replace_fails)
+    with pytest.raises(OSError):
+        outputs._put_back(aside, d / 'Song.wav')
+    monkeypatch.undo()
+    assert (d / 'Song.wav').read_bytes() == b'their file' and aside.read_bytes() == b'stranger'
+
+
+def test_start_removes_only_old_leftovers_inside_the_data_folder(tmp_path, monkeypatch):
+    import json
+
+    from audiolab import library
+
+    root, old = tmp_path / 'jobs', time.time() - 2 * 3600
+    folders = {
+        k: root / f'j_20260101_00000{i}_aaaaa{i}' for i, k in enumerate('orphan fresh broken saved odd out lib'.split())
+    }
+    files = {
+        'orphan': ['input/Song.wav', 'input/cover/cover.jpg', 'input/cover/original.png', '.job.json.tmp'],
+        'fresh': ['input/Song.wav'],  # being written by a request right now (in a real start: none is)
+        'broken': ['job.json'],  # unreadable, but a job: left alone
+        'saved': ['Song.mp3'],  # finished audio: an output folder once set to a place like this
+        'odd': ['input/notes.txt'],  # not what a submission leaves
+        'out': ['input/Song.mp3'],  # looks like a leftover, but it is the output folder as set
+        'lib': ['input/Live.mp3'],  # looks like a leftover, but the Library knows a file in it
+    }
+    for key, names in files.items():
+        for name in names:
+            (folders[key] / name).parent.mkdir(parents=True, exist_ok=True)
+            (folders[key] / name).write_bytes(b'x')
+    monkeypatch.setenv('AUDIOLAB_OUTPUT_DIR', str(folders['out']))
+    entry = {'id': 'j_20250101_000000_ffffff', 'files': [{'id': 'f0', 'path': str(folders['lib'] / 'input/Live.mp3')}]}
+    (SETTINGS.library_dir / f'{entry["id"]}.json').write_text(json.dumps(entry))
+    staging = library.originals_dir() / '.original-x1y2'  # record() killed while publishing
+    staging.mkdir()
+    (staging / 'f00d.wav').write_bytes(b'copy')
+    kept = library.originals_dir() / '0123456789abcdef.wav'
+    kept.write_bytes(b'kept original')
+    for key, folder in folders.items():
+        if key != 'fresh':
+            for path in [folder, *folder.rglob('*')]:
+                os.utime(path, (old, old))
+    for path in (staging, kept):
+        os.utime(path, (old, old))
+    m = new_manager(root)
+    m.start()
+    m.shutdown()
+    assert not folders['orphan'].exists() and not staging.exists()
+    assert all(folders[k].is_dir() for k in files if k != 'orphan') and kept.read_bytes() == b'kept original'
+    assert (folders['saved'] / 'Song.mp3').is_file() and (folders['out'] / 'input/Song.mp3').is_file()
+
+
+def test_retention_also_applies_while_the_app_stays_open(manager, monkeypatch):
+    events = []
+    manager.subscribe(lambda ev, payload: events.append((ev, payload)))
+    old, new = (manager.submit('analyze', {'kind': 'url', 'url': 'u'}, {}) for _ in range(2))
+    wait_for(lambda: manager.get(new.id).status == 'done' and manager.get(old.id).status == 'done')
+    manager.get(old.id).finished_at = time.time() - 31 * 86400
+    assert manager.prune_expired() == [old.id]
+    assert manager.get(old.id) is None and not manager.job_dir(old.id).exists() and manager.get(new.id)
+    assert ('removed', {'ids': [old.id]}) in events
+    # Output folders set inside a job's folder (before that was refused): the job goes, its folder stays. Both
+    # the one set now and an earlier one whose result the Library still lists.
+    third = manager.submit('analyze', {'kind': 'url', 'url': 'u'}, {})
+    wait_for(lambda: manager.get(third.id).status == 'done')
+    exports, earlier = manager.job_dir(new.id) / 'exports', manager.job_dir(third.id) / 'exports'
+    for folder in (exports, earlier):
+        folder.mkdir()
+        (folder / 'Song.wav').write_bytes(b'finished audio')
+    monkeypatch.setenv('AUDIOLAB_OUTPUT_DIR', str(exports))
+    monkeypatch.setattr('audiolab.jobs.library.known_paths', lambda: [earlier / 'Song.wav'])
+    assert sorted(manager.clear_finished()) == sorted([new.id, third.id])
+    assert all((folder / 'Song.wav').read_bytes() == b'finished audio' for folder in (exports, earlier))
+
+
+def test_a_library_folder_spelled_differently_is_still_protected(manager, monkeypatch):
+    job = manager.submit('analyze', {'kind': 'url', 'url': 'u'}, {})
+    wait_for(lambda: manager.get(job.id).status == 'done')
+    exports = manager.job_dir(job.id) / 'Exports'
+    exports.mkdir()
+    (exports / 'Song.wav').write_bytes(b'finished audio')
+    other = Path(str(exports / 'Song.wav').swapcase())  # the same file on a case-insensitive drive
+    if not other.exists():
+        pytest.skip('case-sensitive file system')
+    monkeypatch.setattr('audiolab.jobs.library.known_paths', lambda: [other])
+    assert manager.clear_finished() == [job.id] and (exports / 'Song.wav').read_bytes() == b'finished audio'
+
+
+def test_keep_awake_never_ends_while_another_worker_runs(tmp_path):
+    import threading
+
+    from audiolab.jobs import Job
+
+    m = JobManager(runner=fake_runner, stages_for=lambda job: STAGES, root=tmp_path / 'jobs', workers=2)
+    first = Job(id='j_20260101_000000_aaaaaa', task='analyze', source={}, options={}, status='running')
+    second = Job(id='j_20260101_000001_bbbbbb', task='analyze', source={}, options={}, status='queued')
+    m._jobs.update({first.id: first, second.id: second})
+    calls, starter = [], []
+
+    def keep_awake(running):  # the second worker starts its job just as the first switches keep-awake off
+        if not running and not starter:
+            second.status = 'running'
+            starter.append(threading.Thread(target=m._update_awake))
+            starter[0].start()
+            time.sleep(0.05)
+        calls.append(running)
+
+    m.on_running_changed = keep_awake
+    m._update_awake()
+    first.status = 'done'
+    m._update_awake()
+    starter[0].join(5)
+    assert calls == [True, False, True]
+
+
+def test_a_job_that_cannot_be_saved_is_refused(manager, monkeypatch):
+    def disk_full(tmp, dst):
+        raise OSError(errno.ENOSPC, 'No space left on device')
+
+    monkeypatch.setattr('audiolab.jobs.replace_file', disk_full)
+    with pytest.raises(AudioLabError, match='The disk is full'):
+        manager.submit('analyze', {'kind': 'url', 'url': 'u'}, {})
+    assert manager.list() == []
 
 
 # --------------------------------------------------------------------- API
@@ -470,6 +753,26 @@ def test_http_api(tmp_path):
         assert c.get('/').status_code == 200
 
 
+def test_an_upload_that_never_becomes_a_job_leaves_no_folder(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from audiolab.api import create_app
+
+    mgr = new_manager(tmp_path / 'jobs')
+    client = TestClient(create_app(local=False, token='t', manager=mgr))  # no lifespan: nothing else starts
+    mgr._stopping = True  # the app began to close while the upload was arriving
+    try:
+        r = client.post(
+            '/api/jobs',
+            headers={'X-AudioLab-Token': 't'},
+            data={'task': 'analyze'},
+            files={'file': ('Song.wav', _wav_bytes(0.1), 'audio/wav')},
+        )
+        assert r.status_code >= 400 and list((tmp_path / 'jobs').glob('j_*')) == []
+    finally:
+        client.close()
+
+
 def test_diagnostics_redaction():
     from audiolab.diagnostics import _private
 
@@ -498,6 +801,8 @@ def test_browser_safety(tmp_path):
         for bad in ('https://evil.example', 'null', 'http://127.0.0.1:3000'):
             r = c.post('/api/jobs', headers={'Origin': bad}, data={'task': 'analyze', 'url': 'https://x.y/z'})
             assert r.status_code == 403, (bad, r.status_code)
+        # No interactive API page: it would load CDN scripts onto this origin.
+        assert c.get('/api/docs').status_code == 404 and c.get('/api/openapi.json').status_code == 404
 
 
 def test_queue_positions_sent_only_when_they_change(tmp_path):
@@ -632,6 +937,39 @@ def test_separate_format_choices(monkeypatch):
     source = {'kind': 'file', 'path': '/x.wav'}
     assert separate.validate({'format': 'wav24'}, source)['format'] == 'wav24'
     assert separate.validate({'format': 'alac16'}, source)['format'] == 'wav16'
+
+
+def test_split_after_separation_is_cancellable_and_matches_the_ai_helpers(tmp_path):
+    import numpy as np
+    import soundfile as sf
+
+    from audiolab.ai.separation import mix_stems, stems_peak
+    from audiolab.tasks import separate
+
+    rng = np.random.default_rng(2)
+    stems = []
+    for i in range(3):  # three stems longer than one block, the last one 5 frames short
+        stems.append(tmp_path / f's{i}.wav')
+        sf.write(
+            stems[-1],
+            rng.standard_normal(((1 << 18) + 1000 - 5 * (i == 2), 2)).astype(np.float32),
+            48000,
+            subtype='FLOAT',
+        )
+    mixed, peak = separate._mixed(stems, tmp_path / 'mix.wav', lambda: None)
+    reference = mix_stems(stems, tmp_path / 'reference.wav')
+    assert np.array_equal(sf.read(mixed, dtype='float32')[0], sf.read(reference, dtype='float32')[0])
+    assert peak == stems_peak([reference]) and separate._peak(stems[0], lambda: None) == stems_peak(stems[:1])
+
+    calls = []
+
+    def cancel_on_second_block():
+        calls.append(1)
+        if len(calls) > len(stems):
+            raise Cancelled()
+
+    with pytest.raises(Cancelled):
+        separate._mixed(stems, tmp_path / 'stopped.wav', cancel_on_second_block)
 
 
 def test_unexpected_errors_answer_in_plain_words(tmp_path, monkeypatch):

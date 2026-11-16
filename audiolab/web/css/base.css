@@ -66,7 +66,7 @@ p { margin: 0; }
   display: flex; align-items: center; gap: 10px;
   height: 32px; padding: 0 10px;
   border-radius: var(--r-sm);
-  color: var(--ink-2); font-weight: 500; font-size: 13.5px; text-decoration: none;
+  color: var(--ink-2); font-weight: 500; font-size: var(--fs-small); text-decoration: none;
   transition: background-color .12s, color .12s;
 }
 .nav-item:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); color: var(--ink); }
@@ -120,7 +120,7 @@ p { margin: 0; }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--s-3) var(--s-5); flex-wrap: wrap; margin-bottom: 28px; }
 .page-head-text { min-width: 0; flex: 1 1 320px; }
 .page-title { font: 600 clamp(28px, 4.2cqi, var(--fs-title))/1.08 var(--font-serif); letter-spacing: -.015em; text-wrap: balance; overflow-wrap: anywhere; }
-.page-sub { margin-top: var(--s-2); color: var(--ink-2); font-size: 15px; max-width: 66ch; text-wrap: pretty; }
+.page-sub { margin-top: var(--s-2); color: var(--ink-2); font-size: var(--fs-h3); max-width: 66ch; text-wrap: pretty; }
 .page-actions { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
 /* A page-wide group (New's form): no box of its own — the sheet is the surface. */
 .panel { background: transparent; }
@@ -128,7 +128,7 @@ p { margin: 0; }
 @container content (max-width: 640px) {
   .view { padding: var(--s-5) var(--s-4) 40px; }
   .page-head { margin-bottom: var(--s-5); }
-  .page-sub { font-size: 14.5px; }
+  .page-sub { font-size: var(--fs-body); }
   .banner { margin: var(--s-3) var(--s-4) 0; }
 }
 

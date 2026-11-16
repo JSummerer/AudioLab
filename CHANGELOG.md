@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Enhance keeps MP3, AAC (.m4a) and Opus files as loud as the master unless their peaks really go over:
+  encoding may use the master's headroom up to just under full scale (−0.1 dBTP), and only a file over that
+  is encoded once more, turned down by the excess plus 0.5 dB. On a test song, MP3 was 0.9 dB, AAC 1.2 dB
+  and Opus 1.6 dB quieter than the WAV (measured loudness); now MP3 is as loud, AAC 0.7 dB and Opus 1.1 dB
+  quieter. Check judges a lossy file's peaks by the same limit, and calls only a peak above full scale
+  "Clipping".
+- WMA Lossless sources count as lossless: in Enhance, a dull top end can get the gentle high-end lift, as
+  with FLAC or WAV.
+
 ## 2.5.1 (beta), 2026-11-16
 
 - Enhance's middle choice is now called "Tone and volume" (formerly "Adaptive"); what it does is unchanged.
@@ -26,8 +37,9 @@
   and Split the output drive needs room only for the results; Save / Convert still needs the full working
   space there. The output folder may not lie inside app data: one set there by an earlier version is refused
   before a job starts (choose another in Settings → Files). A job that can't be saved is refused at once.
-- MP3, AAC and Opus files (and their tracks) that the encoder pushes over your peak ceiling are encoded once
-  more, at most 2 dB quieter; lossless files are never re-encoded.
+- In Enhance, MP3, AAC and Opus files (and their tracks) that the encoder pushes over your peak ceiling are
+  encoded once more, at most 2 dB quieter; lossless files are never re-encoded. (Save / Convert and Split
+  never do this.)
 - **Less memory for long recordings:** on an 8 GB Mac, Volume only and Adaptive Enhance now start up to the
   8-hour limit (before: refused from about one hour), working in files on disk; AI stems is unchanged.
 - **Faster:** cutting long WAV or FLAC into tracks, Enhance's measurements, and Cancel in Split's last steps.

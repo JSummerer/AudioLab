@@ -477,15 +477,17 @@ function processingMeasurements(metrics, section) {
         h('td', { class: 'num' }, fmtNum(a[key]))))))) : null;
 }
 
+/** One saved file's check against the limit it was checked against: the peak ceiling, or for a lossy file
+ * the higher limit just under full scale (older versions checked lossy files against the ceiling). */
 function exportCheck(file) {
   const check = file.verification;
   const status = check.status === 'unverified' ? 'Could not check the saved file'
-    : check.ceiling_met === false ? 'Peak above the ceiling'
-      : check.status === 'verified' ? 'Peak within the ceiling' : 'Review the saved file';
+    : check.ceiling_met === false ? 'Peak above its limit'
+      : check.status === 'verified' ? 'Peak within its limit' : 'Review the saved file';
   const measurements = [
     Number.isFinite(check.integrated_lufs) ? `${fmtNum(check.integrated_lufs, 2)} LUFS` : null,
     Number.isFinite(check.true_peak_dbtp) ? `${fmtNum(check.true_peak_dbtp, 2)} dBTP` : null,
-    Number.isFinite(check.ceiling_dbtp) ? `ceiling ${fmtNum(check.ceiling_dbtp, 2)} dBTP` : null,
+    Number.isFinite(check.ceiling_dbtp) ? `limit ${fmtNum(check.ceiling_dbtp, 2)} dBTP` : null,
   ].filter(Boolean);
   return h('li', null, h('strong', null, file.label || file.name || 'Export'), ` — ${status}`,
     measurements.length ? ` (${measurements.join(' · ')})` : null);
@@ -517,7 +519,7 @@ const OWN_SETTINGS = {
 const shortNum = (v) => String(Number(Number(v).toFixed(1))).replace('-', '−');
 // Loudness in words ("Normal volume"); the number in LUFS with "Show details" (Settings).
 const volumeText = (lufs) => (showDetails() ? `${shortNum(lufs)} LUFS` : `${loudnessWord(lufs)} volume`);
-const PEAK_WORDS = { Safe: 'peaks safe', 'Little headroom': 'little headroom', Clipping: 'clipping' };
+const PEAK_WORDS = { Safe: 'peaks safe', 'Little headroom': 'little headroom', 'No headroom': 'no headroom', Clipping: 'clipping' };
 
 function versionFacts(entry) {
   if (entry.task === 'import') {

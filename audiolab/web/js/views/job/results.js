@@ -138,7 +138,8 @@ function fileRow(job, f) {
 }
 
 /** The peak check of a saved file (docs/API.md "verification"), in plain words; the loudness and
- * peak numbers with "Show details". */
+ * peak numbers with "Show details", and the limit this file was checked against (a lossy file's is
+ * higher than the master's ceiling). */
 function exportCheckText(v, details = showDetails()) {
   if (v.status === 'unverified') return 'Saved · it couldn’t be checked afterwards';
   const plain = v.status === 'warning' ? 'Checked after saving: its peaks go over the limit' : 'Checked after saving: peaks stay under the limit';
@@ -146,7 +147,8 @@ function exportCheckText(v, details = showDetails()) {
   const values = [
     Number.isFinite(v.integrated_lufs) ? `${v.integrated_lufs.toFixed(1)} LUFS` : 'loudness unavailable',
     Number.isFinite(v.true_peak_dbtp) ? `${v.true_peak_dbtp.toFixed(2)} dBTP` : 'silent',
-  ].join(' · ');
+    Number.isFinite(v.ceiling_dbtp) ? `limit ${v.ceiling_dbtp.toFixed(2)} dBTP` : null,
+  ].filter(Boolean).join(' · ');
   return `${plain} · ${values}`;
 }
 

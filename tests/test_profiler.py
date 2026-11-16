@@ -165,6 +165,34 @@ def test_profile_keys_and_alerts():
     assert all(a['level'] in ('ok', 'info', 'warning', 'danger') for a in rep['alerts'])
 
 
+def test_check_judges_a_lossy_file_by_the_lossy_limit():
+    """An Enhance MP3 may peak at -0.3 dBTP: not too hot for a lossy file; a lossless one keeps today's warning."""
+    from audiolab.dsp.limiter import true_peak_db
+    from audiolab.media.export import source_peak_limit
+    from audiolab.tasks.analyze import describe
+
+    limit = source_peak_limit('mp3')
+    assert limit == -0.05 and source_peak_limit('pcm_alaw') == source_peak_limit('pcm_mulaw') == limit
+    assert all(source_peak_limit(c) is None for c in ('pcm_s16le', 'alac', 'flac', 'wmalossless', None))
+    x = _club(8.0)
+    x *= 10 ** ((-0.3 - true_peak_db(x)) / 20)
+    lossy, lossless = profile(x, SR, 8.0, 'whole file', peak_limit_dbtp=limit), profile(x, SR, 8.0, 'whole file')
+    assert -0.5 < lossy['true_peak_dbtp'] < limit and lossy['peak_limit_dbtp'] == limit
+
+    def peaks(rep):
+        return next(a['title'] for a in rep['alerts'] if 'Peaks' in a['title'])
+
+    assert peaks(lossy) == 'Peaks are safe' and peaks(lossless) == 'Peaks are too hot'
+    assert 'Peaks stay below the safe limit.' in describe(lossy, {})
+    assert 'Peaks go above the safe limit — it may distort on some speakers.' in describe(lossless, {})
+
+    # -0.046 dBTP is reported as -0.05, at the limit: the alert and the summary judge that same value.
+    x *= 10 ** ((-0.046 - true_peak_db(x)) / 20)
+    edge = profile(x, SR, 8.0, 'whole file', peak_limit_dbtp=limit)
+    assert edge['true_peak_dbtp'] == -0.05 and peaks(edge) == 'Peaks are safe'
+    assert 'Peaks stay below the safe limit.' in describe(edge, {})
+
+
 def test_classifier_music_vs_speech():
     club = classify(audio_features(_club(), SR), 3600.0, None)
     assert club['type'] == 'dj_set', club

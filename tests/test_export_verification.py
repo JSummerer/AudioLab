@@ -1,7 +1,6 @@
 """Generated audio exercises the meter on finished files and at the end of the stream."""
 
 import threading
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -95,49 +94,67 @@ def test_cancellation_is_propagated(tmp_path):
         verification.measure_export(tmp_path / 'export.wav', ceiling_dbtp=-1.25, progress=Progress.null(cancel))
 
 
-def test_a_lossy_export_over_the_ceiling_is_turned_down_once_and_the_wav_is_untouched(tmp_path, monkeypatch):
+def test_the_limit_a_saved_file_is_checked_against():
+    from audiolab.media import export
+
+    assert export.peak_limit('mp3_320', -1.0) == export.peak_limit('opus_160', -1.5) == export.LOSSY_LIMIT_DBTP
+    assert export.peak_limit('aac_256', 0.0) == 0.0  # never stricter than the user's own ceiling
+    assert export.peak_limit('alac16', -1.0) == export.peak_limit('wav24', -1.0) == -1.0  # lossless, ALAC in .m4a too
+
+
+def test_a_lossy_export_uses_the_headroom_up_to_the_limit_and_is_turned_down_once_above_it(tmp_path, monkeypatch):
     from audiolab.dsp.limiter import tp_limit
     from audiolab.media import export
 
-    # A loud, limited pop-like master: the MP3 encoder lifts its peaks about 0.6 dB above the master's.
-    t = np.arange(4 * SR) / SR
-    noise = np.random.default_rng(1).standard_normal(len(t))
-    kick = np.sin(2 * np.pi * 55 * t) * np.exp(-(t % 0.5) * 12)
-    chord = sum(np.sin(2 * np.pi * f * k * t) / k for f in (220, 277.2, 329.6) for k in range(1, 30)) * 0.08
-    mix = kick + 0.3 * noise * np.exp(-(t % 0.25) * 40) + chord
-    mix *= 2 / np.abs(mix).max()
-    limited, _ = tp_limit(np.column_stack((mix, np.roll(mix, 7))), ceiling_db=-1.0, sr=SR)
-    master = tmp_path / 'master.flac'
-    sf.write(master, limited.astype(np.float32), SR, subtype='PCM_24')
-    ceiling = verification.measure_export(master, ceiling_dbtp=0)['true_peak_dbtp']  # the master meets it exactly
+    def limited_master(name, ceiling_db):  # loud and limited, pop-like: encoding lifts its peaks
+        t = np.arange(4 * SR) / SR
+        noise = np.random.default_rng(1).standard_normal(len(t))
+        kick = np.sin(2 * np.pi * 55 * t) * np.exp(-(t % 0.5) * 12)
+        chord = sum(np.sin(2 * np.pi * f * k * t) / k for f in (220, 277.2, 329.6) for k in range(1, 30)) * 0.08
+        mix = kick + 0.3 * noise * np.exp(-(t % 0.25) * 40) + chord
+        mix *= 2 / np.abs(mix).max()
+        limited, _ = tp_limit(np.column_stack((mix, np.roll(mix, 7))), ceiling_db=ceiling_db, sr=SR)
+        sf.write(tmp_path / name, limited.astype(np.float32), SR, subtype='PCM_24')
+        return tmp_path / name, verification.measure_export(tmp_path / name, ceiling_dbtp=0)['true_peak_dbtp']
 
-    def check(path, progress):
-        return verification.measure_export(path, ceiling_dbtp=ceiling, progress=progress)
+    def check(path, progress, limit):
+        return verification.measure_export(path, ceiling_dbtp=limit, progress=progress)
 
+    limit = export.LOSSY_LIMIT_DBTP
+    # Over the master's ceiling, under the limit: the MP3 is saved as encoded; the WAV is held to the ceiling.
+    master, ceiling = limited_master('quiet.flac', -2.0)  # the master meets its ceiling exactly
+    out = tmp_path / 'room'
+    outputs = export.export(master, out, 'Song', ['wav24', 'mp3_320'], check=check, ceiling_dbtp=ceiling)
+    made = {o['format']: o for o in outputs}
+    mp3, wav = made['mp3_320']['verification'], made['wav24']['verification']
+    assert made['mp3_320']['trim_db'] == 0.0 and mp3['status'] == 'verified' and mp3['ceiling_dbtp'] == limit
+    assert ceiling < mp3['true_peak_dbtp'] <= limit
+    assert made['wav24']['trim_db'] == 0.0 and wav['status'] == 'verified' and wav['ceiling_dbtp'] == ceiling
+
+    # Over the limit: one re-encode turned down by the excess plus the margin, if that stays within the bound.
+    master, _ = limited_master('hot.flac', -0.3)
     made = {}
-    for trim in (False, True):  # without the trim: what every default export did until now
-        monkeypatch.setattr(export, 'TRIM_MAX_DB', 2.0 if trim else 0.0)
-        out = tmp_path / f'trim {trim}'
-        made[trim] = {o['format']: o for o in export.export(master, out, 'Song', ['wav24', 'mp3_320'], check=check)}
-        assert sorted(p.name for p in out.iterdir()) == ['Song.mp3', 'Song.wav']  # no second file, no staging
-    over, fixed = made[False]['mp3_320'], made[True]['mp3_320']
+    for bound in (0.0, export.TRIM_MAX_DB):  # 0: every needed turn-down is beyond it, so kept as encoded
+        monkeypatch.setattr(export, 'TRIM_MAX_DB', bound)
+        out = tmp_path / f'bound {bound}'
+        (made[bound],) = export.export(master, out, 'Song', ['mp3_320'], check=check, ceiling_dbtp=-1.0)
+        assert [p.name for p in out.iterdir()] == ['Song.mp3']  # no second file, no staging
+    over, fixed = made[0.0], made[2.0]
     assert over['verification']['ceiling_met'] is False and over['trim_db'] == 0.0
-    assert fixed['verification']['ceiling_met'] is True and fixed['verification']['status'] == 'verified'
-    assert fixed['trim_db'] == round(over['verification']['true_peak_dbtp'] - ceiling + export.TRIM_MARGIN_DB, 2)
-    assert fixed['verification'] == check(fixed['path'], Progress.null())  # the reading is of the saved file
-    wavs = [Path(made[trim]['wav24']['path']).read_bytes() for trim in (False, True)]
-    assert wavs[0] == wavs[1] and made[True]['wav24']['trim_db'] == 0.0
+    assert fixed['trim_db'] == round(over['verification']['true_peak_dbtp'] - limit + export.TRIM_MARGIN_DB, 2)
+    assert fixed['verification']['status'] == 'verified' and fixed['verification']['true_peak_dbtp'] <= limit
+    assert fixed['verification'] == check(fixed['path'], Progress.null(), limit)  # the reading is of the saved file
 
     # Cancelled while the turned-down version is checked: nothing is saved and nothing is left behind.
     calls = []
 
-    def cancel_on_recheck(path, progress):
+    def cancel_on_recheck(path, progress, limit):
         calls.append(path)
         if len(calls) == 2:
             raise Cancelled()
-        return check(path, progress)
+        return check(path, progress, limit)
 
     out = tmp_path / 'cancelled'
     with pytest.raises(Cancelled):
-        export.export(master, out, 'Song', ['mp3_320'], check=cancel_on_recheck)
+        export.export(master, out, 'Song', ['mp3_320'], check=cancel_on_recheck, ceiling_dbtp=-1.0)
     assert len(calls) == 2 and list(out.iterdir()) == []

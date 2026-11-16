@@ -254,10 +254,11 @@ def decode(ctx: TaskContext, acq: Acquired, progress: Progress) -> dict[str, Any
 
 def source_format(acq: Acquired) -> dict[str, Any]:
     """`analyze_file` kwargs describing the source's own format (probed once in `decode`;
-    the working reference is always 48 kHz stereo)."""
+    the working reference is always 48 kHz stereo), with a lossy codec's peak limit."""
     src = (acq.metadata or {}).get('source_audio') or {}
     out = {'source_rate': src.get('sample_rate'), 'source_channels': src.get('channels')}
-    return {k: v for k, v in out.items() if v}
+    limit = export.source_peak_limit(src.get('audio_codec'))
+    return {k: v for k, v in out.items() if v} | ({'peak_limit_dbtp': limit} if limit is not None else {})
 
 
 def describe_source(analysis: dict[str, Any], acq: Acquired) -> dict[str, Any]:

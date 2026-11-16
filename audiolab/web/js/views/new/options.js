@@ -435,7 +435,7 @@ function fineTuning() {
   const rows = [
     ['target_lufs', 'Loudness target', 'How loud the result is. Streaming apps play near −14 LUFS; DJ sets sit around −10 to −12.',
       number('target_lufs', 'Loudness target', { min: -24, max: -6, step: 0.5, unit: 'LUFS', fallback: -14 })],
-    ['tp_ceiling_db', 'Peak ceiling', 'Highest allowed peak (true peak). Lower is safer for phones and Bluetooth.',
+    ['tp_ceiling_db', 'Peak ceiling', 'Highest allowed peak (true peak) of the master; lossy files may use the room up to just under full scale. Lower is safer for phones and Bluetooth.',
       number('tp_ceiling_db', 'Peak ceiling', { min: -3, max: -0.1, step: 0.1, unit: 'dBTP', fallback: -1 })],
     ['bass_db', 'Bass boost', 'Extra low end. 0 keeps the bass as it is.',
       number('bass_db', 'Bass boost', { min: 0, max: 6, step: 0.5, unit: 'dB', fallback: 1.5 })],

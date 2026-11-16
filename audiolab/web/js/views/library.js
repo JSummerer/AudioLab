@@ -429,7 +429,7 @@ function processingDetails(entry, files, open) {
     if (typeof requested[key] === 'boolean') overrides.push([label, requested[key] ? 'On' : 'Off']);
   }
   const steps = [...(applied.steps || [])];
-  if (applied.ai?.fallback) steps.push('The AI stage could not be used. Adaptive processing was applied.');
+  if (applied.ai?.fallback) steps.push('The AI stage could not be used. Tone and volume processing was applied.');
   const adaptive = applied.adaptive_lowmid;
   if (adaptive?.engaged === false && adaptive.skip_reason && !['off', 'no isolated low-mid rises needing control'].includes(adaptive.skip_reason)) {
     steps.push(`Adaptive low-mid control stayed off: ${adaptive.skip_reason}.`);

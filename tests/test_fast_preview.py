@@ -427,7 +427,7 @@ def test_invalid_missing_and_unsupported_preview_requests(app, tmp_path):
 
     best, _ = retained(tmp_path, quality='best')
     rejected = client.post(f'/api/library/{best["id"]}/preview', json={'start_s': 0, 'duration_s': 5})
-    assert rejected.status_code == 400 and 'Volume only and Adaptive' in rejected.text
+    assert rejected.status_code == 400 and '"Volume only" and "Tone and volume"' in rejected.json()['detail']
     assert manager.list() == []
 
 

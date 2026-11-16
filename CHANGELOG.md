@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.5.1 (beta), 2026-11-16
+
+- Enhance's middle choice is now called "Tone and volume" (formerly "Adaptive"); what it does is unchanged.
+- Save / Convert to MP3, M4A or Opus on another drive needs room there only for that file, so a one-hour
+  MP3 now starts on a stick with 1 GB free. WAV, FLAC, the original stream, video and cutting into tracks
+  still need the full working space there.
+
 ## 2.5.0 (beta), 2026-11-16
 
 - **Adjust**, new in the Library: pick a 5–30 second passage of a version, edit its EQ on a graph, in fields

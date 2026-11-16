@@ -60,7 +60,7 @@ def _decisions(value: Any) -> list[dict[str, str]]:
         if all(k in decision for k in ('key', 'label', 'value', 'source')):
             if decision['key'] == 'ai_stage' and decision['value'] == 'none (fallback)':
                 # The live explanation may name a local runtime error; keep the outcome instead.
-                decision['why'] = 'The AI pack was unavailable, so Adaptive processing was used.'
+                decision['why'] = 'The AI pack was unavailable, so Tone and volume processing was used.'
             out.append(decision)
     return out
 

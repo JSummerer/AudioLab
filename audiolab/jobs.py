@@ -750,7 +750,11 @@ class JobManager:
         except AudioLabError as e:
             self._fail(job, ctx, _error(e))
         except MemoryError:
-            smaller = 'Use Adaptive processing or a shorter piece.' if job.task == 'enhance' else 'Try a shorter piece.'
+            smaller = (
+                'Use Tone and volume processing or a shorter piece.'
+                if job.task == 'enhance'
+                else 'Try a shorter piece.'
+            )
             error = {
                 'message': 'The computer ran out of memory while processing this.',
                 'hints': ['Close other apps and try again.', smaller],

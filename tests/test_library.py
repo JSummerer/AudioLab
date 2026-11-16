@@ -224,7 +224,7 @@ def test_enhance_processing_and_export_check_survive_job_removal(manager, monkey
         assert details['resolved']['recipe'] == {'key': 'music', 'name': 'Song / music'}
         assert details['resolved']['params'] == {'target_lufs': -14.0, 'highpass_hz': 25.0, 'mono_bass_hz': None}
         assert details['resolved']['decisions'][0]['why'] == 'Detected music'
-        assert 'Adaptive processing' in details['resolved']['decisions'][1]['why']
+        assert 'Tone and volume processing' in details['resolved']['decisions'][1]['why']
         applied = details['applied']
         assert applied['ai'] == {'stage': 'stem_eq', 'fallback': True}
         assert applied['limiter'] == {'engaged': False, 'max_gr_db': 0.0}

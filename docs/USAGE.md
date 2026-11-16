@@ -38,8 +38,8 @@ A link opened from another page (`/?url=…`) waits in the link field until you 
 Use only material you have permission to process.
 
 - **Save / Convert:** convert formats, save an original stream, or cut chapters/a pasted tracklist into tracks.
-- **Enhance:** choose a recipe or use Auto. Volume only mainly adjusts volume; Adaptive uses the
-  recipe's processing; AI stems adds the optional AI stage.
+- **Enhance:** choose a recipe or use Auto. "Volume only" mainly adjusts volume. "Tone and volume" uses
+  the recipe's processing. "AI stems" adds the optional AI stage.
 - **Split:** produce vocals/instrumental or four stems using the optional AI pack.
 - **Check:** inspect measurements and a spectrogram. Tempo, musical key and content type are estimates.
   Frequency range can suggest limitations; it cannot prove a file's encoding history.
@@ -70,12 +70,12 @@ video without it. YouTube can block accounts that download a lot; a spare Google
 | Processing | What changes | Needs AI? |
 |---|---|---|
 | **Volume only** | Mainly loudness; keeps the original tone | No |
-| **Adaptive** | Tone, dynamics and loudness using the chosen recipe | No |
+| **Tone and volume** | Tone, dynamics and loudness using the chosen recipe | No |
 | **AI stems** | Adds an AI stage to the recipe; takes longer | Yes |
 
-Start with Volume only or Adaptive. AI stems can alter tone and is not a guarantee that you will prefer
-the sound. Earlier versions called these choices Light, Standard and Best; existing screenshots still
-show those names. The **Standard / Fine-tuned AI model** choice is separate from Enhance processing;
+Start with "Volume only" or "Tone and volume". AI stems can alter tone and is not a guarantee that you
+will prefer the sound. Versions 2.4.0b4 to 2.5.0 called "Tone and volume" Adaptive. Earlier versions called these
+choices Light, Standard and Best; existing screenshots still show those names. The **Standard / Fine-tuned AI model** choice is separate from Enhance processing;
 see [hardware guidance](HARDWARE.md).
 
 Auto chooses from the same recipes you can select yourself:
@@ -181,8 +181,8 @@ the existing version is a valid result. Opening or leaving Adjust does not creat
 A section preview is an estimate: it uses nearby audio for context, while the full render checks the
 whole recording again. Even retained full-recording gain cannot predict how EQ changes the next full
 render's normalization. Auditions exclude saved-format compression artifacts. Short previews are currently
-available for Volume only and Adaptive results with saved settings and a kept original; AI stems
-needs a full render. Preview work joins the ordinary queue, so it may wait for a running job.
+available for results made with "Volume only" or "Tone and volume". They need saved settings and a kept
+original; AI stems needs a full render. Preview work joins the ordinary queue, so it may wait for a running job.
 If a file's timing cannot be aligned reliably for a short preview, AudioLab explains the problem;
 try a WAV or FLAC original or run Enhance on the full recording. **Apply to full recording** reanalyzes
 the complete original and verifies new exports, preserving previous versions. It reuses available

@@ -695,7 +695,7 @@ function aiRows() {
   const help = managed
     ? 'Adds Split and AI stems. One download includes the AI software and both model choices; processing then works offline on this computer.'
     : canInstall ? 'Adds Split and AI stems. Installs AI software in this source environment; models download on first use.'
-      : 'Save, Convert, Check, and the Adaptive and Volume only modes work without the AI add-on.';
+      : 'Save, Convert and Check work without the AI add-on. So does Enhance with “Volume only” or “Tone and volume”.';
   return h('div', { dataset: { spot: 'ai' } },
     // Not installed is a choice, not a fault: a dim light, not a red one.
     statusRow(ai.installing ? 'on' : ai.available ? 'ok' : 'dim', 'AI add-on', aiDetail,

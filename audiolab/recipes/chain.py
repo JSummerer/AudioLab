@@ -228,7 +228,7 @@ def _ai_stage(
             'x': None,
             'report': report,
             'warning': f'The AI separation was not clean enough (residual {sep["residual_db"]} dB) — '
-            f'used the adaptive chain instead.',
+            f'used Tone and volume processing instead.',
         }
     if params.ai_stage == 'voice_isolate':
         x = _read_stem(sep['stems']['vocals'], n, progress.check_cancel, scratch)
@@ -359,7 +359,7 @@ def _render(
         except Exception as e:  # MPS/CUDA OOM, missing model, ... → fall back, don't fail the job
             msg = str(e) if isinstance(e, AudioLabError) else f'{type(e).__name__}: {e}'
             warnings.append(
-                'The AI stage failed — used Adaptive processing instead. The full log has technical details.'
+                'The AI stage failed — used Tone and volume processing instead. The full log has technical details.'
             )
             ai_report = {'stage': params.ai_stage, 'fallback': True, 'error': msg[:300]}
         if x is None:

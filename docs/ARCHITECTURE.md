@@ -53,7 +53,7 @@ line and the Docker image.
 | `previews.py` | The Enhance before/after excerpt (a loud 45 s passage, or the whole recording when shorter) at the true relative level, one shared headroom gain; compared when the original isn't kept |
 | `processing.py` | Bounded, path-free projection of resolved and applied Enhance processing for results and durable Library history; legacy entries remain readable |
 | `settings.py` | Data/output folders (the output folder is only resolved here, never created: whatever writes creates it; it may neither lie inside the data folder nor contain it), env-var limits (`AUDIOLAB_*`), persisted user preferences (checked on load/update; a new snapshot becomes active only after saving succeeds) |
-| `resources.py` | Memory/disk/duration preflight, run before any big download: the working folder needs the task's estimate; the output folder needs only the results for Enhance and Split, the full working estimate for Save / Convert, and is not checked for Check; also refuses an output folder that can't be written to |
+| `resources.py` | Memory/disk/duration preflight, run before any big download: the working folder needs the task's estimate; the output folder needs only the results (never more than the working estimate), is not checked for Check, and needs the full working estimate when the results' size isn't known (Save / Convert other than one MP3, M4A or Opus file of known length: WAV/FLAC keep the source's unknown rate and channels, tracks each embed the cover); also refuses an output folder that can't be written to |
 | `diagnostics.py` | Log file setup and the plain-text system/job report for bug reports (`/api/diagnostics`, `audiolab doctor --report`) |
 | `errors.py` | `AudioLabError(message, hints, fix, detail)` — every user-visible failure carries plain-language hints, an optional one-click fix and the raw text behind it (`detail`, for bug reports only); `storage_error()` words a full disk or a folder AudioLab may not write to. Anything else unexpected becomes a JSON 500 with hints (`api/app.py`) or "Something went wrong while …" on the job (`jobs.py`) |
 | `util.py` | File-name safety, unique paths, hard links, media types, and human-readable sizes and durations |
@@ -69,8 +69,8 @@ use the cgroup limit minus its reported usage before applying that fraction. See
 the complete Enhance chain constant-memory. Disk estimates depend on task/duration/quality, not every
 source rate, export format or output count; the added free-space allowance is not reserved capacity.
 Long Enhance adds up to 36 bytes per 48 kHz frame (about 5.8 GiB/hour) for disk-backed working buffers.
-Beyond 10 minutes, Volume only and Adaptive Enhance are estimated at the 10-minute figure plus 0.5 GiB per
-hour: their mapped scratch pages count as reclaimable, and the slope is about three times the growth
+Beyond 10 minutes, Enhance with "Volume only" or "Tone and volume" is estimated at the 10-minute figure
+plus 0.5 GiB per hour: its mapped scratch pages count as reclaimable, and the slope is about three times the growth
 measured on one 48 GB Mac. AI stems Enhance keeps the earlier, conservative RAM estimate.
 
 ### Platform code
@@ -89,8 +89,8 @@ from `<data>/downloader/` when it passes its checks (`media/ytdlp_update.py`), e
 That executable is not a general-purpose Python interpreter; the spec freezes extra standard-library
 modules so an update that starts using one still runs. `runtime.py` chooses this mode and the bundled FFmpeg/Deno.
 
-The main app exposes Save/Convert, Check and Volume only/Adaptive Enhance without AI. Since version 2.4.0b2 it
-offers a managed optional add-on containing a frozen AI helper and both
+Without AI, the main app exposes Save/Convert, Check and Enhance with "Volume only" or "Tone and volume".
+Since version 2.4.0b2 it offers a managed optional add-on containing a frozen AI helper and both
 supported model choices; the main app's bundled Python packages remain immutable. `ai.install_supported`
 is driven by a build-generated, bundled catalog, not simply `packaged`. Split/AI stems use the healthy
 managed helper when present. Source/CLI/Docker keep their existing optional-AI and update paths.

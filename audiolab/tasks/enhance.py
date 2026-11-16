@@ -47,7 +47,7 @@ def validate(options: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
     if quality == 'best' and not common.ai_device():
         raise AudioLabError(
             'AI stems processing needs the AI add-on, which is not installed yet.',
-            hints=['Enable AI features in Settings (one-time download), or use Adaptive processing.'],
+            hints=['Enable AI features in Settings (one-time download), or use Tone and volume processing.'],
             fix='install_ai',
         )
     formats = options.get('formats') or SETTINGS.get().enhance_formats

@@ -1,9 +1,10 @@
 # AudioLab for Mac
 
-**[Download the latest release](https://github.com/JSummerer/AudioLab/releases/latest)** (AudioLab 2.5.0) · public beta
+**[Download the latest release](https://github.com/JSummerer/AudioLab/releases/latest)** (AudioLab 2.5.1) · public beta
 
 No Terminal, Python installation or AudioLab account is needed. The app contains its own audio tools.
-Save / Convert, Check, the Library, and Enhance in **Volume only** or **Adaptive** mode work without the optional AI download.
+Save / Convert, Check, the Library, and Enhance in **Volume only** or **Tone and volume** mode work
+without the optional AI download.
 
 **On this page:** [Check your Mac](#check-your-mac) · [Install](#download-and-install) ·
 [First opening](#first-opening) · [Optional AI](#optional-ai) · [Updates](#updates) ·
@@ -27,7 +28,7 @@ See [hardware and storage](HARDWARE.md) for memory, disk, model choices and the 
 ## Download and install
 
 1. **Choose your download:** open the latest release page above and select the `.dmg` under **Assets**.
-   The file is named like **AudioLab-2.5.0-macOS-arm64.dmg** and normally appears in Downloads.
+   The file is named like **AudioLab-2.5.1-macOS-arm64.dmg** and normally appears in Downloads.
 2. **Open the downloaded file.** In its window, drag **AudioLab.app** into **Applications**.
    Wait for Finder to finish copying, then eject the AudioLab disk image in Finder's sidebar.
 3. **Open AudioLab from Applications.** If macOS blocks it, follow the next section.
@@ -112,7 +113,7 @@ fallback: **Use built-in version** goes back to it while an update is in use or 
 start. A newer app's built-in downloader is used whenever it is newer than your update. The audio
 engine (ffmpeg) updates only with the app.
 
-AudioLab 2.5.0 reuses an existing **AI 1.0.0** installation (unchanged since 2.4.0b2). You can check its status in
+AudioLab 2.5.1 reuses an existing **AI 1.0.0** installation (unchanged since 2.4.0b2). You can check its status in
 **Settings → Updates & add-ons**. **Update AI add-on** appears when an app version needs a different add-on.
 
 If you also use a [source installation](INSTALLATION.md#install-from-source), quit one copy before
@@ -169,7 +170,7 @@ Older source installations have [separate cleanup notes](INSTALLATION.md#uninsta
 | AI download or installation stops | Check your connection and free disk space. Read the message in **Updates & add-ons**, then Resume or Retry. If it fails again, include the error in a report. |
 | Split or AI stems is unavailable | Enable AI and wait for **Ready**. If already installed, read the reason and use **Repair AI add-on** when it appears. Version 2.4.0b1 needs an app update first. |
 | A link fails | Choose **Update downloader** (offered on the failed job, or in **Settings → Updates & add-ons**), or use a local audio file. Supported sites can change. |
-| A job needs too much memory or disk | Try a shorter recording or switch to Volume only or Adaptive in Enhance. |
+| A job needs too much memory or disk | Try a shorter recording or switch to "Volume only" or "Tone and volume" in Enhance. |
 
 For a failed job, choose **Copy details for a bug report**. For other problems, use
 **Settings → About → Copy system report**. If the app cannot open, just report the warning, Mac chip,

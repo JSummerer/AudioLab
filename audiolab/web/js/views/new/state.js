@@ -9,7 +9,7 @@ export const MAX_FILES = 50;
 export const LIGHT_KEYS = ['target_lufs', 'tp_ceiling_db', 'sample_rate'];
 export const RECIPE_LABELS = { club: 'DJ set', live: 'Concert', music: 'Song', voice: 'Podcast / voice' };
 // The labels describe what runs; the API keeps the original quality keys.
-export const PROCESSING_LABELS = { light: 'Volume only', standard: 'Adaptive', best: 'AI stems' };
+export const PROCESSING_LABELS = { light: 'Volume only', standard: 'Tone and volume', best: 'AI stems' };
 
 export const TASKS = [
   { key: 'download' }, // Save or Convert: see options.js taskText()

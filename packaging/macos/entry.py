@@ -7,9 +7,9 @@ from audiolab import runtime
 runtime.configure_packaged()
 
 if sys.argv[1:2] == ['--audiolab-downloader']:
-    import yt_dlp
+    from audiolab.media.ytdlp_update import load_downloader
 
-    yt_dlp.main(sys.argv[2:])
+    load_downloader().main(sys.argv[2:])  # a newer downloaded update when usable, else the built-in copy
 elif sys.argv[1:] == ['--audiolab-native-smoke']:
     from native_smoke import main
 

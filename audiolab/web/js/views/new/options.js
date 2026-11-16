@@ -1,25 +1,22 @@
 // New view — what to do: the four tasks (Save/Convert · Enhance · Split ·
-// Check) and the options of the chosen task. Rarely used choices and fine-tuning
-// sit under each task's "More options"; whatever is set there is sent.
+// Check) and the options of the chosen task. Rarely used choices, the name and cover
+// tools and fine-tuning sit under each task's "More options"; whatever is set there is sent.
+// Every option reads like a sleeve's credits: its label left, its control right.
 import { h, icon, clear } from '../../dom.js';
-import { store, aiAvailable, isShown, setShown, formatInfo } from '../../store.js';
+import { store, aiAvailable, isShown, setShown, formatInfo, ENHANCE_PRESETS } from '../../store.js';
 import { segmented, chips, switchControl, autoRange, toast, callout } from '../../ui.js';
-import { go, settingsPath } from '../../router.js';
+import { settingsPath } from '../../router.js';
 import { state, refs, redraw, definePart, isFileLike, isLinkSource, appliedAdvanced, TASKS, LIGHT_KEYS, RECIPE_LABELS, PROCESSING_LABELS } from './state.js';
-import { tracksBlock } from './tracks.js';
-import { hasOwnCover } from './cover.js';
+import { tracksBlock, tracksUpFront } from './tracks.js';
+import { hasOwnCover, takesCover, coverTools } from './cover.js';
+import { nameTools } from './names.js';
 import { TASK_ICON } from '../job/index.js';
 import { eqField, formatEq, parseEq } from '../../eq.js';
 import { sectionEqField, sectionRows, checkSections } from '../../section-eq.js';
 
 // Destination presets: what people own, not codec names (the format itself is the
-// chip's second line and its (i) card — all from /api/health).
-const PRESETS = [
-  ['mp3_320', 'Small files, plays anywhere'],
-  ['wav16', 'USB stick, TV & car'],
-  ['alac16', 'iPhone & Apple Music'],
-  ['flac24', 'Archive'],
-];
+// chip's second line and its (i) card — all from /api/health). Shared with Settings.
+const PRESETS = ENHANCE_PRESETS;
 
 // Rarely used choices: under "More options" (unless already picked).
 const RARE_DOWNLOAD = new Set(['opus']);
@@ -30,18 +27,19 @@ definePart('tiles', renderTiles);
 definePart('options', renderOptions);
 
 // ---------------------------------------------------------------------------
-// Tasks
+// Tasks: a radio group (one Tab stop, arrow keys move and pick). A task that needs the
+// AI add-on is a plain link to Settings → AI until it is installed.
 // ---------------------------------------------------------------------------
 /** Why a task can't be picked right now ({ reason, action? }), or null. */
 export function taskBlock(key) {
   const src = state.source;
   if (key === 'separate' && !aiAvailable()) {
     if (store.health?.ai?.install_supported === false) {
-      return { reason: store.health.ai.reason || 'AI is unavailable in this build', action: 'ai' };
+      return { reason: store.health.ai.reason || 'AI is unavailable in this build' };
     }
     return store.health?.ai?.installing
       ? { reason: 'The AI add-on is installing…', action: 'ai' }
-      : { reason: 'Needs the free AI add-on — tap to set up', action: 'ai' };
+      : { reason: 'Needs the free AI add-on', action: 'ai' };
   }
   if (key === 'analyze' && src?.kind === 'playlist') return { reason: 'Pick a single video to check it' };
   return null;
@@ -56,47 +54,73 @@ function taskText(t) {
   return { title: t.title, desc: t.desc };
 }
 
+let keyedTiles = null; // the tile group that has its arrow-key handler
+
 // Four entries under a rule: the task's icon and name, one line; the picked one in the accent.
 function renderTiles() {
-  const el = clear(refs.tiles);
-  if (taskBlock(state.task) && !taskBlock(state.task).action) state.task = 'download';
+  const el = refs.tiles;
+  if (keyedTiles !== el) { el.addEventListener('keydown', onTileKey); keyedTiles = el; }
+  const focused = el.contains(document.activeElement) ? document.activeElement.dataset?.task : null;
+  clear(el);
+  // A task that can't be picked now doesn't stay picked: files start on Enhance, links on Save.
+  if (taskBlock(state.task)) state.task = isFileLike() && !taskBlock('enhance') ? 'enhance' : 'download';
   for (const t of TASKS) {
     const block = taskBlock(t.key);
     const { title, desc } = taskText(t);
-    const selected = state.task === t.key;
+    const head = h('span', { class: 'tile-title' }, icon(TASK_ICON[t.key], 17, 'tile-ico'), title);
+    if (block?.action === 'ai') {
+      el.append(h('a', { class: 'tile is-blocked', href: settingsPath('ai'), dataset: { task: t.key } },
+        head, h('span', { class: 'tile-desc is-reason' }, block.reason),
+        h('span', { class: 'tile-link' }, store.health?.ai?.installing ? 'See the progress…' : 'Set up AI…')));
+      continue;
+    }
+    const selected = state.task === t.key && !block;
     const tile = h('button', {
-      type: 'button', class: ['tile', block && 'is-blocked'],
-      'aria-pressed': String(selected && !block), 'aria-disabled': block ? 'true' : null,
+      type: 'button', role: 'radio', class: ['tile', block && 'is-blocked'],
+      'aria-checked': String(selected), 'aria-disabled': block ? 'true' : null, tabindex: selected ? '0' : '-1',
       dataset: { task: t.key },
     },
-    h('span', { class: 'tile-title' }, icon(TASK_ICON[t.key], 17, 'tile-ico'), title),
+    head,
     h('span', { class: ['tile-desc', block && 'is-reason'] }, block ? block.reason : desc));
-    tile.addEventListener('click', () => {
-      if (block) {
-        if (block.action === 'ai') go(settingsPath('ai'), { focus: false });
-        else toast(block.reason);
-        return;
-      }
-      if (state.task === t.key) return;
-      state.task = t.key;
-      redraw('tiles', 'options', 'action');
-    });
+    tile.addEventListener('click', () => pickTask(t.key));
     el.append(tile);
   }
+  if (focused) el.querySelector(`[data-task="${focused}"]`)?.focus({ preventScroll: true });
+}
+
+function pickTask(key) {
+  const block = taskBlock(key);
+  if (block) { toast(block.reason); return; }
+  state.taskPicked = true;
+  if (state.task === key) return;
+  state.task = key;
+  redraw('tiles', 'options', 'action');
+}
+
+/** Arrow keys, Home and End move between the tasks that can be picked, and pick them (as radio buttons do). */
+function onTileKey(e) {
+  const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+  const radios = [...refs.tiles.querySelectorAll('[role="radio"]:not([aria-disabled="true"])')];
+  const i = radios.indexOf(document.activeElement);
+  if (i < 0 || !(step || e.key === 'Home' || e.key === 'End')) return;
+  e.preventDefault();
+  const next = step ? radios[(i + step + radios.length) % radios.length] : e.key === 'Home' ? radios[0] : radios.at(-1);
+  next.focus();
+  pickTask(next.dataset.task);
 }
 
 // ---------------------------------------------------------------------------
-// Options
+// Options: one label column and one control column
 // ---------------------------------------------------------------------------
+/** One option: its label, then its control(s). `text`: the first control is a line of text, not a pill row. */
 function optionBlock(label, ...content) {
   return h('div', { class: 'opt' }, h('div', { class: 'opt-label' }, label), ...content);
 }
 
-function advRows(rows) {
-  return h('div', { class: 'adv-rows' }, rows.map(([label, help, control, cls]) =>
-    h('div', { class: ['adv-row', cls] },
-      h('div', { class: 'adv-text' }, h('div', { class: 'adv-label' }, label), h('div', { class: 'adv-help' }, help)),
-      h('div', { class: 'adv-control' }, control))));
+function textOption(label, ...content) {
+  const el = optionBlock(label, ...content);
+  el.classList.add('opt-text');
+  return el;
 }
 
 export function downloadChoices() {
@@ -146,6 +170,21 @@ function coverRow(o, chosen) {
   return h('label', { class: 'switch-row', for: sw.id }, sw, h('span', { class: 'switch-row-label' }, 'Embed cover art'), help);
 }
 
+/**
+ * Under More options, for one link or file: its name (file names and tags) and its cover art —
+ * `embed` (the Embed cover art switch, Save and Enhance), an own picture, and the separate image.
+ */
+function sourceOptions(task, embed = null) {
+  const src = state.source;
+  if (!takesCover(src)) return embed ? [textOption('Cover art', embed)] : [];
+  const refresh = () => { syncMore?.(); redraw('sleeve'); };
+  const cover = [embed, ...coverTools(src, task, { onChange: refresh })].filter(Boolean);
+  return [
+    textOption('Name', nameTools(src)),
+    cover.length ? textOption('Cover art', ...cover) : null,
+  ];
+}
+
 /** Settings → Defaults: what the options start from, and what "Reset" returns to. */
 function defaults() {
   const s = store.settings || {};
@@ -179,9 +218,17 @@ function splitChoice({ label, moreLabel, value, options, rare, onChange }) {
   return { main, more, moreKeys: new Set(extra.map((o) => o.value)) };
 }
 
+/** Tracks beside the other choices when they matter (tracks.js tracksUpFront), else under More options. */
+function placeTracks() {
+  const tb = tracksBlock();
+  if (tb) tb.classList.add('opt-text');
+  return tb && tracksUpFront() ? { front: tb, folded: null } : { front: null, folded: tb };
+}
+
 // --- More options ----------------------------------------------------------------
 // Open or closed is remembered per task (at first: Settings → "Show all options by
-// default"). Folded, the head says how many differ from their defaults, with Reset.
+// default"). Folded, the head says how many differ from their defaults, with Reset. Reset is for the
+// processing options only: the name and the cover picture stay as the page shows them (and as they are sent).
 let syncMore = null; // refreshes the folded head after a change outside the fold
 
 function moreOptions(task, body, { changed, reset }) {
@@ -204,7 +251,7 @@ function moreOptions(task, body, { changed, reset }) {
   toggle.addEventListener('click', () => { setShown(key, panel.hidden); sync(); });
   resetBtn.addEventListener('click', () => {
     reset();
-    redraw('options', 'action');
+    redraw('source', 'options', 'action');
     refs.options.querySelector('.more .more-toggle')?.focus();
   });
   syncMore = sync;
@@ -213,6 +260,8 @@ function moreOptions(task, body, { changed, reset }) {
 }
 
 function renderOptions() {
+  // Don't rebuild under someone typing a name (health and settings events redraw).
+  if (state.source?.editing && document.activeElement?.closest?.('.name-edit') && refs.options.contains(document.activeElement)) return;
   // Rebuilt under someone typing (the tracklist, on a health or settings event)? Keep their place.
   const ta = refs.options.contains(document.activeElement) && document.activeElement.tagName === 'TEXTAREA' ? document.activeElement : null;
   const place = ta && [ta.id, ta.selectionStart, ta.selectionEnd, ta.scrollTop];
@@ -246,12 +295,13 @@ function renderDownloadOptions(el) {
     onChange: (v) => { d.format = v; syncCover?.(); redraw('action'); },
   });
   const formatChanged = () => fmt.moreKeys.has(d.format) && d.format !== dflt.download_format;
+  const tracks = placeTracks();
   el.append(optionBlock(title, fmt.main, sourceNote()));
-  const tb = tracksBlock();
-  if (tb) el.append(tb);
+  if (tracks.front) el.append(tracks.front);
   el.append(moreOptions('download', [
+    tracks.folded,
     fmt.more ? optionBlock('Other formats', fmt.more) : null,
-    coverRow(d, () => choices.filter((f) => f.key === d.format)),
+    ...sourceOptions('download', coverRow(d, () => choices.filter((f) => f.key === d.format))),
   ], {
     changed: () => Number(formatChanged()) + Number(d.embed_cover !== dflt.embed_cover),
     reset: () => {
@@ -317,7 +367,7 @@ function renderEnhanceOptions(el) {
   const all = store.health?.formats?.enhance || [];
   const fmts = enhanceFormatGroups();
   const formatsChanged = () => [...fmts.moreKeys].filter((k) => state.enhance.formats.has(k) && !dflt.enhance_formats.includes(k));
-  const tb = tracksBlock();
+  const tracks = placeTracks();
   el.append(
     optionBlock('Type of audio',
       segmented({ label: 'Type of audio', value: e.recipe, options: recipeOptions(), onChange: (v) => { e.recipe = v; redraw('sleeve'); } })),
@@ -344,10 +394,11 @@ function renderEnhanceOptions(el) {
       })),
     optionBlock('Save for', all.length ? fmts.main : loadingNote(), sourceNote()),
   );
-  if (tb) el.append(tb);
+  if (tracks.front) el.append(tracks.front);
   el.append(moreOptions('enhance', [
+    tracks.folded,
     fmts.more ? optionBlock('More formats', fmts.more) : null,
-    coverRow(e, () => all.filter((f) => e.formats.has(f.key))),
+    ...sourceOptions('enhance', coverRow(e, () => all.filter((f) => e.formats.has(f.key)))),
     fineTuning(),
   ], {
     changed: () => formatsChanged().length + Number(e.embed_cover !== dflt.embed_cover) + fineTuningChanges(),
@@ -362,6 +413,11 @@ function renderEnhanceOptions(el) {
   }));
 }
 
+/**
+ * Fine-tuning: each setting is an option like the others (label left, control and its help right).
+ * Choices are pills with the default first; on/off is a switch; a number is Auto or Custom with a slider;
+ * the EQs are editors.
+ */
 function fineTuning() {
   const a = state.enhance.advanced;
   const set = (k) => (v) => {
@@ -369,52 +425,52 @@ function fineTuning() {
     if (v == null || v === 'auto') delete a[k]; else a[k] = v;
     if (fineTuningChanges() !== before) redraw('sleeve'); // it counts them
   };
-  const tri = (k, label, opts) => segmented({
-    label, size: 'sm', value: a[k] ?? 'auto',
-    options: opts.map(([value, label]) => ({ value, label })), onChange: set(k),
+  const pills = (k, label, opts, dflt = 'auto') => segmented({
+    label, size: 'sm', value: opts.some(([v]) => String(v) === String(a[k])) ? a[k] : dflt,
+    options: opts.map(([value, text]) => ({ value, label: text })),
+    onChange: (v) => set(k)(String(v) === String(dflt) ? null : v),
   });
+  const number = (k, label, range) => autoRange({ ...range, label, value: a[k] ?? null, onChange: set(k) });
   const light = state.enhance.quality === 'light';
   const rows = [
     ['target_lufs', 'Loudness target', 'How loud the result is. Streaming apps play near −14 LUFS; DJ sets sit around −10 to −12.',
-      autoRange({ min: -24, max: -6, step: 0.5, value: a.target_lufs ?? null, unit: 'LUFS', fallback: -14, onChange: set('target_lufs') })],
+      number('target_lufs', 'Loudness target', { min: -24, max: -6, step: 0.5, unit: 'LUFS', fallback: -14 })],
     ['tp_ceiling_db', 'Peak ceiling', 'Highest allowed peak (true peak). Lower is safer for phones and Bluetooth.',
-      autoRange({ min: -3, max: -0.1, step: 0.1, value: a.tp_ceiling_db ?? null, unit: 'dBTP', fallback: -1, onChange: set('tp_ceiling_db') })],
+      number('tp_ceiling_db', 'Peak ceiling', { min: -3, max: -0.1, step: 0.1, unit: 'dBTP', fallback: -1 })],
     ['bass_db', 'Bass boost', 'Extra low end. 0 keeps the bass as it is.',
-      autoRange({ min: 0, max: 6, step: 0.5, value: a.bass_db ?? null, unit: 'dB', fallback: 1.5, onChange: set('bass_db') })],
+      number('bass_db', 'Bass boost', { min: 0, max: 6, step: 0.5, unit: 'dB', fallback: 1.5 })],
     ['harmonics', 'Bass harmonics', 'Adds harmonics so deep bass is easier to hear on small speakers. Off by default.',
       switchControl({ label: 'Bass harmonics', checked: a.harmonics === 'on', onChange: (on) => set('harmonics')(on ? 'on' : null) })],
     ['adaptive_lowmid', 'Adaptive low-mids', 'Tames brief buildup in the low-mids while keeping steady warmth. Strong allows a deeper cut. Skipped when AI shapes the stems.',
-      tri('adaptive_lowmid', 'Adaptive low-mids', [['auto', 'Auto'], ['strong', 'Strong'], ['off', 'Off']])],
-    ['glue', 'Glue compression', 'Gently evens out loud and quiet moments in a mix.', tri('glue', 'Glue compression', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']])],
+      pills('adaptive_lowmid', 'Adaptive low-mids', [['auto', 'Auto'], ['strong', 'Strong'], ['off', 'Off']])],
+    ['glue', 'Glue compression', 'Gently evens out loud and quiet moments in a mix.',
+      pills('glue', 'Glue compression', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']])],
     ['hf_restore', 'Brighten muffled highs', 'Only for files whose highs are cut off, like old MP3s. Adds new high harmonics; it can’t bring back lost detail.',
-      tri('hf_restore', 'Brighten muffled highs', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']])],
-    ['denoise', 'Noise reduction', 'Off by default. Choose Light or Strong only if you hear steady hiss or hum.',
-      segmented({
-        label: 'Noise reduction', size: 'sm', value: ['light', 'strong'].includes(a.denoise) ? a.denoise : 'off',
-        options: [['off', 'Off'], ['light', 'Light'], ['strong', 'Strong']].map(([value, label]) => ({ value, label })),
-        onChange: (v) => set('denoise')(v === 'off' ? null : v),
-      })],
-    ['mono_bass', 'Mono bass', 'Makes deep bass mono, as club systems expect.', tri('mono_bass', 'Mono bass', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']])],
+      pills('hf_restore', 'Brighten muffled highs', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']])],
+    ['denoise', 'Noise reduction', 'Choose Light or Strong only if you hear steady hiss or hum.',
+      pills('denoise', 'Noise reduction', [['off', 'Off'], ['light', 'Light'], ['strong', 'Strong']], 'off')],
+    ['mono_bass', 'Mono bass', 'Makes deep bass mono, as club systems expect.',
+      pills('mono_bass', 'Mono bass', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']])],
     ['deess', 'Sharp S sounds', 'Softens S sounds and cymbal hits only where they jump out. Strong suits harsh recordings.',
-      tri('deess', 'Sharp S sounds', [['auto', 'Auto'], ['strong', 'Strong'], ['off', 'Off']])],
+      pills('deess', 'Sharp S sounds', [['auto', 'Auto'], ['strong', 'Strong'], ['off', 'Off']])],
     ['sample_rate', 'Sample rate', '48 kHz suits TVs, phones and most players; 44.1 kHz is for CDs. Higher rates don’t add detail.',
-      segmented({
-        label: 'Sample rate', size: 'sm', value: a.sample_rate ?? 'auto',
-        options: [['auto', 'Auto'], [44100, '44.1 kHz'], [48000, '48 kHz'], [96000, '96 kHz']].map(([value, label]) => ({ value, label })),
-        onChange: set('sample_rate'),
-      })],
+      pills('sample_rate', 'Sample rate', [['auto', 'Auto'], [44100, '44.1 kHz'], [48000, '48 kHz'], [96000, '96 kHz']])],
     ['eq', 'Custom EQ', 'For experts. Up to 8 bands, one per line, like 160 Hz −3.3 dB Q 2.9. Applied before compression, loudness and peak control.',
-      eqControl(), 'adv-row-stack'],
+      eqControl()],
     ['section_eq', 'Section EQ', 'For experts. EQ for parts of the recording, like a harsh stretch of a long set. Each part fades in and out (5 seconds unless you set a fade). Applied after Custom EQ.',
-      sectionControl(), 'adv-row-stack'],
+      sectionControl()],
   ];
-  const el = optionBlock('Fine-tuning',
-    h('p', { class: 'muted small adv-note' }, light
+  const shown = light ? rows.filter(([key]) => LIGHT_KEYS.includes(key)) : rows;
+  return h('div', { class: 'fine-tuning' },
+    textOption('Fine-tuning', h('p', { class: 'muted small' }, light
       ? 'Only these settings apply when you choose Volume only.'
-      : 'Keep the defaults unless you know you want something else.'),
-    advRows((light ? rows.filter(([key]) => LIGHT_KEYS.includes(key)) : rows).map(([, ...rest]) => rest)));
-  el.classList.add('fine-tuning');
-  return el;
+      : 'Keep the defaults unless you know you want something else.')),
+    shown.map(([key, label, help, control]) => {
+      const row = optionBlock(label, control, h('p', { class: 'muted small tune-help' }, help));
+      row.classList.add('tune');
+      row.dataset.key = key;
+      return row;
+    }));
 }
 
 /**
@@ -533,14 +589,14 @@ function renderSeparateOptions(el) {
   }
   el.append(moreOptions('separate', [
     fmt.more ? optionBlock('Other file types', fmt.more) : null,
-    models.length ? advRows([
-      ['AI model', 'The fine-tuned model is cleaner but about four times slower.',
-        segmented({
-          label: 'AI model', size: 'sm', value: s.model,
-          options: [{ value: 'auto', label: 'Automatic' }, ...models.map((m) => ({ value: m.key, label: m.label }))],
-          onChange: (v) => { s.model = v; },
-        })],
-    ]) : null,
+    models.length ? optionBlock('AI model',
+      segmented({
+        label: 'AI model', size: 'sm', value: s.model,
+        options: [{ value: 'auto', label: 'Automatic' }, ...models.map((m) => ({ value: m.key, label: m.label }))],
+        onChange: (v) => { s.model = v; syncMore?.(); },
+      }),
+      h('p', { class: 'muted small tune-help' }, 'The fine-tuned model is cleaner but about four times slower.')) : null,
+    ...sourceOptions('separate'),
   ], {
     changed: () => Number(formatChanged()) + Number(s.model !== 'auto'),
     reset: () => {

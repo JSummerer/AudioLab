@@ -71,7 +71,8 @@ def main() -> int:
                 health = json.load(response)
             assert health['packaged'] and health['ffmpeg']['ok']
             assert health['ffmpeg']['source'] == 'bundled'
-            assert health['downloader']['ok'] and not health['downloader']['update_supported']
+            assert health['downloader']['ok'] and health['downloader']['update_supported']
+            assert health['downloader']['source'] == 'bundled' and not health['downloader']['fallback']
             assert health['ai']['available'] is False
             assert health['ai']['install_supported'] is True and health['ai']['managed']
             viewport = window.evaluate_js(
@@ -90,7 +91,11 @@ def main() -> int:
                 "!!document.querySelector('#enableAi')",
                 'The native window did not render the optional AI download action.',
             )
-            assert window.evaluate_js("!document.querySelector('#updateDownloader')")
+            _wait_for(  # the app-owned downloader update; nothing to go back from on a fresh install
+                window,
+                "!!document.querySelector('#updateDownloader') && !document.querySelector('#resetDownloader')",
+                'The native window did not render the downloader update action.',
+            )
             result.update(
                 rendered=True,
                 backend=window.gui.renderer,

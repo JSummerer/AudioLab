@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import test from 'node:test';
 import { fmtDuration } from '../../audiolab/web/js/dom.js';
 import { PROCESSING_LABELS, LIGHT_KEYS } from '../../audiolab/web/js/views/new/state.js';
+import { ENHANCE_PRESETS } from '../../audiolab/web/js/store.js';
 import { parseEq } from '../../audiolab/web/js/eq.js';
 import { checkSections } from '../../audiolab/web/js/section-eq.js';
 
@@ -15,9 +16,17 @@ class Element {
     Object.assign(this, attrs);
     this.children = children.flat(Infinity).filter((c) => c != null);
   }
-  addEventListener() {}
+  append(...kids) { this.children.push(...kids.flat(Infinity).filter((c) => c != null)); }
+  addEventListener(type, fn) { ((this.listeners ||= {})[type] ||= []).push(fn); }
+  fire(type) { for (const fn of this.listeners?.[type] || []) fn({ preventDefault() {} }); }
   setAttribute(key, value) { this[key] = value; }
+  get classList() {
+    const add = (c) => { this.class = [this.class, c].flat().filter(Boolean); };
+    return { add, toggle: (c, on) => { if (on) add(c); } };
+  }
 }
+const findIn = (node, pred) => (node instanceof Element
+  ? (pred(node) ? node : node.children.map((c) => findIn(c, pred)).find(Boolean)) : undefined);
 function text(node) {
   if (Array.isArray(node)) return node.map(text).join(' ');
   return node instanceof Element ? node.textContent ?? node.children.map(text).join(' ') : String(node ?? '');
@@ -38,9 +47,13 @@ function setup({ crlf = false } = {}) {
     download: [mp3, wav, original], enhance: [{ ...mp3, key: 'mp3_320' }, { ...wav, key: 'wav16' }],
   } } };
   const context = vm.createContext({
-    state, store, redrawn, PROCESSING_LABELS,
-    refs: { input: { value: '' } }, AbortController, setTimeout, fmtDuration,
-    focusStart() {},
+    state, store, redrawn, PROCESSING_LABELS, ENHANCE_PRESETS,
+    refs: { input: { value: '' }, options: { querySelector: () => null } }, AbortController, URL, setTimeout, fmtDuration,
+    focusStart() {}, autoTask() {},
+    segmented: (attrs) => new Element('div', attrs), isShown: () => false, setShown() {}, formatInfo: () => null,
+    clear: (el) => { el.children = []; return el; },
+    append: (el, kids) => { el.children.push(...kids.flat(Infinity).filter((c) => c != null)); return el; },
+    isLinkSource: () => state.source?.kind === 'url',
     api: async (path, { json }) => { requests.push({ path, json }); },
     h: (tag, attrs, ...children) => new Element(tag, attrs || {}, children),
     icon: () => '', fmtBytes: (size) => `${size} B`,
@@ -65,13 +78,47 @@ function setup({ crlf = false } = {}) {
 test('the separate image is off by default and does not control embedding', () => {
   const s = setup();
   assert.deepEqual(JSON.parse(JSON.stringify(s.run('coverOptions(state.source, "download")'))), {});
-  const tools = s.run('coverTools(state.source)');
-  assert.match(text(tools), /Also save a separate image/);
-  assert.match(text(tools), /artwork inside supported audio files/);
-  assert.equal(tools[0].children[1].children[0].checked, false);
-  tools[0].children[1].children[0].onChange(true);
+  const [own, separate] = s.run('coverTools(state.source, "download")');
+  assert.match(text(own), /Use my own image/);
+  assert.match(text(separate), /Also save a separate image/);
+  const sw = separate.children[0];
+  assert.equal(sw.checked, false);
+  sw.onChange(true);
   assert.deepEqual(JSON.parse(JSON.stringify(s.run('coverOptions(state.source, "download")'))), { save_cover: true });
   assert.equal(s.state.download.embed_cover, true);
+  assert.equal(s.run('coverTools(state.source, "separate")')[0], null, 'Split takes no picture of your own');
+});
+
+test('Reset under More options resets the options, never the name the page shows and sends', () => {
+  const s = setup();
+  // "Enhance it"/"Change and start again" from a job that was given the title "Concert".
+  s.run(`useJobSource({ id: 'j1', task: 'download', title: 'Original', status: 'done',
+    source: { kind: 'file', name: 'Original.wav' }, options: { format: 'mp3', meta: { title: 'Concert' } } }, 'download')`);
+  assert.deepEqual(JSON.parse(JSON.stringify(s.run('metaPayload(state.source)'))), { title: 'Concert' });
+  s.state.download.embed_cover = false; // one option changed
+  const el = s.run('const el = h("div"); renderDownloadOptions(el); el');
+  const reset = findIn(el, (n) => n.tag === 'button' && n.children.includes('Reset'));
+  reset.fire('click');
+  assert.equal(s.state.download.embed_cover, true, 'the option is back to its default');
+  assert.equal(s.run('shownName(state.source).title'), 'Concert');
+  assert.deepEqual(JSON.parse(JSON.stringify(s.run('metaPayload(state.source)'))), { title: 'Concert' }, 'still sent');
+});
+
+test('a link from another page only fills the link field: nothing is looked up before Load', () => {
+  const s = setup();
+  s.run('offerLink("https://example.com/watch?v=stub")');
+  assert.deepEqual(s.requests, [], 'no /api/probe request');
+  assert.equal(s.run('refs.input.value'), 'https://example.com/watch?v=stub');
+  assert.equal(s.state.source.kind, 'offered');
+  s.run('pasteLink("https://example.com/watch?v=pasted")'); // a paste into the waiting field
+  assert.deepEqual(s.requests, [], 'a paste does not look it up either');
+  assert.equal(s.state.source.url, 'https://example.com/watch?v=pasted');
+  s.run('loadUrl(refs.input.value)'); // what Load does
+  assert.deepEqual(s.requests.map((r) => r.path), ['/api/probe'], 'Load looks it up');
+  // main.js hands a deep link to offerLink, never to loadUrl.
+  const main = readFileSync(new URL('../../audiolab/web/js/main.js', import.meta.url), 'utf8');
+  assert.match(main, /offerLink\(deepLink\.link\)/);
+  assert.doesNotMatch(main, /loadUrl\(deepLink/);
 });
 
 test('a plain source summary requests available art without claiming that it has a picture', () => {

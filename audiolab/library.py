@@ -26,6 +26,7 @@ import json
 import math
 import os
 import re
+import shutil
 import stat
 import tempfile
 import threading
@@ -41,7 +42,7 @@ from .errors import AudioLabError
 from .media.export import FORMATS
 from .settings import SETTINGS
 from .system import replace_file
-from .util import PLAYABLE_EXT, link_or_copy, media_type, sanitize_filename
+from .util import FOLDER_JUNK, PLAYABLE_EXT, link_or_copy, media_type, sanitize_filename
 
 ENTRY_ID_RE = re.compile(r'^j_\d{8}_\d{6}_[0-9a-f]{6}$')  # an entry is named after its job
 ORIGINAL = 'original'  # file id of the kept original
@@ -50,8 +51,6 @@ ORIGINAL_NAME_RE = re.compile(r'^[0-9a-f]{16}\.[a-z0-9]{1,5}$')
 VERSION_KIND = {'download': 'saved', 'enhance': 'enhanced', 'separate': 'stem', 'import': 'imported'}
 KEEPS_ORIGINAL = ('enhance',)  # nothing compares stems with the original
 TIMELINE_TASKS = ('enhance', 'import')  # entries that keep the analysis `tone_timeline`
-# What file managers leave in a folder: one holding only these counts as empty.
-FOLDER_JUNK = frozenset(('.DS_Store', 'Thumbs.db', 'desktop.ini', '.directory'))
 
 _lock = threading.Lock()  # entry files and originals: workers write, routes read and remove
 
@@ -60,6 +59,41 @@ def originals_dir() -> Path:
     p = SETTINGS.library_dir / 'originals'
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+STAGING_PREFIX = '.original-'  # record()'s temporary folder in originals/; a kept original never starts with '.'
+
+
+def _linkable(path: Path, kept: Path) -> bool:
+    """Whether the original about to be kept may be a hard link to `path`: the kept original itself, or a
+    job's input that has no other name. A second name may be the user's own file (a result or an imported
+    file used as the source is linked into the job), and editing that file in place would silently change
+    the kept original, so then it is copied. Conservative: a re-run whose input is linked to an earlier
+    job's upload is copied too, only when nothing is kept for it yet."""
+    if path == kept:
+        return True
+    try:
+        return os.stat(path).st_nlink <= 1
+    except OSError:
+        return False
+
+
+def sweep_staging(min_age_s: float) -> None:
+    """Remove the temporary folders record() leaves in originals/ when the app is killed while publishing
+    (otherwise they hold a copy of a recording nobody sees). Called at start under the instance lock;
+    only real folders with that prefix and older than `min_age_s`, never a kept original."""
+    now = time.time()
+    try:
+        candidates = [p for p in originals_dir().iterdir() if p.name.startswith(STAGING_PREFIX)]
+    except OSError:
+        return
+    for p in candidates:
+        try:
+            if p.is_symlink() or not p.is_dir() or now - p.lstat().st_mtime < min_age_s:
+                continue
+        except OSError:
+            continue
+        shutil.rmtree(p, ignore_errors=True)
 
 
 def source_key(
@@ -192,15 +226,15 @@ def record(job, check_cancel: Callable[[], None] | None = None, begin_commit: Ca
         if item:
             # Always prepare our own link/copy: a concurrent Storage action may remove an existing
             # original before publication. Only this temporary directory belongs to this attempt.
-            folder = cleanup.enter_context(tempfile.TemporaryDirectory(prefix='.original-', dir=originals_dir()))
+            folder = cleanup.enter_context(tempfile.TemporaryDirectory(prefix=STAGING_PREFIX, dir=originals_dir()))
             dst = originals_dir() / item['file']
             candidate = dst if _size(dst) == item['size_bytes'] else original
             try:
-                staged = link_or_copy(candidate, Path(folder) / item['file'], check)
+                staged = link_or_copy(candidate, Path(folder) / item['file'], check, link=_linkable(candidate, dst))
             except FileNotFoundError:
                 if candidate == original:
                     raise
-                staged = link_or_copy(original, Path(folder) / item['file'], check)
+                staged = link_or_copy(original, Path(folder) / item['file'], check, link=_linkable(original, dst))
         check()
         with _lock:  # Library -> manager is the only nested lock order
             if begin_commit:
@@ -408,6 +442,19 @@ def file_path(entry: dict[str, Any], file_id: str) -> Path | None:
         if f.get('id') == file_id:
             return _resolve(entry, f.get('path'))
     return None
+
+
+def known_paths() -> list[Path]:
+    """Every output folder and result file the Library knows (they may be gone): places a cleanup inside
+    the data folder must never touch, whatever the output folder is set to now."""
+    paths = []
+    for entry in _all():
+        try:
+            found = [folder(entry), *(_resolve(entry, f.get('path')) for f in entry.get('files') or [])]
+        except (KeyError, TypeError, AttributeError):  # a damaged entry: its paths are unknown
+            continue
+        paths += [p for p in found if p is not None]
+    return paths
 
 
 def folder(entry: dict[str, Any]) -> Path | None:

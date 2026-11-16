@@ -7,7 +7,7 @@ compatible add-on for Split and AI stems Enhance; testers install neither Python
 The **Build macOS tester app** workflow in GitHub Actions is the maintained release path. Start it
 manually from the Actions tab; it creates build artifacts without publishing a release.
 Temporary app/source artifacts expire after one day; validation logs expire after seven days.
-Download and verify them before publishing the beta's durable assets in GitHub Releases.
+Download and verify them before publishing the release's durable assets in GitHub Releases.
 
 For a local build, use an Apple silicon Mac with Xcode Command Line Tools,
 [uv](https://docs.astral.sh/uv/getting-started/installation/) and the exact Python Build Standalone
@@ -22,7 +22,11 @@ The build uses `.work/macos-package/` for its environment, downloads, media comp
 cache and release products. Override `AUDIOLAB_PACKAGE_WORK_DIR` for a separate build. Set
 `AUDIOLAB_BUILD_PYTHON` to select the pinned builder interpreter. Nothing is installed globally.
 Use a fresh work folder when rebuilding a prepared release. Requirements are pinned in
-`requirements.lock`; the application source comes from this checkout.
+`requirements.lock`; the application source comes from this checkout. Refresh `yt-dlp` there for every
+release: the built-in downloader is what every user starts with and falls back to, and sites change often. It has no
+`sources.json` row, so this does not touch the AI helper's pin. The spec also freezes standard-library
+modules nothing in the app imports yet (`DOWNLOADER_STDLIB`), so a downloaded downloader update that
+starts using one still runs.
 
 CI seeds `media/downloads/` from the checksum-pinned `v2.4.0b2` core source companion to avoid
 downloading unchanged sources from every upstream host again. `seed_sources.py` copies only regular
@@ -64,7 +68,9 @@ The HTTP check saves an Adaptive result, checks that the Library retains its red
 job removal, auditions a five-second excerpt with changed settings, and applies those settings to
 the full recording. It checks the two bounded PCM streams, new exports in the same Library group,
 and the kept original's hash. The check removes external Python from PATH and uses isolated
-data/output folders and localhost requests.
+data/output folders and localhost requests. It also runs the frozen downloader mode with offline
+stand-in updates in the data folder: a newer one runs, a broken or an older one falls back to the
+built-in copy.
 The AI check installs the real archive through the production manager with a localhost transport
 fixture, then exercises frozen Split, AI stems Enhance, removal and reinstallation. The independent
 helper check runs for both reused and new archives, exercises both offline models using the
@@ -75,7 +81,8 @@ local verification does not steal focus or write to a user's WebKit profile.
 
 Before uploading a binary, require the ordinary repository checks, build checks and actual artifact
 smoke results. Upload the DMG, new core source companion, AI catalog and checksums to the GitHub
-prerelease. A helper rebuild additionally includes its new runtime and matching source companion;
+release (a normal release for X.Y.Z; the in-app check reads the version, not GitHub's prerelease flag:
+a final build is offered only final versions, a beta-numbered build also betas). A helper rebuild additionally includes its new runtime and matching source companion;
 a reuse release keeps linking to the original published helper assets. Do not attach build folders, logs containing personal paths, local audit reports or any
 real recordings. Native CI is regression evidence; it does not qualify every macOS version or
 the manual Gatekeeper approval interaction.

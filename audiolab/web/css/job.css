@@ -64,6 +64,8 @@
 .files-where { font-size: var(--fs-small); color: var(--ink-2); overflow-wrap: anywhere; }
 .files-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px var(--s-1); margin-left: -8px; }
 .files-actions:empty { display: none; }
+/* A push button first (Show in Finder, or the ZIP): its border lines up with the text, not its label. */
+.files-actions:has(> .btn-key:first-child) { margin-left: 0; }
 
 /* Tracks of a result (split by a tracklist) */
 .tracks-block > summary { display: inline-flex; cursor: pointer; list-style: none; }
@@ -161,8 +163,7 @@
   .job-body .callout-actions { display: grid; }
 }
 
-.journal-block > summary { display: inline-flex; align-items: center; gap: 2px; min-height: 30px; font-size: var(--fs-small); font-weight: 600; color: var(--ink-2); }
-.journal-block > summary:hover { color: var(--ink); }
+/* "Full log" uses the shared disclosure look (components.css). */
 .journal { list-style: none; margin: var(--s-2) 0 0; padding: 0; max-height: 340px; overflow: auto; display: grid; gap: 6px; font-size: var(--fs-small); }
 .journal li { display: grid; grid-template-columns: auto 4.5rem minmax(0, 1fr); gap: 10px; align-items: baseline; }
 .j-time { font: 500 var(--fs-tiny) var(--font-mono); color: var(--ink-3); }

@@ -32,18 +32,29 @@ export function dynamicsWord(lra) {
   return 'Very wide';
 }
 
-/** What was done, in plain lines. Not where the files went ("Saved 2 files to /Users/…"): the files
- * section says that. `skip`: leading lines the page shows elsewhere. */
+// The one convention for server summary lines: a plain sentence, optionally followed by its details
+// in trailing brackets — "Made it louder (+8.2 dB: −25.2 → −17.0 LUFS)."
+const TRAILING_DETAILS = /\s*\([^()]*\)\s*([.!?]?)\s*$/;
+
+/** A summary line without "Show details": its trailing bracket goes, nothing else is changed. */
+export function plainLine(s) {
+  return s.replace(TRAILING_DETAILS, '$1').trim() || s;
+}
+
+/** What was done, in plain lines (the server's own lines with "Show details"). Not where the files went
+ * ("Saved 2 files to /Users/…"): the files section says that. `skip`: leading lines the page shows elsewhere. */
 export function summaryBlock(r, title = 'What we did', { skip = 0 } = {}) {
   const dirs = [r.tracks_dir, r.output_dir].filter(Boolean);
+  const details = showDetails();
   const lines = (r.summary || []).slice(skip)
     .filter((s) => !/^Saved( \d+ files?)? to /.test(s))
-    .map((s) => dirs.reduce((t, d) => t.replace(` — saved to ${d}.`, '.'), s));
+    .map((s) => dirs.reduce((t, d) => t.replace(` — saved to ${d}.`, '.'), s))
+    .map((s) => (details ? s : plainLine(s)));
   if (!lines.length) return null;
   return block(title, h('ul', { class: 'summary' }, lines.map((s) => h('li', null, icon('check', 15), h('span', null, s)))));
 }
 
-/** A section whose title row holds the "Show details" switch (the job page puts it into `.details-slot`). */
+/** A section whose title row holds the "Show details" control (the job page puts it into `.details-slot`). */
 export function detailsBlock(title, ...children) {
   return h('section', { class: 'block' },
     h('div', { class: 'block-head' }, h('h2', { class: 'block-title' }, title), h('span', { class: 'details-slot' })),

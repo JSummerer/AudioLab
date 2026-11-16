@@ -225,7 +225,7 @@ function reductionTimeline(applied, start, end, offset, cue) {
   });
   if (!lanes.length) return null; // Older records have no time series to display.
   const hasHighlights = lanes.some(({ bins }) => bins.length);
-  return h('details', { class: 'cmp-repeat cmp-reductions' },
+  return h('details', { class: 'cmp-repeat cmp-reductions disclosure' },
     h('summary', { class: 'cmp-repeat-summary' }, 'Changes timeline'),
     h('p', { class: 'cmp-reductions-note muted small' },
       hasHighlights ? 'Each mark shows the largest reduction in a time window. Choose a highlight to repeat around its peak.'
@@ -899,7 +899,7 @@ export function comparePlayer(opts) {
   const repeatPoint = (which) => h('button', {
     type: 'button', class: 'btn btn-key btn-sm', onclick: () => markRepeat(which),
   }, `Set ${which}`);
-  const repeatDetails = h('details', { class: 'cmp-repeat' }, repeatSummary,
+  const repeatDetails = h('details', { class: 'cmp-repeat disclosure' }, repeatSummary,
     h('div', { class: 'cmp-repeat-controls' }, repeatPoint('start'), repeatPoint('end'),
       h('label', { class: 'details-toggle', for: `${id}-repeat` }, repeatSwitch, 'Repeat')),
     repeatNote);

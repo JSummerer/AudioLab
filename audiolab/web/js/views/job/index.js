@@ -9,7 +9,7 @@
 import { h, icon, clear, fmtDuration } from '../../dom.js';
 import { api, mediaUrl } from '../../api.js';
 import { store, on, isActive, isFinished, upsertJob, taskLabel, jobsFence, mayInsertJob, showDetails, setShown } from '../../store.js';
-import { meter, statusLed, statusWord, callout, switchControl } from '../../ui.js';
+import { meter, statusLed, statusWord, callout } from '../../ui.js';
 import { back, go } from '../../router.js';
 import { liveView, updateLive, failedView, cancelledView } from './status.js';
 import { doneView, RECIPE_SHORT } from './results.js';
@@ -41,14 +41,20 @@ export const jobView = {
       title: h('h1', { class: 'page-title', id: 'jobTitle', tabindex: '-1' }),
       sub: h('p', { class: 'job-sub-line' }),
       body: h('div', { class: 'job-body' }),
-      details: switchControl({
-        id: 'jobDetails',
-        onChange: (v) => { setShown('details', v); if (page) { page.key = null; render({ anchor: true }); } },
-      }),
+      detailsText: h('span'),
       coverKey: null,
       headKey: null,
     };
-    refs.detailsToggle = h('label', { class: 'details-toggle', for: 'jobDetails' }, refs.details, 'Show details');
+    // "Show details" shows or hides the numbers on this page: a disclosure, not an on/off setting.
+    refs.details = h('button', { type: 'button', class: 'more-toggle job-details', id: 'jobDetails', 'aria-expanded': 'false' },
+      h('span', { class: 'more-mark', 'aria-hidden': 'true' }), refs.detailsText);
+    refs.details.addEventListener('click', () => {
+      setShown('details', !showDetails());
+      syncDetails();
+      if (page) { page.key = null; render({ anchor: true }); }
+    });
+    refs.detailsToggle = refs.details;
+    syncDetails();
     refs.bar = h('div', { class: 'job-bar' },
       h('button', { type: 'button', class: 'btn btn-ghost btn-quiet btn-sm', onclick: () => back() },
         icon('chevron', 16, 'ico-flip'), 'Back'));
@@ -60,7 +66,7 @@ export const jobView = {
   },
 
   show(id) {
-    refs.details.checked = showDetails(); // Settings may have changed the default meanwhile
+    syncDetails(); // Settings may have changed the default meanwhile
     if (page?.id !== id) {
       teardown();
       page = { id, key: null, dataKey: null, seen: false, lookup: 'idle', error: '', ctx: newContext() };
@@ -75,6 +81,12 @@ export const jobView = {
     page = null;
   },
 };
+
+function syncDetails() {
+  const open = showDetails();
+  refs.details.setAttribute('aria-expanded', String(open));
+  refs.detailsText.textContent = open ? 'Hide details' : 'Show details';
+}
 
 /** Cleanups registered by the builders (players, tickers, journal polling). `entry`: the
  * Library entry the compare player was built from, kept while the job's files stay the
@@ -167,11 +179,11 @@ function renderHead(job) {
   clear(refs.sub).append(...parts.flatMap((p, i) => (i ? [h('span', { class: 'job-dot', 'aria-hidden': 'true' }, '·'), p] : [p])));
 }
 
-/** The sleeve's picture: a finished job always has one (its cover, or a quiet square with the
- * task's icon); while running or after a failure only when there is a real cover. */
+/** The sleeve's picture: a job always has one (its cover, or a quiet square with the task's icon),
+ * from the start, so the title doesn't move when the job finishes. Not for a job that isn't there. */
 function renderCover(job) {
   const src = coverUrl(job);
-  const shown = job.status === 'done' || !!src;
+  const shown = !!job.task || !!src;
   refs.head.classList.toggle('has-cover', shown);
   refs.cover.hidden = !shown;
   const key = shown ? `${src || ''}|${job.task}` : null;
@@ -289,6 +301,6 @@ function renderMissing() {
   body.append(callout('info',
     state === 'removed' ? 'This job was removed from the list.' : 'This job isn’t in the list.',
     state === 'removed' ? 'Its files are still in your output folder.'
-      : 'It may have been removed or cleared. Files it made are still in your output folder.',
+      : 'It may have been removed or cleared. Files from a finished job stay in your output folder.',
     ways));
 }

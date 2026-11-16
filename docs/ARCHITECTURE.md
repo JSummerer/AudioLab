@@ -37,20 +37,23 @@ line and the Docker image.
 | `desktop.py` | Starts the app: picks a free port, runs the server, opens the native window (pywebview; default on macOS) or the browser, one instance per data folder, clean quit |
 | `runtime.py` | Source/frozen-runtime boundary: packaged downloader command, private bundled-tool lookup, certificate trust and app-owned cache/temp setup before helpers start; source mode retains its existing environment |
 | `cli.py` | `audiolab [app\|serve\|download\|enhance\|separate\|analyze\|doctor\|update\|install-ai\|shortcut]` |
-| `api/` | FastAPI app (`app.py`: `create_app`, lifespan, error format, static UI), `security.py` (local-mode Host/Origin checks, token, upload cap), `state.py` (per-app runtime state: manager, live-event hub, caches, health), `jobs.py` (probe + job routes, files, ZIP, excerpt PCM), `status.py` (health, settings, storage, diagnostics, maintenance), `events.py` (SSE), `library.py` (Library list and entries, files, PCM chunks for comparing, removal) |
-| `jobs.py` | Job records, FIFO queue, worker threads, cancel/retry, restart recovery, event fan-out, the one bounded `shutdown()` |
-| `library.py` | The Library: one JSON record per finished result (Save, Enhance, Split) in `<data>/library/`, independent of job retention; keeps the acquired original of Enhance jobs for comparing (hard link, or a copy where links are impossible, named by its content's SHA-1; setting `keep_originals`); groups versions of one recording (video id, link, or an upload's content); picks the result an entry is compared with (`compare_file_id`, lossless first); removing an entry keeps output files unless the user opts in to the Trash |
+| `api/` | FastAPI app (`app.py`: `create_app`, lifespan, error format, static UI), `security.py` (local-mode Host/Origin checks, token, upload cap), `state.py` (per-app runtime state: manager, live-event hub, caches, health), `jobs.py` (probe + job routes, files, ZIP, excerpt PCM), `status.py` (health, settings, storage, diagnostics, maintenance: downloader update, update check, AI add-on), `events.py` (SSE), `library.py` (Library list and entries, files, PCM chunks for comparing, removal) |
+| `jobs.py` | Job records, FIFO queue, worker threads, cancel/retry, restart recovery, event fan-out, the one bounded `shutdown()`; a `job.json` is trusted only when its id is its folder's name; at start it removes leftovers untouched for an hour (job folders without `job.json` that hold only what a submission leaves, Library staging folders); retention, when on, runs at start and every 6 hours. Delete, Clear finished, retention and the start-up sweep all keep a job folder that holds the output folder or a file the Library knows, decided by folder identity (device and inode), so two spellings of one folder on a case-insensitive disk count as the same. A job whose task has returned its result is settled as finished even when shutdown stops waiting for the Library step |
+| `outputs.py` | What one job attempt created in the output folder (files as they get their final name, new folders), kept in memory only; a failure or Cancel while the task runs removes exactly that (a folder also when it holds only file-manager leftovers such as `.DS_Store`), never through a link, never a file that changed since, and never after the task has returned its result. A crash or forced quit leaves the attempt's files in place |
+| `library.py` | The Library: one JSON record per finished result (Save, Enhance, Split) in `<data>/library/`, independent of job retention; keeps the acquired original of Enhance jobs for comparing (hard link, or a copy where links are impossible or the source file has another name on disk, e.g. a result or imported file used as the source, so editing that file never changes the kept original; named by its content's SHA-1; setting `keep_originals`); groups versions of one recording (video id, link, or an upload's content); picks the result an entry is compared with (`compare_file_id`, lossless first); removing an entry keeps output files unless the user opts in to the Trash |
 | `context.py` | `Progress` (scoped progress, journal notes, cancellation, child-process registry) and `TaskContext` (stages of one job) |
 | `tasks/` | The four user-facing tasks (`validate`, `stages`, `run`) and `importing.py`, the `import` task behind Library "Add a file" (`import` is a Python keyword, so `tasks/__init__.py` maps task names to modules); `common.py` acquires sources (reusing a kept original for a link when allowed) and publishes outputs; `preview.py` runs bounded Library section previews through the existing Enhance queue |
-| `media/` | `proc.py` (cancellable subprocesses), `ffmpeg.py` (system or bundled ffmpeg, probing incl. embedded tags, `decode_pcm`: 48 kHz chunks on a 1/25 s grid that join like one decode; WebM/Matroska's millisecond timestamps get a seek offset measured once per file), `youtube.py` (yt-dlp + deno, the artist/title rule for links, tracks from chapters/tracklists, self-repair update, browser sign-in), `export.py` (format matrix, the file types that can be added, tags, cover art, sample-accurate track cutting) |
+| `media/` | `proc.py` (cancellable subprocesses), `ffmpeg.py` (system or bundled ffmpeg, probing incl. embedded tags, `decode_pcm`: 48 kHz chunks on a 1/25 s grid that join like one decode; WebM/Matroska's millisecond timestamps get a seek offset measured once per file), `youtube.py` (yt-dlp + deno, the artist/title rule for links, tracks from chapters/tracklists, downloader update and the source install's self-repair, browser sign-in), `export.py` (format matrix, the file types that can be added, tags, cover art, sample-accurate track cutting; WAV/FLAC/AIFF cuts seek near their start; Enhance files are checked before they get their final name, and a lossy one over the peak ceiling is re-encoded once with a bounded trim; track files take the trim of their format's full file) |
+| `media/ytdlp_update.py` | The packaged app's downloader updates in `<data>/downloader/`: fetches yt-dlp's zipimport build, checks size, checksum and that it starts, and records it; `packaging/macos/entry.py` loads it in downloader mode (`load_downloader`) when it is newer than the built-in copy and imports cleanly, else the built-in copy runs and the failure is recorded |
+| `updates.py` | The update check (newest AudioLab release for this build, yt-dlp's newest stable release; on "Check now" or, with `check_updates`, at most once a day, also when the record can't be saved: the last check time is kept in memory too) cached in `<data>/updates.json`, and the GitHub helpers shared with `media/ytdlp_update.py`: fixed HTTPS hosts (redirects included), size limits, plain-language errors |
 | `analysis/` | `profile.py` (loudness, true peak, LRA, bandwidth, bands, alerts), `levels.py` (bounded whole-reference level and stereo scan), `tone.py` (how the tonal balance moves, chart data from the same scan), `classify.py` (content type + reasons), `key.py` (musical key estimate) |
 | `recipes/` | `Recipe` + `ChainParams`, `resolve()` turns recipe + measurements + user overrides into parameters *with reasons*; `chain.render()` is the single mastering chain; `calibration.py` validates compact full-render state and selects the compatible basis for paired auditions |
 | `ai/` | Lazy source torch/demucs detection and windowed separation; `install.py` installs source packages, `managed.py` owns the catalog-pinned packaged runtime lifecycle selected by `api/state.py`, `client.py` invokes the isolated helper, `worker.py` runs/probes it and loads local offline weights |
 | `dsp/` | Float32 signal-processing blocks; `scratch.py` reuses disk-backed full-rate buffers for Enhance beyond 10 minutes; `timeline.py` collects bounded reduction highlights without retaining full-rate controls |
 | `previews.py` | The Enhance before/after excerpt (a loud 45 s passage, or the whole recording when shorter) at the true relative level, one shared headroom gain; compared when the original isn't kept |
 | `processing.py` | Bounded, path-free projection of resolved and applied Enhance processing for results and durable Library history; legacy entries remain readable |
-| `settings.py` | Data/output folders (the output folder is only resolved here, never created: whatever writes creates it), env-var limits (`AUDIOLAB_*`), persisted user preferences (checked on load/update; a new snapshot becomes active only after saving succeeds) |
-| `resources.py` | Memory/disk/duration preflight, run before any big download; also refuses an output folder that can't be written to |
+| `settings.py` | Data/output folders (the output folder is only resolved here, never created: whatever writes creates it; it may neither lie inside the data folder nor contain it), env-var limits (`AUDIOLAB_*`), persisted user preferences (checked on load/update; a new snapshot becomes active only after saving succeeds) |
+| `resources.py` | Memory/disk/duration preflight, run before any big download: the working folder needs the task's estimate; the output folder needs only the results for Enhance and Split, the full working estimate for Save / Convert, and is not checked for Check; also refuses an output folder that can't be written to |
 | `diagnostics.py` | Log file setup and the plain-text system/job report for bug reports (`/api/diagnostics`, `audiolab doctor --report`) |
 | `errors.py` | `AudioLabError(message, hints, fix, detail)` — every user-visible failure carries plain-language hints, an optional one-click fix and the raw text behind it (`detail`, for bug reports only); `storage_error()` words a full disk or a folder AudioLab may not write to. Anything else unexpected becomes a JSON 500 with hints (`api/app.py`) or "Something went wrong while …" on the job (`jobs.py`) |
 | `util.py` | File-name safety, unique paths, hard links, media types, and human-readable sizes and durations |
@@ -66,7 +69,9 @@ use the cgroup limit minus its reported usage before applying that fraction. See
 the complete Enhance chain constant-memory. Disk estimates depend on task/duration/quality, not every
 source rate, export format or output count; the added free-space allowance is not reserved capacity.
 Long Enhance adds up to 36 bytes per 48 kHz frame (about 5.8 GiB/hour) for disk-backed working buffers.
-The earlier conservative RAM estimate remains in force pending representative long-run measurements.
+Beyond 10 minutes, Volume only and Adaptive Enhance are estimated at the 10-minute figure plus 0.5 GiB per
+hour: their mapped scratch pages count as reclaimable, and the slope is about three times the growth
+measured on one 48 GB Mac. AI stems Enhance keeps the earlier, conservative RAM estimate.
 
 ### Platform code
 Everything that differs between macOS, Windows and Linux lives in `system.py`; other modules call its
@@ -79,15 +84,19 @@ the platform in `doctor`. Porting a feature to another OS means filling in its b
 The source launchers remain for development and the source-mode AI installer. The downloadable Core app has a separate
 entry, `packaging/macos/entry.py`, frozen with the spec and pinned build inputs in `packaging/macos/`.
 It starts the same native window/server/task pipeline without `start.sh`, uv, pip or a user's Python.
-Its private downloader mode dispatches yt-dlp inside the frozen executable; that executable is not a
-general-purpose Python interpreter. `runtime.py` chooses this mode and the bundled FFmpeg/Deno.
+Its private downloader mode dispatches yt-dlp inside the frozen executable: a newer downloaded update
+from `<data>/downloader/` when it passes its checks (`media/ytdlp_update.py`), else the built-in copy.
+That executable is not a general-purpose Python interpreter; the spec freezes extra standard-library
+modules so an update that starts using one still runs. `runtime.py` chooses this mode and the bundled FFmpeg/Deno.
 
 The main app exposes Save/Convert, Check and Volume only/Adaptive Enhance without AI. Since version 2.4.0b2 it
 offers a managed optional add-on containing a frozen AI helper and both
 supported model choices; the main app's bundled Python packages remain immutable. `ai.install_supported`
 is driven by a build-generated, bundled catalog, not simply `packaged`. Split/AI stems use the healthy
 managed helper when present. Source/CLI/Docker keep their existing optional-AI and update paths.
-Downloader self-updates remain disabled in packaged mode; replace the app to update the main delivery.
+The packaged app updates its downloader only on a click ("Update downloader"), never by itself after a
+failed link; replace the app to update everything else. The update check only reads GitHub's release
+lists and links to the release page; it downloads and installs nothing.
 
 Core builds normally reuse the immutable helper selected by `packaging/ai/published-helper.json`.
 `packaging/ai/reuse.py` checks the exact catalog/archive/source companion and the reviewed helper
@@ -106,7 +115,7 @@ weights, cache and temporary files stay under `<data>/ai/`; shared/source caches
 nor deleted. Source `install.py` keeps the existing pip/uv route.
 
 An ownership marker distinguishes a managed root from unrelated existing files. Output folders must
-not overlap AI storage; settings and task output creation both enforce this. Archive extraction accepts
+not overlap the data folder, which holds AI storage; settings and task output creation both enforce this. Archive extraction accepts
 regular files, directories and deferred hardlinks to direct regular archive members, never symlinks or
 link chains. This stores shared native libraries once; storage reporting also counts their inodes once.
 
@@ -133,12 +142,12 @@ and fresh-download Gatekeeper checks are separate from ordinary source regressio
 No framework, no build step: ES modules loaded straight by the browser (reload to see changes).
 
 ```
-index.html            the shell: sidebar (collapses to an icon rail, ⌘\ / Ctrl+\; bottom tab bar on narrow screens) + one <section> per view
+index.html            the shell: sidebar (collapses to an icon rail, ⌘\ / Ctrl+\; starts collapsed below 1000 px; bottom tab bar on narrow screens) + one <section> per view
 css/                  tokens.css (colours, type, spacing; light/dark) · base.css (reset, shell) · components.css (shared controls)
                       · one file per view: new.css · activity.css · job.css · library.css (+ the compare player) · adjust.css · settings.css
                       · eq-editor.css for the graphical EQ
 fonts/                the bundled title serif (Source Serif 4, OFL) for browsers and systems without ui-serif; README says how to swap it
-js/main.js            boot, global wiring (paste or drop a link anywhere, drop files, deep links ?url=&task=, notice banner)
+js/main.js            boot, global wiring (paste or drop a link anywhere, drop files, deep links ?url=&task= that wait for Load, notice banner)
 js/router.js          hash routes #/new · #/activity · #/job/<id> · #/library[/<entry id>] · #/adjust/<entry id> · #/settings[/<section>]
 js/api.js store.js    HTTP client + token · app state, event bus, live updates (SSE, polling fallback)
 js/dom.js ui.js       tiny DOM helpers and icons · shared controls (toasts, dialogs, menus, meters, segmented…)
@@ -146,7 +155,6 @@ js/player.js          job page players: stems, tracks, one file (says when this 
 js/compare.js         the compare player (job page and Library): original | result sample-locked on one Web Audio clock from
                       server-decoded PCM chunks, crossfaded switch, whole-song volume match · plain Library file player
 js/actions.js         job actions shared by views (cancel, retry, remove, clear finished…)
-js/quick-preview.js   legacy preview-dialog helper retained with its existing API/playback regressions; Library now opens Adjust
 js/eq.js              canonical EQ normalization and text/APO parsing/formatting, optional examples, compact Fine-tuning editor
 js/eq-editor.js       graphical/numeric/text EQ, drag and keyboard edits, bypass/undo/reset, lightweight draft snapshots
 js/eq-response.js     plots server-equivalent zero-phase filter magnitude; no browser audio processing engine
@@ -161,14 +169,15 @@ js/views/activity.js  the job list (in progress, then finished by day; filters)
 js/views/job/         one job: live progress, failures with fixes, results per task
 js/views/library.js   finished results by recording: versions, files, play/compare, kept originals, remove
 js/views/adjust.js    optional saved-version workspace, in-app drafts, passage/section editing, comparison and full Apply
-js/views/settings.js  preferences and system status
+js/views/settings.js  preferences, Updates & add-ons (app, downloader, AI add-on, audio engine), storage, about
 ```
 
 Views stay mounted; the router shows one at a time and calls its `show`/`hide` hooks (a hidden job
 page stops its players and polling). There is no global Simple/Advanced mode: each task in New folds its
 rarely used choices and fine-tuning under **More options** (folded, it says how many differ from their
-defaults, with Reset), and whatever is set there is sent with the job. Job pages have a **Show details**
-switch (numbers, decisions, log details). Both remember open/closed in the browser (`localStorage`; the macOS
+defaults, with Reset; the name and cover picture there are never counted or reset), and whatever is set
+there is sent with the job. Job pages have a **Show details**
+disclosure (numbers, decisions, log details). Both remember open/closed in the browser (`localStorage`; the macOS
 window keeps it too: `desktop.py` starts pywebview with `private_mode=False`); the one
 Settings row "Show all options by default" (stored as `ui_mode`, `advanced` = on) is where they start.
 Every way back into New goes through `views/new`: "Do more with this" (an earlier job's source, its name and
@@ -185,7 +194,8 @@ attempt its own media object so a late error or rejected play cannot stop a newe
 ## Life of a job
 
 1. `POST /api/jobs` → `tasks.<task>.validate()` normalises options (bad input → 400 with a readable message).
-2. `JobManager.submit()` writes `job.json`, queues it, emits a `job` event.
+2. `JobManager.submit()` writes `job.json` (a job whose record can't be written is refused, never queued),
+   queues it, emits a `job` event.
 3. A worker builds a `TaskContext` with the task's stages and calls `tasks.<task>.run(ctx, source)`.
 4. The task hands `Progress` scopes to library code. Every call can raise `Cancelled`; child
    processes are registered so cancel kills them immediately.
@@ -199,10 +209,21 @@ attempt its own media object so a late error or rejected play cannot stop a newe
    Once publication begins, cancellation is refused rather than acknowledged and followed by Done.
    Delete/Clear cannot interleave with terminal persistence. Late callbacks carry their attempt's context
    identity and cannot revive a removed, retried or force-settled job.
+   Each attempt records what it creates in the output folder (`outputs.py`: `export` notes each file as
+   it gets its final name, `tasks/common.py` each new folder). A failure or Cancel while the task runs
+   discards exactly that before the outcome is published, so no half result stays and a retry reuses the
+   same names; anything else in the folder stays. Once the task has returned its result nothing is
+   discarded: a Cancel or quit during the Library step still finishes the job as done, with a warning
+   that it was not added to the Library. The record lives in memory only, so after a crash or forced
+   quit the attempt's files stay; nothing is removed from the output folder at a later start.
 7. Quitting the app runs `JobManager.shutdown()`: running jobs are stopped (child processes killed) and
    recorded as "Stopped because AudioLab was closed", queued ones as not started — both can be retried.
    After a crash, the next start marks running jobs as interrupted (their `work/scratch/` goes, unless
    `keep_work_files`) and queued ones as not started. A retry looks a link up again (`source._probe` is dropped).
+   Each start, under the instance lock, also removes job folders without `job.json` (an upload that never
+   became a job) and Library staging folders left by a killed publication, once untouched for an hour.
+   Only then, holding that lock, does the packaged app delete downloader update archives `active.json` no
+   longer names (`AppState.started`); a second launch never touches the running app's files.
 
 Subprocess owners call `system.register_process_group()` immediately after spawning with
 `own_process_group()`. On POSIX this retains the private group identity even if its leader exits first:
@@ -247,9 +268,12 @@ The control runs before bass boosts/harmonics, skips AI stem EQ, and runs on AI 
 bypasses it. The old static cut remains available only to direct `ChainParams` callers and cannot
 stack with the new stage. Bass harmonics are separately opt-in.
 
-`media/verification.py` decodes each complete Enhance export once to measure native-rate loudness
-and a 192 kHz true-peak estimate, including buffered tail samples. A ceiling miss or failed check
-retains the output and adds a warning; it never silently re-masters a format. Split tracks are not
+`media/verification.py` decodes each complete Enhance export once, before it gets its final name, to
+measure native-rate loudness and a 192 kHz true-peak estimate, including buffered tail samples. A lossy
+file (MP3, AAC, Opus) whose encoded peaks exceed the ceiling is encoded once more from the master, turned
+down by the excess plus 0.1 dB (at most 2 dB), and checked again; "What we did" names the trim. Lossless
+files are never re-encoded. A remaining ceiling miss or failed check retains the output and adds a
+warning; it never re-masters a format. Split tracks are not
 individually checked. Master and file measurements remain distinct. The compare player uses the
 selected export's loudness; master excerpts still use master measurements. Its optional repeat range
 uses 40 ms grid points and schedules both sides together, caching at most 8 s for short repeats.
@@ -327,6 +351,34 @@ silent excerpts are replaced with a bounded excerpt anchored at sound found by t
 Separate basis fields prevent mistaking these estimates for complete spectral coverage. A successful AI stage transfers its
 audio array to the chain rather than retaining a second obsolete buffer through the remaining DSP.
 
+## Decisions and why
+
+- **No automatic tone stabiliser.** A validated detector (30 s windows of seven band shares against the
+  recording's median, ≥ 2 dB for ≥ 3 minutes) flagged the tilted first part of one DJ set, but also five
+  stretches of a second set and a whole orchestral concert. Band shares cannot tell a recording fault from the
+  music changing, so it would mostly correct the music. The tone timeline shows the balance without a verdict,
+  section EQ acts only on ranges the user picks, and the chart makes no EQ proposals. Automatic detection would
+  need labels: known cues (track boundaries) or listening tests that mark faults.
+- **Long-set inconsistencies:** slow drift is no trigger (same evidence). Abrupt steps that persist for minutes,
+  a dropped channel or one clipped stretch are measurable and rarely musical: mark them on the timeline first;
+  correcting them automatically needs labelled examples of real faults.
+- **No learned restoration (e.g. Apollo) for now.** It helps only sources with cut-off highs (MP3, YouTube AAC),
+  not the usual full-band YouTube Opus; it runs about real time on Apple GPUs and is unusable on CPU, so a long
+  set takes hours; its weights are CC BY-SA 4.0. At most an opt-in AI-pack add-on, offered below an ~18 kHz
+  cutoff, replacing only the band above it and called rebuilt, never recovered, and only if blind level-matched
+  tests on 128 kbps MP3/AAC clearly beat Brighten muffled highs without harming full-band Opus.
+- **Checked and rejected:** a Q correction for the zero-phase bells (they match a DAW bell within 0.006 dB; a
+  test pins it); the de-esser off for DJ sets (its tone budget bounds it, no evidence of harm); AAC instead of
+  ALAC for AirPods (one lossy step beats two); synthetic stereo (not justified by the evidence).
+- **Long recordings' dynamics** use level-independent measures (typical 30 s peak-to-loudness, 3-minute range):
+  absolute level and whole-file range misread a quiet, long DJ upload as concert dynamics.
+- **Fair comparisons:** louder sounds better at first, so comparisons match volume and flag versions more than
+  1 dB apart. ReplayGain tags are later work (WAV can't carry them; Sound Check applies only in Apple Music).
+- **YouTube sign-in** only for a paced retry after a refusal; no Premium client (its 256 kbps formats need an
+  extra request that can get accounts flagged sooner).
+- **Edited auditions stay estimates:** EQ or dynamics edits change whole-program loudness and detector context,
+  so reusing the saved gain cannot make a passage equal to Apply.
+
 ## Extending
 
 - **New recipe**: add a `Recipe` + defaults in `recipes/`, map content types to it in
@@ -349,6 +401,8 @@ audio array to the chain rather than retaining a second obsolete buffer through 
 | Library records and kept originals | `<data>/library/` (`originals/` = the downloaded stream or uploaded file, as it came; cleared in Settings → Storage) |
 | Log file | macOS `~/Library/Logs/AudioLab`, elsewhere (and with a custom data folder) `<data>/logs` |
 | Packaged Core caches/temp | `<data>/cache/yt-dlp`, `<data>/cache/deno`, `<data>/cache/tmp`; configured by `runtime.py` before use |
+| Packaged downloader updates | `<data>/downloader/`: `active.json`, the active `yt-dlp-<version>.zip`, `failed.json` after a failed start; archives `active.json` no longer names stay while the app runs and are deleted at the next start, once it holds the data folder's lock (`media/ytdlp_update.py`) |
+| Last update check | `<data>/updates.json` (`updates.py`); Health only reads it |
 | Managed packaged AI | `<data>/ai/`: versioned runtime and models, active receipt, cache, temporary files and resumable download; `<data>/.ai-operation.lock` coordinates lifecycle/jobs |
 | Native WebKit website data | macOS-managed default Cocoa website store under the app identity; separate from app data (see [Mac cleanup](MACOS.md#uninstall)) |
 | Source-mode AI models | Hugging Face cache (`HF_HOME` / `HF_HUB_CACHE`) and/or Torch hub (`~/.cache/torch`, `TORCH_HOME`); can be shared with other software |
@@ -357,8 +411,8 @@ Output is user-owned and is never deleted automatically: removing jobs or Librar
 the user opts in to moving a result's files to the system Trash (Remove from Library, Keep only this version). App data also
 contains user audio copies: do not treat the whole folder as a disposable cache. Settings → About
 opens the actual app data/log folders for optional manual cleanup. The app has no recursive uninstall
-endpoint; a chosen output folder can overlap a custom data path, so automatic root deletion would be
-unsafe. The Core app's cache setup does not redirect `HOME` or claim to contain all macOS/WebKit data.
+endpoint; output folders inside the data folder are refused now, but older versions allowed them, so
+automatic root deletion would be unsafe. The Core app's cache setup does not redirect `HOME` or claim to contain all macOS/WebKit data.
 
 ## Renaming
 

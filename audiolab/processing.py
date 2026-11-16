@@ -6,11 +6,13 @@ contain source metadata, paths, and tool errors that do not belong here.
 
 from typing import Any
 
+from .ai import MODELS
 from .media.export import FORMATS
-from .recipes.base import eq_bands, section_eq
+from .recipes.base import ADVANCED_CHOICES, PARAM_CHOICES, QUALITIES, RECIPES, eq_bands, section_eq
 from .recipes.calibration import retained
 
-_RECIPE_KEYS = ('club', 'live', 'music', 'voice')
+# The allowed values come from the definitions themselves, so a new recipe or choice is kept, not dropped.
+_RECIPE_KEYS = tuple(RECIPES)
 _LEVELS = 'target_lufs tp_ceiling_db bass_db sample_rate'
 _METRICS = 'lufs true_peak_dbtp lra'
 _DYNAMICS = 'max_gr_db active_pct'
@@ -75,7 +77,7 @@ def _applied(value: Any) -> dict[str, Any]:
             numbers=f'{_DYNAMICS} thresh_dbfs',
             flags='engaged',
             text='skip_reason',
-            choices={'mode': ('glue', 'leveler')},
+            choices={'mode': PARAM_CHOICES['compressor'][1:]},  # engaged: never 'off'
         ),
         'deess': _fields(
             report.get('deess'),
@@ -93,7 +95,7 @@ def _applied(value: Any) -> dict[str, Any]:
             report.get('ai'),
             numbers='residual_db',
             flags='fallback gate_passed',
-            choices={'stage': ('stem_eq', 'voice_isolate'), 'model': ('htdemucs', 'htdemucs_ft')},
+            choices={'stage': PARAM_CHOICES['ai_stage'][1:], 'model': tuple(MODELS)},  # ran: never 'none'
         ),
         'adaptive_lowmid': _adaptive(report.get('adaptive_lowmid')),
     }
@@ -164,12 +166,7 @@ def _params(value: Any) -> dict[str, Any]:
             'adaptive_lowmid_db'
         ),
         flags='hf_restore deess_mix volume_only',
-        choices={
-            'denoise': ('off', 'light', 'strong'),
-            'compressor': ('off', 'glue', 'leveler'),
-            'ai_stage': ('none', 'stem_eq', 'voice_isolate'),
-            'ai_model': ('htdemucs', 'htdemucs_ft'),
-        },
+        choices=PARAM_CHOICES,
     )
     if 'mono_bass_hz' in raw and raw['mono_bass_hz'] is None:
         params['mono_bass_hz'] = None  # explicitly off, rather than missing from an older report
@@ -196,7 +193,7 @@ def snapshot(options: dict, result: dict) -> dict[str, Any] | None:
     requested = _fields(
         options,
         flags='split_tracks embed_cover save_cover',
-        choices={'recipe': ('auto', *_RECIPE_KEYS), 'quality': ('light', 'standard', 'best')},
+        choices={'recipe': ('auto', *_RECIPE_KEYS), 'quality': QUALITIES},
     )
     formats = [f for f in _list(options.get('formats'), 24) if isinstance(f, str) and f in FORMATS]
     if formats:
@@ -204,16 +201,7 @@ def snapshot(options: dict, result: dict) -> dict[str, Any] | None:
     advanced = _fields(
         options.get('advanced'),
         numbers=_LEVELS,
-        choices={
-            'glue': ('on', 'off'),
-            'hf_restore': ('on', 'off'),
-            'mono_bass': ('on', 'off'),
-            'denoise': ('off', 'light', 'strong'),
-            'deess': ('auto', 'off', 'strong'),
-            'model': ('htdemucs', 'htdemucs_ft'),
-            'adaptive_lowmid': ('auto', 'off', 'strong'),
-            'harmonics': ('on', 'off'),
-        },
+        choices={**ADVANCED_CHOICES, 'model': tuple(MODELS)},
     )
     eq = eq_bands(_mapping(options.get('advanced')).get('eq'))
     if eq is not None:
@@ -223,7 +211,7 @@ def snapshot(options: dict, result: dict) -> dict[str, Any] | None:
         advanced['section_eq'] = sections
     metrics = _mapping(result.get('metrics'))
     bandwidth = preview_bandwidth(_mapping(result.get('analysis')).get('bandwidth'))
-    auto = _fields(report, choices={'auto_compressor': ('off', 'glue', 'leveler')})
+    auto = _fields(report, choices={'auto_compressor': PARAM_CHOICES['compressor']})
     calibration = retained(report.get('calibration'))
     return {
         'requested': {**requested, 'advanced': advanced},

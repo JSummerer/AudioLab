@@ -1,5 +1,7 @@
 """Frozen/source runtime boundaries, with no external requests, installers or models."""
 
+import hashlib
+import json
 import os
 import ssl
 import sys
@@ -18,7 +20,7 @@ from audiolab.api import create_app
 from audiolab.api.state import AppState
 from audiolab.errors import AudioLabError, ToolMissingError
 from audiolab.jobs import JobManager
-from audiolab.media import export, ffmpeg, proc, youtube
+from audiolab.media import export, ffmpeg, proc, youtube, ytdlp_update
 from audiolab.settings import SETTINGS
 
 
@@ -156,8 +158,8 @@ def test_packaged_maintenance_never_starts_an_installer(monkeypatch):
     _packaged(monkeypatch)
     monkeypatch.setattr(proc, 'run', _no_process)
     monkeypatch.setattr(install.subprocess, 'Popen', _no_process)
-    with pytest.raises(AudioLabError, match='built into this AudioLab app'):
-        youtube.update_ytdlp()
+    monkeypatch.setattr(ytdlp_update, 'install_latest', lambda progress=None: {'ok': True, 'via': 'app-owned update'})
+    assert youtube.update_ytdlp() == {'ok': True, 'via': 'app-owned update'}  # never pip in the frozen app
     with pytest.raises(AudioLabError, match='cannot be added'):
         install.install_command()
     installer = install.AIInstaller()
@@ -238,25 +240,42 @@ def test_health_reports_maintenance_capabilities_and_fixed_folders(monkeypatch, 
     with TestClient(app_factory(), base_url='http://127.0.0.1') as client:
         health = client.get('/api/health').json()
         assert health['packaged'] is packaged
-        assert health['downloader']['update_supported'] is not packaged
+        downloader = health['downloader']
+        assert downloader['update_supported'] is True and downloader['fallback'] is False
+        assert downloader['source'] == ('bundled' if packaged else 'environment')
+        assert (downloader['bundled_version'] is not None) is packaged  # this environment's yt-dlp stands in
         assert health['ai']['install_supported'] is not packaged
         assert not health['ai']['available']
         assert health['data_dir'] == str(SETTINGS.data_dir)
         assert health['logs_dir'] == str(system.log_dir(SETTINGS.data_dir))
 
 
-def test_packaged_maintenance_api_rejects_before_any_subprocess(monkeypatch, app_factory):
+def test_packaged_maintenance_api_never_starts_a_package_installer(monkeypatch, app_factory):
     _packaged(monkeypatch)
     monkeypatch.setattr(proc, 'run', _no_process)
     monkeypatch.setattr(install.subprocess, 'Popen', _no_process)
+    fetched, reverted = [], []
+    monkeypatch.setattr(
+        ytdlp_update,
+        'install_latest',
+        lambda progress=None: fetched.append(1) or {'ok': True, 'before': 'a', 'after': 'b', 'message': 'updated'},
+    )
+    monkeypatch.setattr(ytdlp_update, 'use_bundled', lambda: reverted.append(1))
     with TestClient(app_factory(), base_url='http://127.0.0.1') as client:
-        for path, message in (
-            ('/api/system/update-downloader', 'built into this AudioLab app'),
-            ('/api/system/install-ai', 'compatible AI download'),
-        ):
-            response = client.post(path)
-            assert response.status_code == 400 and message in response.json()['detail']
+        response = client.post('/api/system/install-ai')
+        assert response.status_code == 400 and 'compatible AI download' in response.json()['detail']
+        assert client.post('/api/system/update-downloader').json()['ok'] and fetched == [1]  # the app-owned update
+        assert client.delete('/api/system/downloader').json()['source'] == 'bundled' and reverted == [1]
         assert client.get('/api/settings').json()['auto_update_downloader'] is True
+    assert not youtube.auto_fix_downloader()  # click-only in the packaged app (PACKAGED_AUTO_FIX)
+
+
+def test_source_install_has_no_builtin_downloader_to_go_back_to(monkeypatch, app_factory):
+    monkeypatch.setattr(runtime, 'is_packaged', lambda: False)
+    with TestClient(app_factory(), base_url='http://127.0.0.1') as client:
+        response = client.delete('/api/system/downloader')
+        assert response.status_code == 400 and 'built-in downloader' in response.json()['detail']
+    assert youtube.auto_fix_downloader()  # source installs keep fixing themselves
 
 
 def test_packaged_install_api_is_idempotent_when_ai_is_ready(monkeypatch, app_factory):
@@ -308,7 +327,7 @@ def test_source_api_never_removes_unmanaged_ai(monkeypatch, app_factory):
         assert response.status_code == 400 and 'shared caches' in response.json()['detail']
 
 
-@pytest.mark.parametrize('part', ['', 'ai', 'ai/finished'])
+@pytest.mark.parametrize('part', ['', 'ai', 'ai/finished', 'jobs/j_1/exports', 'library'])
 def test_settings_rejects_output_overlapping_managed_storage(part, app_factory, monkeypatch):
     monkeypatch.delenv('AUDIOLAB_OUTPUT_DIR')
     target = SETTINGS.data_dir / part
@@ -330,7 +349,53 @@ def test_source_environment_cannot_publish_audio_into_managed_storage(tmp_path, 
     assert not (SETTINGS.data_dir / 'ai').exists()
 
 
-def test_packaged_download_errors_recommend_app_replacement(monkeypatch):
+class _WorkStarted(Exception):
+    pass
+
+
+@pytest.mark.parametrize('legacy', [True, False])
+@pytest.mark.parametrize(
+    ('task', 'source', 'options'),
+    [
+        ('download', {'kind': 'url', 'url': 'https://example.test/watch?v=abc'}, {'format': 'mp3'}),
+        ('enhance', {'kind': 'file', 'name': 'tone.wav'}, {}),
+    ],
+)
+def test_a_saved_output_folder_inside_app_data_is_refused_before_any_work(
+    tmp_path, monkeypatch, task, source, options, legacy
+):
+    from audiolab import tasks
+    from audiolab.context import TaskContext
+    from audiolab.tasks import common
+
+    monkeypatch.delenv('AUDIOLAB_OUTPUT_DIR')  # the saved setting decides, as on a user's computer
+    folder = SETTINGS.data_dir / 'finished' if legacy else tmp_path / 'Music'  # the first: accepted before 2.5
+    saved = json.dumps({'output_dir': str(folder)})
+    SETTINGS.settings_file.write_text(saved)
+    SETTINGS._settings = None
+    assert SETTINGS.output_dir == folder  # reloaded as saved
+
+    def work(*args, **kwargs):
+        raise _WorkStarted
+
+    monkeypatch.setattr(common, 'probe_url', work)  # a link's lookup comes before its download
+    monkeypatch.setattr(common.ffmpeg, 'probe_media', work)  # a file's first step
+    source = {**source, 'path': str(tmp_path / 'tone.wav')} if source['kind'] == 'file' else source
+    (tmp_path / 'tone.wav').write_bytes(b'RIFF')
+    opts = tasks.validate(task, options, source)
+    spec = tasks.get(task)
+    ctx = TaskContext('t', tmp_path / 'job', opts, spec.stages(opts, source))
+    if legacy:
+        with pytest.raises(AudioLabError, match='separate from AudioLab’s app data folder') as refused:
+            spec.run(ctx, source)
+        assert any('Settings → Files' in hint for hint in refused.value.hints)
+        assert not folder.exists() and SETTINGS.settings_file.read_text() == saved  # nothing made or rewritten
+    else:
+        with pytest.raises(_WorkStarted):  # unchanged: the work starts
+            spec.run(ctx, source)
+
+
+def test_packaged_download_errors_offer_the_downloader_update(monkeypatch):
     _packaged(monkeypatch)
     for message in (
         'ERROR: HTTP Error 403: Forbidden',
@@ -338,8 +403,62 @@ def test_packaged_download_errors_recommend_app_replacement(monkeypatch):
         'ERROR: something unknown',
     ):
         error = youtube._friendly_error(message, 'https://example.test/audio')
-        assert any('newer AudioLab app' in hint for hint in error.hints)
-        assert not any('Settings → Downloads' in hint for hint in error.hints)
+        assert youtube._UPDATE_HINT in error.hints
+        assert not any('newer AudioLab app' in hint for hint in error.hints)
+
+
+@pytest.mark.parametrize('source', ['updated', 'bundled'])
+def test_download_errors_name_the_way_back_while_an_update_is_in_use(monkeypatch, source):
+    _packaged(monkeypatch)
+    monkeypatch.setattr(ytdlp_update, 'state', lambda: {'source': source, 'fallback': False, 'active': None})
+    back = 'Use built-in version'
+    for message in ('ERROR: signature extraction failed', 'Traceback (most recent call last):\nKeyError: x'):
+        hints = youtube._friendly_error(message, 'https://example.test/audio').hints
+        assert any(back in hint for hint in hints) is (source == 'updated'), hints
+    private = youtube._friendly_error('ERROR: Private video', 'https://example.test/audio').hints
+    assert not any(back in hint for hint in private)  # not the downloader's fault: no way back offered
+
+
+def test_unused_downloader_archives_go_only_once_this_app_holds_the_data_folder(monkeypatch, app_factory, tmp_path):
+    _packaged(monkeypatch)
+    running = JobManager(runner=lambda job, ctx: {}, stages_for=lambda job: [], root=tmp_path / 'jobs')
+    running.start()  # the app that is already open: one of its downloads still reads this archive
+    folder = ytdlp_update.folder()
+    folder.mkdir(parents=True)
+    archive = folder / 'yt-dlp-2099.01.01.zip'
+    archive.write_bytes(b'imported lazily by a running downloader')
+    with pytest.raises(AudioLabError, match='already running'), TestClient(app_factory()):
+        pass  # a second launch with the same data folder
+    assert archive.exists()
+    running.shutdown(1)
+    with TestClient(app_factory()):
+        assert not archive.exists()  # the next real start cleans up
+
+
+def test_an_undeletable_unused_archive_never_stops_the_app(monkeypatch, app_factory, caplog):
+    _packaged(monkeypatch)
+    folder = ytdlp_update.folder()
+    folder.mkdir(parents=True)
+    stuck, unused = folder / 'yt-dlp-2099.01.01.zip', folder / 'yt-dlp-2099.02.01.zip'
+    active = folder / 'yt-dlp-2099.03.01.zip'
+    for archive in (stuck, unused, active):
+        archive.write_bytes(archive.name.encode())
+    record = {'version': '2099.03.01', 'file': active.name, 'size': active.stat().st_size}
+    record['sha256'] = hashlib.sha256(active.read_bytes()).hexdigest()
+    (folder / 'active.json').write_text(json.dumps(record))
+    unlink = Path.unlink
+
+    def refuse(self, missing_ok=False):  # e.g. no permission, or open in another program on Windows
+        if self == stuck:
+            raise PermissionError(13, 'Permission denied', str(self))
+        return unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, 'unlink', refuse)  # the same failure on every system (chmod is POSIX-only)
+    with TestClient(app_factory(), base_url='http://127.0.0.1') as client:
+        assert client.get('/api/ping').json()['ok']
+    assert 'Could not delete an unused downloader update' in caplog.text
+    assert stuck.exists() and not unused.exists()  # the others are still cleaned up…
+    assert active.exists() and ytdlp_update.active(folder)['file'] == active.name  # …and the update in use stays
 
 
 def test_reveal_endpoints_open_only_fixed_app_folders(tmp_path, monkeypatch, app_factory):
@@ -363,16 +482,43 @@ def test_reveal_app_folders_are_local_only(monkeypatch, app_factory):
     with TestClient(app_factory(local=False)) as client:
         for path in ('/api/reveal-data', '/api/reveal-logs'):
             response = client.post(path)
+            assert response.status_code == 403 and 'Folders can only be opened' in response.json()['detail']
+
+
+def test_packaged_downloader_changes_are_local_only_and_say_so(monkeypatch, app_factory):
+    _packaged(monkeypatch)
+    monkeypatch.setattr(ytdlp_update, 'install_latest', lambda progress=None: pytest.fail('updated remotely'))
+    monkeypatch.setattr(ytdlp_update, 'use_bundled', lambda: pytest.fail('reset remotely'))
+    with TestClient(app_factory(local=False)) as client:
+        for response in (client.post('/api/system/update-downloader'), client.delete('/api/system/downloader')):
             assert response.status_code == 403
+            assert response.json()['detail'] == 'The downloader can only be changed on the computer AudioLab runs on.'
 
 
-@pytest.mark.parametrize('command', ['update', 'install-ai'])
-def test_packaged_maintenance_cli_explains_unavailable_commands(monkeypatch, capsys, command):
+def test_packaged_ai_changes_are_local_only_and_say_so(monkeypatch, app_factory):
+    _packaged(monkeypatch)
+    with TestClient(app_factory(local=False)) as client:
+        calls = (
+            client.post('/api/system/install-ai'),
+            client.post('/api/system/cancel-ai'),
+            client.delete('/api/system/ai'),
+        )
+        for response in calls:
+            assert response.status_code == 403
+            assert response.json()['detail'] == 'The AI add-on can only be changed on the computer AudioLab runs on.'
+
+
+def test_packaged_maintenance_cli_explains_unavailable_commands(monkeypatch, capsys):
     _packaged(monkeypatch)
     monkeypatch.setattr(install.subprocess, 'Popen', _no_process)
-    assert cli.main([command]) == 1
+    assert cli.main(['install-ai']) == 1
     message = capsys.readouterr().err
     assert 'AudioLab' in message and 'Traceback' not in message
+    monkeypatch.setattr(proc, 'run', _no_process)
+    monkeypatch.setattr(
+        ytdlp_update, 'install_latest', lambda progress=None: {'ok': False, 'message': 'No internet connection.'}
+    )
+    assert cli.main(['update']) == 1 and 'No internet connection.' in capsys.readouterr().out
 
 
 def test_reveal_missing_logs_does_not_create_the_folder(tmp_path, monkeypatch):

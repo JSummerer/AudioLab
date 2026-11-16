@@ -15,7 +15,7 @@
 .lib-group + .lib-group { margin-top: var(--s-5); padding-top: var(--s-6); border-top: 1px solid var(--line); }
 
 /* The sleeve: cover (or a quiet square), title, credits. */
-.lib-head { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: var(--s-4); align-items: center; }
+.lib-head { display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; gap: var(--s-4); align-items: center; }
 .lib-cover { width: 72px; height: 72px; }
 .lib-cover:has(img) { box-shadow: var(--shadow-cover); }
 .lib-head-text { min-width: 0; }
@@ -53,7 +53,6 @@
 /* Versions of one recording that differ in loudness: one plain line above them. */
 .lib-hint { margin: var(--s-3) 0 0; max-width: 72ch; color: var(--ink-2); font-size: var(--fs-small); }
 /* Import (a file already on this computer) and the Trash opt-in under a removal. */
-.lib-add-version { margin: var(--s-1) 0 0 -8px; }
 .lib-import .field + .muted, .lib-import .field-label { margin-top: var(--s-3); }
 .lib-import-error { margin: var(--s-2) 0 0; color: var(--danger); }
 .lib-import-error:empty { display: none; }
@@ -63,6 +62,8 @@
   /* Not enough room beside the title for every version: the actions go under it, for all of them alike. */
   .lib-actions { flex-basis: 100%; }
   .lib-actions > .btn-ghost:first-child { margin-left: -8px; }
+  /* Only the ⋯ menu: it stays beside the title rather than alone on a row of its own. */
+  .lib-actions:has(> :only-child) { flex-basis: auto; }
 }
 
 /* A version's files: rows whose hairlines start at the text, under the version's own divider. */
@@ -78,7 +79,6 @@
 .lib-play.is-on { background: var(--accent-soft); }
 
 .lib-tracks, .lib-processing { margin: var(--s-1) 0 0 30px; }
-:is(.lib-tracks, .lib-processing) > summary { width: max-content; max-width: 100%; padding: var(--s-1) 0; color: var(--ink-2); font-size: var(--fs-small); font-weight: 600; }
 :is(.lib-tracks, .lib-processing)[open] > summary { margin-bottom: var(--s-1); }
 .lib-tracks .files { max-height: 360px; overflow: auto; }
 .lib-tracks .file-row { background-size: 100% 1px; background-position: 0 0; }
@@ -102,7 +102,7 @@
   .lib-original-actions { margin-left: -8px; }
 }
 @container content (max-width: 480px) {
-  .lib-head { grid-template-columns: 56px minmax(0, 1fr); gap: var(--s-3); }
+  .lib-head { grid-template-columns: 56px minmax(0, 1fr) auto; gap: var(--s-3); }
   .lib-cover { width: 56px; height: 56px; }
   .lib-original { margin-left: 0; }
   /* Two actions to a row, not one left over: words only. */
@@ -187,8 +187,7 @@
 .cmp-marker[aria-current="true"] .cmp-marker-time { color: var(--ink-2); }
 .cmp-marker-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.cmp-repeat { border-top: 1px solid var(--line); padding-top: var(--s-3); }
-.cmp-repeat-summary { cursor: pointer; color: var(--ink-2); font-size: var(--fs-small); }
+.cmp-repeat { border-top: 1px solid var(--line); padding-top: var(--s-2); }
 .cmp-repeat-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-3); margin-top: var(--s-3); }
 .cmp-repeat-note { color: var(--ink-2); font-size: var(--fs-small); margin: var(--s-2) 0 0; }
 
@@ -205,19 +204,6 @@
 /* A hiccup while playing (Try again): a compact callout over the transport. */
 .cmp-problem .callout { padding: var(--s-2) var(--s-3); }
 .cmp-problem .callout-body p { font-size: var(--fs-small); }
-
-/* Section preview: source range and a few settings, then the temporary comparison. */
-.quick-preview-fields { display: grid; gap: var(--s-2); min-width: 0; border: 0; margin: 0; padding: 0; }
-.quick-preview-range { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-4); }
-.quick-preview-number, .quick-preview-choice { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-2); }
-.quick-preview-number .field { width: var(--label-w); }
-.quick-preview-settings { display: grid; gap: var(--s-2); padding-top: var(--s-2); border-top: 1px solid var(--line); }
-.quick-preview-settings :is(.quick-preview-choice, .quick-preview-number, .quick-preview-eq) > span { min-width: var(--label-w); }
-.quick-preview-eq { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--s-1) var(--s-2); }
-.quick-preview-eq > span { padding-top: var(--s-2); }
-.quick-preview-eq .eq-edit { flex: 1 1 18rem; width: auto; }
-.quick-preview-listen { padding-top: var(--s-3); border-top: 1px solid var(--line); }
-.quick-preview .dialog-actions { flex-wrap: wrap; }
 
 @container content (max-width: 480px) {
   .ab-keys { gap: var(--s-4); }

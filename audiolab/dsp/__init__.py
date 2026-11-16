@@ -2,7 +2,7 @@
 dither, noise reduction and high-frequency restoration. All float32, memory-bounded."""
 
 from .bus import glue_comp, mono_below
-from .dither import add_24bit_tpdf, quantize_to_16bit
+from .dither import add_24bit_tpdf
 from .filters import (
     apply_sos_zero_phase,
     filtfilt_stream,
@@ -27,6 +27,5 @@ __all__ = [
     'lra',
     'true_peak_db',
     'tp_limit',
-    'quantize_to_16bit',
     'add_24bit_tpdf',
 ]

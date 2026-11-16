@@ -62,7 +62,10 @@ def test_preview_uses_final_master_and_export_reading_reaches_library(delivery):
     assert sf.info(path).samplerate == 44100
     verification = file['verification']
     assert verification['status'] in {'verified', 'warning'}  # resampling the sharp transient can raise its peak
-    assert verification == measure_export(path, ceiling_dbtp=verification['ceiling_dbtp'])
+    saved = measure_export(path, ceiling_dbtp=verification['ceiling_dbtp'])  # measured before it had its name
+    assert {k: v for k, v in verification.items() if k != 'message'} == {
+        k: v for k, v in saved.items() if k != 'message'
+    }
 
     original, original_rate = sf.read(common.reference_path(ctx), dtype='float32', always_2d=True)
     master, master_rate = sf.read(ctx.work_dir / 'scratch' / 'master.flac', dtype='float32', always_2d=True)
@@ -89,41 +92,71 @@ def test_preview_uses_final_master_and_export_reading_reaches_library(delivery):
     assert entry['files'][0]['verification'] == {k: v for k, v in verification.items() if k != 'message'}
 
 
+def test_master_reuses_the_analysis_measurement_of_the_reference(delivery, monkeypatch):
+    from audiolab.recipes import chain
+
+    source, ctx, _notes = delivery()
+    measure, calls = chain._measure, []
+    monkeypatch.setattr(chain, '_measure', lambda x, sr, **kw: calls.append(len(x)) or measure(x, sr, **kw))
+    result = enhance.run(ctx, source)
+    assert len(calls) == 1  # only the finished master: the input was measured by the analysis
+    analysis = result['analysis']
+    levels = {k: analysis[k] for k in ('integrated_lufs', 'true_peak_dbtp', 'lra')}
+    before = result['metrics']['before']
+    assert (before['lufs'], before['true_peak_dbtp'], before['lra']) == tuple(levels.values())
+    x, _ = sf.read(common.reference_path(ctx), dtype='float32', always_2d=True)
+    assert measure(x, SR) == levels  # exactly what the renderer would have measured itself
+
+
 def test_meter_error_and_ceiling_miss_keep_the_exports(delivery, monkeypatch):
-    source, ctx, notes = delivery(('wav16', 'wav24'))
+    source, ctx, notes = delivery(('mp3_320', 'wav16', 'wav24'))
+    ctx.options['split_tracks'] = True  # tracks are cut in the first format, the MP3
+    cuts = []
+    monkeypatch.setattr(common, 'split_into_tracks', lambda *a, **kw: (cuts.append(kw), ([], None))[1])
     private_detail = '/private/work/meter.log'
+    mp3_checks = []
 
     def measure(path, *, ceiling_dbtp, progress, duration_s):
+        reading = {'integrated_lufs': -14.0, 'ceiling_dbtp': ceiling_dbtp, 'tolerance_db': PEAK_TOLERANCE_DB}
+        if path.suffix == '.mp3':  # over by 0.5 dB as encoded; under once turned down
+            mp3_checks.append(path)
+            over = len(mp3_checks) == 1
+            peak = ceiling_dbtp + (0.5 if over else -0.1)
+            return {
+                **reading,
+                'status': 'warning' if over else 'verified',
+                'true_peak_dbtp': peak,
+                'ceiling_met': not over,
+            }
         info = sf.info(path)  # the verification stage receives each actual saved file
         assert info.frames > 0
         if info.subtype == 'PCM_16':
             raise AudioLabError('Meter failed', detail=private_detail)
         assert info.subtype == 'PCM_24'
-        return {
-            'status': 'warning',
-            'integrated_lufs': -14.0,
-            'true_peak_dbtp': ceiling_dbtp + 0.4,
-            'ceiling_dbtp': ceiling_dbtp,
-            'ceiling_met': False,
-            'tolerance_db': PEAK_TOLERANCE_DB,
-            'message': f'{path.name} peaks above the ceiling after export.',
-        }
+        return {**reading, 'status': 'warning', 'true_peak_dbtp': ceiling_dbtp + 0.4, 'ceiling_met': False}
 
     monkeypatch.setattr(enhance, 'measure_export', measure)
     result = enhance.run(ctx, source)
     files = {f['format']: f for f in result['files']}
-    assert files.keys() == {'wav16', 'wav24'}
+    assert files.keys() == {'wav16', 'wav24', 'mp3_320'}
     assert all(Path(f['path']).is_file() for f in files.values())
     unverified = files['wav16']['verification']
     assert unverified['status'] == 'unverified' and unverified['ceiling_met'] is None
     assert unverified['integrated_lufs'] is None and unverified['true_peak_dbtp'] is None
     assert 'could not be verified' in unverified['message'] and private_detail not in unverified['message']
-    missed = files['wav24']['verification']
+    missed = files['wav24']['verification']  # lossless: kept as it is, with the warning
     assert missed['status'] == 'warning' and missed['ceiling_met'] is False
     assert missed['true_peak_dbtp'] > missed['ceiling_dbtp']
+    assert missed['message'].startswith('The WAV 24-bit file goes over the peak ceiling. For more room,')
+    assert missed['message'].endswith('(-0.60 dBTP after saving; ceiling -1.00 dBTP).')
     for check in (unverified, missed):
-        warning = next(w for w in result['warnings'] if w.startswith(check['message']))
-        assert ('warning', warning) in notes
+        assert check['message'] in result['warnings'] and ('warning', check['message']) in notes
+    # The MP3 was encoded once more, turned down, before it was saved: no warning, a plain "What we did" line.
+    assert len(mp3_checks) == 2 and files['mp3_320']['verification']['status'] == 'verified'
+    assert files['mp3_320']['verification']['message'] is None and len(result['warnings']) == 2
+    line = 'Turned the MP3 down slightly so its peaks stay under the limit (-0.6 dB; encoding raises peaks).'
+    assert line in result['summary']
+    assert [kw['trim_db'] for kw in cuts] == [0.6]  # its tracks are turned down just like the full MP3
 
 
 @pytest.mark.parametrize(('helper', 'stage'), [('make_previews', 'preview'), ('measure_export', 'export')])

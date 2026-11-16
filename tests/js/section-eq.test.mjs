@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   checkSections, dragSectionEdge, parseFade, sectionRows, sameSections, sectionFromAudition, sectionFullStrength,
 } from '../../audiolab/web/js/section-eq.js';
-import { clockText } from '../../audiolab/web/js/dom.js';
+import { clockText, parseClock } from '../../audiolab/web/js/dom.js';
 
 const row = (from, to, text = '14 kHz -2 dB Q 0.7', fade = '') => ({ from, to, fade, text });
 const band = { hz: 14000, db: -2, q: 0.7 };
@@ -33,6 +33,19 @@ test('saved sections become rows that check back to the same sections', () => {
   assert.deepEqual(rows[0], { from: '40:00', to: '45:00', fade: '', text: '14 kHz −2.0 dB Q 0.7' });
   assert.ok(sameSections(checkSections(rows).sections, saved));
   assert.ok(!sameSections(saved.slice(1), saved));
+  // Removing every section is a change: Adjust sends `section_eq: []` (adjust.js settingsSnapshot) to clear them.
+  const cleared = checkSections([], 9632);
+  assert.deepEqual(cleared, { sections: [], errors: [] });
+  assert.ok(!sameSections(cleared.sections, saved));
+  assert.ok(sameSections(cleared.sections, undefined), 'nothing saved and nothing added: nothing sent');
+});
+
+test('clock times (Adjust start and length, section times): m:ss, h:mm:ss, decimals; 60 or more after a colon is unreadable', () => {
+  assert.equal(parseClock('15'), 15);
+  assert.equal(parseClock('0:20'), 20);
+  assert.equal(parseClock('1:02:03.5'), 3723.5);
+  assert.equal(parseClock(' 1:02:03,5 '), 3723.5);
+  for (const bad of ['1:75', '1:60:00', '', '1:2:3:4', '-0:10', '1:0x']) assert.ok(Number.isNaN(parseClock(bad)), bad);
 });
 
 test('exactly ten seconds with five-second fades is valid, including touching sections and millisecond round trips', () => {

@@ -676,6 +676,28 @@ def test_storage_counts_a_linked_original_once(manager):
         assert st['originals_bytes'] == 0 and st['jobs_bytes'] > 200_000
 
 
+def test_a_kept_original_never_shares_bytes_with_a_file_of_the_user(tmp_path, manager):
+    """An imported file re-run as Enhance is linked into the job (no copy up front), but the original the
+    Enhance keeps is a copy: editing the user's file in place must never change it."""
+    from fastapi.testclient import TestClient
+
+    from audiolab.api import create_app
+
+    users = tmp_path / 'Music' / 'Set.wav'
+    users.parent.mkdir()
+    users.write_bytes(b'U' * 200_000)
+    imported = manager.submit('analyze', {'kind': 'file', 'name': 'Set.wav', 'path': str(users)}, {}, title='Set')
+    wait_for(lambda: manager.get(imported.id).status == 'done')
+    with TestClient(create_app(local=False, token='t', manager=manager)) as c:
+        (job,) = c.post(
+            '/api/jobs', headers={'X-AudioLab-Token': 't'}, data={'task': 'enhance', 'source_job': imported.id}
+        ).json()['jobs']
+        wait_for(lambda: manager.get(job['id']).status == 'done')
+    assert Path(manager.get(job['id']).source['path']).samefile(users)  # the job's input: a link
+    kept = library.file_path(library.get(job['id']), 'original')
+    assert kept.read_bytes() == users.read_bytes() and not kept.samefile(users)
+
+
 def test_own_cover_next_to_an_upload_called_cover_original(tmp_path, manager):
     """An audio file named like the cover's own files must survive storing the cover (also on a re-run)."""
     from fastapi.testclient import TestClient

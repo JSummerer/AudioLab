@@ -64,7 +64,6 @@ include = [
     "audiolab", "tests", "docs", "README.md", "CHANGELOG.md", "CONTRIBUTING.md",
     "SECURITY.md", "LICENSE", "pyproject.toml", "start.sh", "start.bat", "AudioLab.command", "packaging",
 ]
-exclude = ["docs/PLAN.md"]
 
 [tool.ruff]
 line-length = 120

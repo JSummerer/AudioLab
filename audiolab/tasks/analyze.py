@@ -22,6 +22,11 @@ def stages(options: dict[str, Any], source: dict[str, Any]):
     return STAGES
 
 
+def loudness_word(lufs: float) -> str:
+    """Overall volume in a word a novice understands."""
+    return 'very loud' if lufs > -9 else 'loud' if lufs > -12 else 'normal' if lufs > -17 else 'quiet'
+
+
 def describe(analysis: dict[str, Any], kind: dict[str, Any]) -> list[str]:
     """Plain-language findings for novices."""
     if analysis.get('is_silent'):
@@ -31,8 +36,7 @@ def describe(analysis: dict[str, Any], kind: dict[str, Any]) -> list[str]:
         out.append(f'Sounds like: {kind["label"]} ({kind.get("confidence_label", "medium")} confidence).')
     lufs, tp, lra = analysis.get('integrated_lufs'), analysis.get('true_peak_dbtp'), analysis.get('lra')
     if lufs is not None:
-        loud = 'very loud' if lufs > -9 else 'loud' if lufs > -12 else 'normal' if lufs > -17 else 'quiet'
-        out.append(f'Overall volume is {loud} ({lufs:.1f} LUFS).')
+        out.append(f'Overall volume is {loudness_word(lufs)} ({lufs:.1f} LUFS).')
     if analysis.get('is_clipping'):
         out.append('The recording is clipped — some loud peaks are flattened, and that distortion cannot be undone.')
     elif tp is not None and tp > -0.5:

@@ -1,11 +1,12 @@
 // Job page — results of a finished job, per task. Listening and the files come first: the
-// player right under the sleeve (compare, stems, plain), then the files as a tracklist with
-// their downloads ("Save cover to folder" adds the cover as one more; a file the user moved
-// or deleted is marked, without download or player), then what was done and detected, and
-// "do more with this". Players register their cleanup on the page context `ctx`.
+// player right under the sleeve (compare, stems, plain), then the files as a tracklist —
+// in the app on this computer with "Show in Finder" (they are already in the output folder),
+// otherwise with their downloads ("Save cover to folder" adds the cover as one more; a file the
+// user moved or deleted is marked, without download or player), then what was done and
+// detected, and "do more with this". Players register their cleanup on the page context `ctx`.
 import { h, icon, clear, fmtBytes, fmtDuration, confidenceWords, shortFolder } from '../../dom.js';
 import { api, url, fileUrl, zipUrl, mediaUrl } from '../../api.js';
-import { store, emit, showDetails, upsertJob } from '../../store.js';
+import { store, emit, showDetails, upsertJob, aiAvailable } from '../../store.js';
 import { callout, toast, toastError, block } from '../../ui.js';
 import { go, jobPath, settingsPath } from '../../router.js';
 import { stemRows, filePlayer, trackRows } from '../../player.js';
@@ -81,12 +82,11 @@ function filesBlocks(job, r, ctx) {
   const all = r.files || [];
   const files = all.filter((f) => !isTrack(f));
   const tracks = all.filter(isTrack).sort((a, b) => (a.track ?? 0) - (b.track ?? 0));
+  // On this computer the files are already in the output folder: Show in Finder, no downloads.
   const local = !!store.health?.local;
-  const zip = all.filter(exists).length >= 2
-    ? h('a', {
-      class: ['btn', 'btn-sm', local ? 'btn-ghost' : 'btn-key'], href: zipUrl(job.id),
-      download: true, title: 'All files of this job in one ZIP',
-    }, icon('archive', 15), 'Download all (ZIP)')
+  const zip = !local && all.filter(exists).length >= 2
+    ? h('a', { class: 'btn btn-key btn-sm', href: zipUrl(job.id), download: true, title: 'All files of this job in one ZIP' },
+      icon('archive', 15), 'Download all (ZIP)')
     : null;
   const library = r.library_id
     ? h('a', { class: 'btn btn-ghost btn-sm', href: `#/library/${encodeURIComponent(r.library_id)}` }, icon('arrow', 15), 'Open in Library')
@@ -100,7 +100,7 @@ function filesBlocks(job, r, ctx) {
   if (!all.length) out.push(block('Your files', h('p', { class: 'muted' }, 'No files were produced.'), foot));
   else if (files.length) out.push(h('section', { class: 'block job-files' }, h('h2', { class: 'block-title' }, 'Your files'), list, foot));
   if (tracks.length) {
-    const t = trackRows(job.id, tracks.filter(exists));
+    const t = trackRows(job.id, tracks.filter(exists), { download: !local });
     const gone = tracks.filter((f) => !exists(f));
     ctx.onCleanup(() => t.destroy());
     out.push(h('details', { class: 'block tracks-block job-files', open: true },
@@ -118,9 +118,10 @@ function filesBlocks(job, r, ctx) {
   return out;
 }
 
-/** One file with its download — or, moved or deleted since, marked as such (as in the Library). */
+/** One file with its download (not in the local app) — or, moved or deleted since, marked as such (as in the Library). */
 function fileRow(job, f) {
   const there = exists(f);
+  const download = there && !store.health?.local;
   return h('li', { class: ['file-row', !there && 'is-missing'], dataset: { file: f.id } },
     f.kind === 'cover' ? coverThumb(mediaUrl(job.id, `file:${f.id}`), there)
       : icon(f.kind === 'video' ? 'video' : f.kind === 'report' ? 'file' : 'music', 18, 'file-ico'),
@@ -131,18 +132,22 @@ function fileRow(job, f) {
         there && f.size_bytes ? h('span', { class: 'file-size-inline' }, ` · ${fmtBytes(f.size_bytes)}`) : null),
       f.verification ? h('span', { class: 'file-name' }, exportCheckText(f.verification)) : null),
     h('span', { class: 'file-size' }, there ? fmtBytes(f.size_bytes) : ''),
-    there
+    download
       ? h('a', { class: 'btn btn-ghost btn-sm', href: fileUrl(job.id, f.id), download: f.name, 'aria-label': `Download ${f.label || f.name}` }, icon('download', 14), h('span', { class: 'dl-text' }, 'Download'))
-      : h('span', { class: 'lib-missing' }, icon('alert', 14), 'Moved or deleted'));
+      : there ? null : h('span', { class: 'lib-missing' }, icon('alert', 14), 'Moved or deleted'));
 }
 
-function exportCheckText(v) {
-  if (v.status === 'unverified') return 'Export saved · measurements unavailable';
+/** The peak check of a saved file (docs/API.md "verification"), in plain words; the loudness and
+ * peak numbers with "Show details". */
+function exportCheckText(v, details = showDetails()) {
+  if (v.status === 'unverified') return 'Saved · it couldn’t be checked afterwards';
+  const plain = v.status === 'warning' ? 'Checked after saving: its peaks go over the limit' : 'Checked after saving: peaks stay under the limit';
+  if (!details) return plain;
   const values = [
     Number.isFinite(v.integrated_lufs) ? `${v.integrated_lufs.toFixed(1)} LUFS` : 'loudness unavailable',
     Number.isFinite(v.true_peak_dbtp) ? `${v.true_peak_dbtp.toFixed(2)} dBTP` : 'silent',
   ].join(' · ');
-  return `${v.status === 'warning' ? 'Export exceeds peak ceiling' : 'Export checked'} · ${values}`;
+  return `${plain} · ${values}`;
 }
 
 /** A cover file's picture in place of the icon (the icon when it is gone or won't load). */
@@ -164,8 +169,9 @@ async function revealJob(job) {
   }
 }
 
+/** In the local app the main way to the files, so a push button, first in its row. */
 function revealButton(job) {
-  return h('button', { type: 'button', class: 'btn btn-ghost btn-sm', onclick: () => revealJob(job) }, icon('folder', 15), REVEAL_LABEL);
+  return h('button', { type: 'button', class: 'btn btn-key btn-sm reveal-btn', onclick: () => revealJob(job) }, icon('folder', 15), REVEAL_LABEL);
 }
 
 /** "Save cover to folder" (POST /api/jobs/{id}/cover) while the job has a cover and no cover file
@@ -186,8 +192,10 @@ function coverButton(job, r, list) {
       const row = fileRow(job, f);
       const old = [...list.children].find((li) => li.dataset.file === f.id);
       if (old) old.replaceWith(row); else list.append(row);
+      // The button goes away: onto the new file's download, else Show in Finder (local app).
+      const next = row.querySelector('a') || b.parentNode?.querySelector('.reveal-btn');
       b.remove();
-      row.querySelector('a')?.focus({ preventScroll: true }); // the button is gone: onto the new file
+      next?.focus({ preventScroll: true });
       const reveal = store.health?.local ? { label: REVEAL_LABEL, run: () => revealJob(job) } : null;
       toast(`Cover saved to the folder as “${f.name}”.`, { kind: 'ok', action: reveal, timeout: 7000 });
     } catch (e) {
@@ -216,11 +224,16 @@ function nextBlock(job) {
     ['separate', 'layers', 'Split it'],
     ['download', 'download', job.source?.kind === 'file' ? 'Convert it' : 'Save it'],
   ].filter((c) => c && c[0] !== job.task);
+  // Splitting needs the AI add-on: until it is installed, an honest link to set it up.
+  const aiMissing = !aiAvailable() && store.health?.ai?.install_supported !== false;
   // After a Check, enhancing is the one obvious next step.
-  return block('Do more with this', h('div', { class: 'next-actions' }, choices.map(([task, ico, label, file = null]) => h('button', {
-    type: 'button', class: ['btn', job.task === 'analyze' && task === 'enhance' ? 'btn-primary' : 'btn-key', 'btn-sm'],
-    onclick: () => emit('use-source', { job, task, file }),
-  }, icon(ico, 15), label))));
+  return block('Do more with this', h('div', { class: 'next-actions' }, choices.map(([task, ico, label, file = null]) => (
+    task === 'separate' && !aiAvailable()
+      ? aiMissing ? h('a', { class: 'btn btn-key btn-sm', href: settingsPath('ai') }, icon(ico, 15), 'Set up AI to split it…') : null
+      : h('button', {
+        type: 'button', class: ['btn', job.task === 'analyze' && task === 'enhance' ? 'btn-primary' : 'btn-key', 'btn-sm'],
+        onclick: () => emit('use-source', { job, task, file }),
+      }, icon(ico, 15), label)))));
 }
 
 // ---------------------------------------------------------------------------
@@ -372,7 +385,7 @@ function stemsBlock(job, r, ctx) {
   const gone = new Set((r.files || []).filter((f) => !exists(f)).map((f) => f.id));
   const stems = (r.previews || []).filter((p) => p.key.startsWith('stem:') && !gone.has(p.file_id));
   if (!stems.length) return null;
-  const s = stemRows(job.id, stems, r.files || []);
+  const s = stemRows(job.id, stems, r.files || [], { download: !store.health?.local });
   ctx.onCleanup(() => s.destroy());
   return listenSection('Your stems', s.el);
 }

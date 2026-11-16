@@ -277,8 +277,12 @@ def render(
     *,
     disk_backed: bool | None = None,
     calibration: AuditionCalibration | None = None,
+    input_metrics: dict[str, float] | None = None,
 ) -> dict[str, Any]:
-    """Render the master. Returns the report described in docs/ARCHITECTURE.md (Enhance in detail)."""
+    """Render the master. Returns the report described in docs/ARCHITECTURE.md (Enhance in detail).
+    `input_metrics`: integrated_lufs / true_peak_dbtp / lra already measured on this very `ref` (Enhance's
+    analysis: the same functions, or the streamed scan that matches them to float precision), so the
+    whole recording is not measured a second time."""
     progress = progress or Progress.null()
     ref, out_master, work_dir = Path(ref), Path(out_master), Path(work_dir)
     out_master.parent.mkdir(parents=True, exist_ok=True)
@@ -290,7 +294,9 @@ def render(
         scratch = ScratchBuffers(stack, work_dir, progress.check_cancel) if use_scratch and n > 0 else None
         staging_dir = stack.enter_context(TemporaryDirectory(dir=out_master.parent, prefix='.render-'))
         staged = Path(staging_dir) / 'master.flac'
-        report = _render(ref, staged, params, profile or {}, work_dir, progress, sr, n, scratch, calibration)
+        report = _render(
+            ref, staged, params, profile or {}, work_dir, progress, sr, n, scratch, calibration, input_metrics
+        )
         progress(100, 'Master ready')
         staged.replace(out_master)
     report['master_path'] = str(out_master)
@@ -308,6 +314,7 @@ def _render(
     n: int,
     scratch: ScratchBuffers | None,
     calibration: AuditionCalibration | None,
+    measured: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     t0 = time.time()
     steps: list[str] = []
@@ -325,7 +332,10 @@ def _render(
     out = scratch.array((n, 2)) if scratch is not None else None
     x = _read_ref(ref, warnings, check_cancel=progress.check_cancel, out=out)
     del out
-    input_metrics = _measure(x, sr, check_cancel=progress.check_cancel)
+    if measured is not None and not warnings:  # nothing replaced: the analysis measured these very samples
+        input_metrics = {k: measured[k] for k in ('integrated_lufs', 'true_peak_dbtp', 'lra')}
+    else:
+        input_metrics = _measure(x, sr, check_cancel=progress.check_cancel)
     silent = input_metrics['true_peak_dbtp'] < SILENCE_DBFS
     if n == 0 or (silent and calibration is None):
         raise AudioLabError(
@@ -358,7 +368,9 @@ def _render(
             del out
             use_ai = False
         elif params.ai_stage == 'stem_eq':
-            steps.append('Split the mix into drums, bass, vocals and the rest with AI and applied EQ to each part')
+            steps.append(
+                'Used AI to split the mix into drums, bass, vocals and the rest, and shaped each part (EQ per part)'
+            )
             adaptive_stats = {'engaged': False, 'skip_reason': 'AI stem EQ already shapes the low-mids'}
             deess_stats = res.get('deess') or deess_stats
             if deess_stats.get('engaged'):
@@ -371,7 +383,7 @@ def _render(
     if params.highpass_hz > 0:
         p(5, 'Removing rumble...')
         x = _filter(highpass_fq(params.highpass_hz, sr=sr), x, p.check_cancel, scratch)
-        steps.append(f'Filtered low frequencies below {params.highpass_hz:.0f} Hz')
+        steps.append(f'Removed deep rumble (below {params.highpass_hz:.0f} Hz)')
 
     # --- noise reduction -----------------------------------------------------
     if params.denoise in ('light', 'strong'):
@@ -398,28 +410,32 @@ def _render(
                 retained['lowmid'] = detector
             if adaptive_stats['engaged']:
                 steps.append(
-                    f'Controlled brief low-mid rises (at most {adaptive_stats["max_gr_db"]:.1f} dB, '
+                    f'Tamed brief muddy build-ups (low-mids, at most {adaptive_stats["max_gr_db"]:.1f} dB, '
                     f'{adaptive_stats["active_pct"]:.1f} % of the recording)'
                 )
             else:
-                steps.append('Left the low-mids unchanged — no isolated rises needed control')
+                steps.append('Found no muddy build-ups to tame (low-mids unchanged: no isolated rises needed control)')
         elif params.mud_cut_db < 0:
             x = _filter(peak_fq(320.0, params.mud_cut_db, q=1.0, sr=sr), x, p.check_cancel, scratch)
-            steps.append('Reduced low-mids around 320 Hz')
+            steps.append(f'Reduced muddiness (low-mids around 320 Hz, {params.mud_cut_db:+.1f} dB)')
         if params.bass_db > 0:
             x = _filter(lowshelf_fq(85.0, params.bass_db, s=1.0, sr=sr), x, p.check_cancel, scratch)
             steps.append(f'Added a little bass weight (+{params.bass_db:.1f} dB)')
         if params.presence_db:
             x = _filter(peak_fq(PRESENCE_HZ, params.presence_db, q=PRESENCE_Q, sr=sr), x, p.check_cancel, scratch)
-            steps.append(f'Adjusted upper mids around 3 kHz ({params.presence_db:+.1f} dB)')
+            plain = 'Brought voices and lead sounds forward' if params.presence_db > 0 else 'Softened harsh upper tones'
+            steps.append(f'{plain} (upper mids around 3 kHz, {params.presence_db:+.1f} dB)')
         if params.air_db:
             x = _filter(highshelf_fq(11000.0, params.air_db, s=1.0, sr=sr), x, p.check_cancel, scratch)
-            steps.append(f'Adjusted the high frequencies ({params.air_db:+.1f} dB)')
+            plain = 'Added a little brightness' if params.air_db > 0 else 'Took a little brightness off'
+            steps.append(f'{plain} (high frequencies above 11 kHz, {params.air_db:+.1f} dB)')
     if params.eq_bands and not params.volume_only:
         # One SOS cascade and one forward/backward pass. Each stage uses half the requested gain in dB.
         sos = np.concatenate([peak_fq(b['hz'], b['db'], q=b['q'], sr=sr) for b in params.eq_bands])
         x = _filter(sos, x, p.check_cancel, scratch)
-        steps.append(f'Applied your custom EQ ({len(params.eq_bands)} band{"s" if len(params.eq_bands) != 1 else ""})')
+        steps.append(
+            f'Applied your custom EQ with {len(params.eq_bands)} band{"s" if len(params.eq_bands) != 1 else ""}'
+        )
     if params.section_eq and not params.volume_only:
         done = apply_section_eq(x, params.section_eq, sr, p.check_cancel, scratch=scratch)
         if done:
@@ -431,7 +447,7 @@ def _render(
         p(40, 'Adding high-frequency harmonics...')
         x, ex = hf_restore(x, sr, float(cutoff), progress=p.sub(40, 48))
         if ex.get('applied'):
-            steps.append(f'Added new high-frequency harmonics above {cutoff / 1000:.1f} kHz')
+            steps.append(f'Filled in treble the source had lost (new harmonics above {cutoff / 1000:.1f} kHz)')
 
     # --- bass: harmonics and mono fold ---------------------------------------
     fold_hz = params.mono_bass_hz or 90.0
@@ -440,13 +456,13 @@ def _render(
         x = subharmonic_reinforce(
             x, wet=params.sub_harmonics, fc=fold_hz, sr=sr, check_cancel=p.check_cancel, scratch=scratch
         )
-        steps.append('Added harmonics to the deep bass')
+        steps.append('Made the deep bass easier to hear on small speakers (added bass harmonics)')
     if params.mono_bass_hz:
         p(56, 'Centering the bass...')
         x = mono_below(
             x, fc=params.mono_bass_hz, sr=sr, check_cancel=p.check_cancel, band_buffer=_work_buffer(scratch, x)
         )
-        steps.append(f'Made bass below {params.mono_bass_hz:.0f} Hz mono (shared between left and right)')
+        steps.append(f'Centred the deep bass between the speakers (mono below {params.mono_bass_hz:.0f} Hz)')
 
     # --- compression -----------------------------------------------------------
     comp_stats: dict[str, Any] = {'engaged': False}
@@ -480,10 +496,12 @@ def _render(
     if params.compressor in ('glue', 'leveler'):
         comp_stats['engaged'] = comp_stats['max_gr_db'] > 0
         if comp_stats['engaged']:
-            steps.append(f'Compressed louder moments (at most {comp_stats["max_gr_db"]:.1f} dB of reduction)')
+            steps.append(
+                f'Gently evened out the loudest moments (compression, at most {comp_stats["max_gr_db"]:.1f} dB)'
+            )
         else:
             comp_stats['skip_reason'] = 'no measurable gain reduction'
-            steps.append('Compression made no measurable level change')
+            steps.append('Left the dynamics as they were (compression made no measurable level change)')
 
     # --- de-esser (the stem-aware AI stage already treated the vocals) --------
     if params.deess_db > 0 and not params.volume_only and not (use_ai and params.ai_stage == 'stem_eq'):
@@ -518,7 +536,7 @@ def _render(
             for s in blocks(len(x), p.check_cancel):
                 x[s] -= dc
             tp_now = true_peak_db(x, check_cancel=p.check_cancel)
-            steps.append('Removed an inaudible DC offset (the waveform sat off-centre and wasted headroom)')
+            steps.append('Re-centred the waveform to free some headroom (an inaudible DC offset)')
     dc_removed = bool(dc.any())
 
     # --- loudness --------------------------------------------------------------
@@ -630,8 +648,8 @@ def _render(
     else:
         steps.insert(
             0,
-            f'Made it {abs(delta):.1f} dB {"louder" if delta > 0 else "quieter"} '
-            f'({input_metrics["integrated_lufs"]:.1f} → {final["integrated_lufs"]:.1f} LUFS)',
+            f'Made it {"louder" if delta > 0 else "quieter"} ({delta:+.1f} dB: '
+            f'{input_metrics["integrated_lufs"]:.1f} → {final["integrated_lufs"]:.1f} LUFS)',
         )
     # A passage rendered with the recording's retained gain is not expected to measure at the target.
     retained_gain = audition.pre_limiter_gain_db is not None or audition.volume_programme_lufs is not None

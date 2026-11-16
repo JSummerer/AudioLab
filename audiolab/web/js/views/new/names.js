@@ -1,5 +1,5 @@
-// New view — name overrides (title + artist) on the source card, used for file
-// names and tags. Sent as `options.meta` (docs/API.md).
+// New view — name overrides (title + artist) under More options, used for file
+// names and tags. Sent as `options.meta` (docs/API.md). The source card shows the name.
 import { h, icon } from '../../dom.js';
 import { redraw, focusIn } from './state.js';
 
@@ -39,18 +39,21 @@ export function metaPayload(src) {
   return Object.keys(out).length ? out : null;
 }
 
+/** The Name row of More options: "Edit name" (and Undo once renamed), or the editor while editing. */
 export function nameTools(src) {
+  if (src.editing) return nameEditor(src);
   const renamed = !!metaPayload(src);
   return h('div', { class: 'name-tools' },
     h('button', {
       type: 'button', class: 'btn btn-ghost btn-sm name-edit-btn',
-      onclick: () => { src.editing = true; redraw('source'); focusIn('#metaTitle', { select: true }); },
+      onclick: () => { src.editing = true; redraw('options'); focusIn('#metaTitle', { select: true }); },
     }, icon('pencil', 14), 'Edit name'),
-    renamed ? h('span', { class: 'muted small' }, 'Your name is used for the files and tags.') : null,
     renamed && src.kind !== 'job' ? h('button', {
       type: 'button', class: 'btn btn-ghost btn-sm',
-      onclick: () => { src.meta = null; redraw('source', 'action'); focusIn('.name-edit-btn'); },
-    }, 'Undo') : null);
+      onclick: () => { src.meta = null; redraw('source', 'options', 'action'); focusIn('.name-edit-btn'); },
+    }, 'Undo') : null,
+    h('p', { class: 'muted small name-note' }, renamed ? 'Your name is used for the files and the song info (tags).'
+      : 'Used for the file names and the song info (tags).'));
 }
 
 export function nameEditor(src) {
@@ -58,7 +61,7 @@ export function nameEditor(src) {
   const draft = src.draft || cur;
   const title = h('input', { class: 'field field-sm', id: 'metaTitle', value: draft.title, autocomplete: 'off', spellcheck: 'false', maxlength: 200 });
   const artist = h('input', { class: 'field field-sm', id: 'metaArtist', value: draft.artist, autocomplete: 'off', spellcheck: 'false', maxlength: 200, placeholder: 'Unknown' });
-  const close = () => { src.editing = false; src.draft = null; redraw('source', 'action'); focusIn('.name-edit-btn'); };
+  const close = () => { src.editing = false; src.draft = null; redraw('source', 'options', 'action'); focusIn('.name-edit-btn'); };
   const save = () => {
     const next = { title: title.value.trim(), artist: artist.value.trim() };
     if (src.kind === 'job') {
@@ -90,6 +93,5 @@ export function nameEditor(src) {
       h('label', { class: 'name-field', for: 'metaArtist' }, h('span', { class: 'name-field-label' }, 'Artist'), artist)),
     h('div', { class: 'name-actions' },
       h('button', { type: 'button', class: 'btn btn-key btn-sm', onclick: save }, icon('check', 14), 'Save name'),
-      h('button', { type: 'button', class: 'btn btn-ghost btn-sm', onclick: close }, 'Cancel'),
-      h('span', { class: 'muted small' }, 'Used for the file names and the song info (tags).')));
+      h('button', { type: 'button', class: 'btn btn-ghost btn-sm', onclick: close }, 'Cancel')));
 }

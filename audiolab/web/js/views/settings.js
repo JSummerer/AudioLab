@@ -1,22 +1,23 @@
 // Settings (#/settings[/<section>]): one column of sections (rows with hairlines: label
-// and help left, the control right) under a sticky strip of section tabs that follows
-// the scroll position. The route's section may also name a spot inside a section that
-// other views link to (#/settings/ai, #/settings/cookies; #/settings/output opens the
-// folder field): the page scrolls there and flashes it. Changes save immediately; a
-// small "Saved ✓" next to the setting confirms it. Paths show short, the full one on hover.
+// and help left; switches and buttons right of them, choices under them) under a sticky
+// strip of section tabs that follows the scroll position. The route's section may also
+// name a spot inside a section that other views link to (#/settings/ai, /cookies, /updates,
+// /downloader; #/settings/output opens the folder field): the page scrolls there and
+// flashes it. Changes save immediately; a small "Saved ✓" next to the setting confirms it.
+// Paths show short, the full one on hover. A section with nothing to show hides, tab and all.
 import { h, icon, clear, append, shortFolder, fmtBytes, fmtDurationWords } from '../dom.js';
 import { api } from '../api.js';
-import { store, on, saveSettings, loadHealth, deviceLabel, appName, isFinished, forgetShown, formatInfo } from '../store.js';
+import { store, on, saveSettings, loadHealth, deviceLabel, appName, isFinished, forgetShown, formatInfo, ENHANCE_PRESETS } from '../store.js';
 import { segmented, chips, switchControl, led, toast, toastError, callout, copyText, confirmDialog, closeInfo } from '../ui.js';
 import { go, settingsPath } from '../router.js';
 import { clearFinished, copyDiagnostics } from '../actions.js';
 
 const SECTIONS = [
   ['files', 'Files'], ['defaults', 'Defaults'], ['look', 'Look'], ['downloads', 'Downloads & sign-in'],
-  ['system', 'AI & system'], ['storage', 'Storage'], ['about', 'About'],
+  ['system', 'Updates & add-ons'], ['storage', 'Storage'], ['about', 'About'],
 ];
 // Spots inside a section → the section holding them.
-const SPOTS = { ai: 'system', cookies: 'downloads', output: 'files', shortcut: 'downloads' };
+const SPOTS = { ai: 'system', updates: 'system', downloader: 'system', cookies: 'downloads', output: 'files' };
 const STALE_DOWNLOADER_DAYS = 60;
 const SIGN_IN_BROWSERS = [
   ['', 'Off'], ['firefox', 'Firefox'], ['chrome', 'Chrome'], ['edge', 'Edge'], ['brave', 'Brave'],
@@ -32,6 +33,10 @@ let flashing = null;  // { key, until }: a section or spot to highlight, survive
 let spyFrame = 0;
 let spyPausedUntil = 0;
 let aiPending = false; // keep all AI actions disabled while a request is in flight
+// Requests in flight, kept outside the controls: Health redraws them (AI polling, events) meanwhile.
+let checkPending = false; // "Check now"
+let dlPending = null;     // 'update' | 'reset' while a downloader request runs
+// The server's own daily check needs no polling: its result arrives as a `system` event (store.js).
 let defaultsWaiting = false; // Defaults were drawn before /api/health brought the formats
 let folderDraft = null; // the output folder field's text while it is open (null = closed)
 const storage = { data: null, finished: null, key: null, timer: 0, refreshPending: false, ai: null };
@@ -50,6 +55,7 @@ export const settingsView = {
       links: {},
       sections: {},
       storageInfo: h('div', { class: 'storage-info', hidden: true, tabindex: '-1' }),
+      originalsInfo: h('div', { class: 'originals-info', tabindex: '-1' }),
       live: h('p', { class: 'sr-only', role: 'status' }),
     };
     this.heading = refs.title;
@@ -78,7 +84,7 @@ export const settingsView = {
       renderSystem();
       renderAbout();
     });
-    on('settings', () => { if (visible && !saving) { renderDefaults(); renderLook(); renderDownloads(); renderStorage(); } });
+    on('settings', () => { if (visible && !saving) { renderDefaults(); renderLook(); renderDownloads(); renderSystem(); renderStorage(); } });
     on('jobs', () => { if (visible) renderStorageInfo(); });
   },
 
@@ -153,7 +159,8 @@ function spy() {
   if (!visible || Date.now() < spyPausedUntil) return;
   const line = scroller.getBoundingClientRect().top + 110;
   let key = SECTIONS[0][0];
-  for (const [k] of SECTIONS) if (refs.sections[k].el.getBoundingClientRect().top <= line) key = k;
+  // A hidden section measures 0 from the top: it would always look current.
+  for (const [k] of SECTIONS) if (!refs.sections[k].el.hidden && refs.sections[k].el.getBoundingClientRect().top <= line) key = k;
   if (scroller.scrollTop > 0 && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 4) key = SECTIONS.at(-1)[0];
   setCurrent(key);
 }
@@ -174,17 +181,29 @@ function setCurrent(key) {
 // ---------------------------------------------------------------------------
 // Building blocks
 // ---------------------------------------------------------------------------
-/** Rebuild a section's content, keeping keyboard focus on the same control (by id). */
+// "Use built-in version" goes away once it has worked: focus moves on to these, not to the page.
+const FOCUS_NEXT = { resetDownloader: ['updateDownloader', 'checkUpdates'] };
+
+/** Rebuild a section's content, keeping keyboard focus on the same control (by id).
+ *  A section left empty (e.g. no sign-in on a remote server) hides with its tab. */
 function fill(key, ...nodes) {
-  const body = refs.sections[key].body;
+  const sec = refs.sections[key];
+  const body = sec.body;
   const focusedId = body.contains(document.activeElement) ? document.activeElement.id : '';
   append(clear(body), nodes);
-  if (focusedId) document.getElementById(focusedId)?.focus({ preventScroll: true });
+  const empty = !body.childElementCount;
+  if (sec.el) sec.el.hidden = empty;
+  if (refs.links?.[key]) refs.links[key].hidden = empty;
+  if (focusedId) {
+    const next = [focusedId, ...(FOCUS_NEXT[focusedId] || [])].map((id) => document.getElementById(id)).find(Boolean);
+    next?.focus({ preventScroll: true });
+  }
   applyFlash();
 }
 
 /** Label + help + control. `setting` names the settings key it changes (for "Saved ✓").
- *  A switch stays on the right of its words even on a phone; other controls go under them. */
+ *  Switches and buttons sit right of their words (a switch even on a phone); choices
+ *  (pills, checklists, a list) go under them with `stack`, so every choice row reads alike. */
 function row(label, help, control, { stack = false, setting = null } = {}) {
   const isSwitch = control?.classList?.contains('switch');
   return h('div', { class: ['adv-row', stack && 'adv-row-stack', isSwitch && 'adv-row-switch'], dataset: setting ? { setting } : null },
@@ -215,6 +234,7 @@ async function save(patch, { quiet = false, mark = true } = {}) {
     renderDefaults();
     renderLook();
     renderDownloads();
+    renderSystem();
     renderStorage();
     if (quiet) throw e;
     return false;
@@ -358,10 +378,10 @@ function renderDefaults() {
         options: (fm.download || []).filter((f) => f.key !== 'video').map((f) => pill(f, true)),
         onChange: (v) => save({ download_format: v }),
       }), { stack: true, setting: 'download_format' }),
-    row('Enhance saves', 'Formats ticked for every Enhance job.',
+    row('Enhance saves', 'Ticked for every Enhance job.',
       loading || chips({
         label: 'Enhance formats', size: 'sm', values: new Set(s.enhance_formats || []),
-        options: (fm.enhance || []).map((f) => choice(f, true)),
+        options: enhanceOptions(fm.enhance || [], choice),
         // In the order shown, not the order clicked.
         onChange: (next) => {
           if (next.size) save({ enhance_formats: (fm.enhance || []).map((f) => f.key).filter((k) => next.has(k)) });
@@ -375,7 +395,22 @@ function renderDefaults() {
         onChange: (v) => save({ separate_format: v }),
       }), { stack: true, setting: 'separate_format' }),
     row('Cover art', 'Puts the video thumbnail (or a file’s own picture) into saved and enhanced songs as album art.',
-      switchControl({ checked: s.embed_cover, label: 'Cover art', onChange: (v) => save({ embed_cover: v }) }), { setting: 'embed_cover' }));
+      switchControl({ checked: s.embed_cover, label: 'Cover art', onChange: (v) => save({ embed_cover: v }) }), { setting: 'embed_cover' }),
+    // Stored as ui_mode ('advanced' = on). Changing it also forgets what was opened or
+    // closed one by one, so the new default shows everywhere.
+    row('Show all options by default', 'Opens “More options” for every task and shows the details (measurements, decisions, full log) on job pages. Each can still be opened or closed on its own.',
+      switchControl({
+        id: 'showAllOptions', checked: s.ui_mode === 'advanced', label: 'Show all options by default',
+        onChange: (v) => { forgetShown(); save({ ui_mode: v ? 'advanced' : 'simple' }); },
+      }), { setting: 'ui_mode' }));
+}
+
+/** Enhance formats named as on New: the destination presets first, the format as their second
+ *  line; then the other formats by name. The facts stay in each (i) card from /api/health. */
+function enhanceOptions(all, choice) {
+  const usual = ENHANCE_PRESETS.flatMap(([key, label]) => all.filter((f) => f.key === key).map((f) => ({ ...choice(f, true), label, desc: f.label })));
+  const rest = all.filter((f) => !ENHANCE_PRESETS.some(([key]) => key === f.key)).map((f) => choice(f, true));
+  return [...usual, ...rest];
 }
 
 function renderLook() {
@@ -386,104 +421,219 @@ function renderLook() {
         label: 'Theme', size: 'sm', value: s.theme || 'auto',
         options: [{ value: 'auto', label: 'Automatic' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }],
         onChange: (v) => save({ theme: v }),
-      }), { setting: 'theme' }),
-    // Stored as ui_mode ('advanced' = on). Changing it also forgets what was opened or
-    // closed one by one, so the new default shows everywhere.
-    row('Show all options by default', 'Opens “More options” for every task and shows the details (measurements, decisions, full log) on job pages. Each can still be opened or closed on its own.',
-      switchControl({
-        id: 'showAllOptions', checked: s.ui_mode === 'advanced', label: 'Show all options by default',
-        onChange: (v) => { forgetShown(); save({ ui_mode: v ? 'advanced' : 'simple' }); },
-      }), { setting: 'ui_mode' }));
+      }), { stack: true, setting: 'theme' }));
 }
 
 // ---------------------------------------------------------------------------
-// Downloads & sign-in: the downloader, browser sign-in, the bookmarklet
+// Downloads & sign-in: browser sign-in for videos YouTube refuses without it
 // ---------------------------------------------------------------------------
 function renderDownloads() {
-  const dl = store.health?.downloader || {};
-  const canUpdate = dl.update_supported !== false && !store.health?.packaged;
-  const age = dl.age_days;
-  const stale = dl.ok && age != null && age > STALE_DOWNLOADER_DAYS;
-  const updateBtn = canUpdate ? h('button', { type: 'button', class: 'btn btn-key btn-sm', id: 'updateDownloader' }, icon('retry', 14), 'Update downloader') : null;
-  updateBtn?.addEventListener('click', async () => {
-    updateBtn.disabled = true;
-    updateBtn.textContent = 'Updating…';
-    try {
-      const res = await api('/api/system/update-downloader', { method: 'POST' });
-      toast(res?.message || (res?.ok ? 'Downloader is up to date.' : 'The update did not work.'), { kind: res?.ok ? 'ok' : 'danger', timeout: 6000 });
-      await loadHealth();
-    } catch (e) {
-      toastError(e);
-      updateBtn.disabled = false;
-      updateBtn.textContent = 'Update downloader';
-    }
-  });
-  fill('downloads',
-    statusRow(dl.ok ? 'ok' : 'bad', 'Downloader (yt-dlp)', dl.ok ? `Version ${dl.version || '?'}${canUpdate ? ' — update it if downloads start failing' : ' · built into the app'}` : 'Not available', updateBtn,
-      stale ? h('div', { class: 'adv-help nudge' },
-        `This version is ${Math.round(age)} days old. Sites like YouTube change often${canUpdate ? ' — updating takes a moment.' : '.'}`) : null,
-      !canUpdate ? h('div', { class: 'adv-help' }, 'Install a newer AudioLab app to update the built-in downloader. Your Library and output files stay in place.') : null),
-    canUpdate ? row('Fix the downloader automatically', 'When a download fails because the site changed, update the downloader and try once more.',
-      switchControl({
-        id: 'autoUpdateDownloader',
-        checked: (store.settings || {}).auto_update_downloader !== false, label: 'Fix the downloader automatically',
-        onChange: (v) => save({ auto_update_downloader: v }),
-      }), { setting: 'auto_update_downloader' }) : null,
-    signInRow(),
-    bookmarklet());
+  fill('downloads', signInRow());
 }
 
 function signInRow() {
   const s = store.settings || {};
   if (!store.health?.local || !('cookies_browser' in s)) return null;
   const locked = (s.locked || []).includes('cookies_browser');
+  // This row only shows for a local server, so the browser's platform is the server's.
+  const mac = /Mac/i.test(navigator.platform || navigator.userAgent);
   const select = h('select', {
     class: 'field field-select', id: 'cookiesBrowser', 'aria-label': 'YouTube sign-in', disabled: locked,
     dataset: { autofocus: '' },
-  }, SIGN_IN_BROWSERS.map(([value, label]) => h('option', { value, selected: (s.cookies_browser || '') === value }, label)));
+  }, SIGN_IN_BROWSERS.map(([value, label]) => h('option', { value, selected: (s.cookies_browser || '') === value },
+    mac && value === 'safari' ? `${label} (needs Full Disk Access)` : label)));
   select.addEventListener('change', () => save({ cookies_browser: select.value }));
   return h('div', { dataset: { spot: 'cookies' } },
     row('YouTube sign-in',
-      'Used only when YouTube refuses a video without it (age check, “confirm you’re not a bot”, members only), never for ordinary videos. '
-        + 'YouTube can block accounts that download a lot, so a spare Google account is safer. Premium gives no better sound for uploads like DJ sets. '
-        + 'Uses your browser’s existing sign-in on this computer; nothing is sent anywhere else. '
-        // This row only shows for a local server, so the browser's platform is the server's.
-        + (/Mac/i.test(navigator.platform || navigator.userAgent)
-          ? 'Firefox works without extra prompts. Chrome, Edge, Brave and similar ask for your Mac’s password once; Safari needs Full Disk Access.'
-          : 'Firefox works most reliably.'),
-      select, { setting: 'cookies_browser' }));
-}
-
-function bookmarkletHref() {
-  // Never put the access token in here: the bookmarklet runs inside the visited page,
-  // which could read it. The AudioLab tab it opens has its own stored token (or asks).
-  const base = new URL('./', location.href).href.replace(/#.*$/, '');
-  const prefix = `${base}?url=`;
-  // The whole script is percent-encoded: browsers decode javascript: URLs before running them.
-  const code = `void(window.open(${JSON.stringify(prefix)}+encodeURIComponent(location.href),'_blank'))`;
-  return `javascript:${encodeURIComponent(code)}`;
-}
-
-function bookmarklet() {
-  const href = bookmarkletHref();
-  const name = `Send to ${appName()}`;
-  const link = h('a', { class: 'bookmarklet', href, draggable: 'true', title: 'Drag this to your bookmarks bar' }, icon('bookmark', 15), name);
-  link.addEventListener('click', (e) => {
-    e.preventDefault();
-    toast('Drag the button to your bookmarks bar, then click it on a YouTube page.', { kind: 'info' });
-  });
-  const copy = h('button', { type: 'button', class: 'btn btn-ghost btn-sm', id: 'copyBookmarklet' }, icon('clipboard', 14), 'Copy as text');
-  copy.addEventListener('click', () => copyText(href, { done: 'Copied — paste it as the address of a new bookmark.', title: name }));
-  return h('div', { dataset: { spot: 'shortcut' } },
-    row(name, 'Drag this to your bookmarks bar. On a YouTube page, click it to open the video here.',
-      h('div', { class: 'bm-row' }, link, copy)));
+      'Used only when YouTube refuses a video without it (age check, bot check, members only), and only sent to YouTube. '
+        + 'YouTube can block accounts that download a lot, so a spare Google account is safer. '
+        + (mac ? 'Firefox asks for nothing; Chrome and similar ask for your Mac’s password once.' : 'Firefox works most reliably.'),
+      select, { stack: true, setting: 'cookies_browser' }));
 }
 
 // ---------------------------------------------------------------------------
-// AI & system
+// Updates & add-ons: the app itself, the downloader, the AI add-on, the audio engine
 // ---------------------------------------------------------------------------
 function renderSystem() {
   const ff = store.health?.ffmpeg || {};
+  fill('system',
+    !ff.ok && ff.error ? callout('danger', 'Audio engine missing', ff.error) : null,
+    appUpdateRow(),
+    checkUpdatesRow(),
+    downloaderRows(),
+    aiRows(),
+    statusRow(ff.ok ? 'ok' : 'bad', 'Audio engine (ffmpeg)', ff.ok ? `Version ${ff.version || '?'} · ${ff.source === 'bundled' ? 'built in' : 'installed on this computer'}` : (ff.error || 'Not found')));
+}
+
+/** Whether dotted version `a` is newer than `b`, part by part as numbers ("2026.10.26" > "2026.9.1"). */
+function isNewer(a, b) {
+  const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d) return d > 0;
+  }
+  return false;
+}
+
+/** The AudioLab row's state from Health's `updates` (null on an older server without update checks).
+ *  { kind: checking | available | error | current | unchecked, led, detail, latest?, url?, error? } */
+function appUpdateState(hth) {
+  const up = hth?.updates;
+  if (!up || typeof up !== 'object') return null;
+  const app = up.app && typeof up.app === 'object' ? up.app : {};
+  const version = hth.version ? `Version ${hth.version}` : 'This version';
+  if (checkPending || up.checking) return { kind: 'checking', led: 'on', detail: `${version} · checking…` };
+  if (app.available === true && app.latest) {
+    // Only ever link to the project's own GitHub pages.
+    const url = typeof app.url === 'string' && app.url.startsWith('https://github.com/') ? app.url : null;
+    return { kind: 'available', led: 'ok', detail: `${version} · ${app.latest} is available`, latest: String(app.latest), url };
+  }
+  if (up.error) return { kind: 'error', led: 'dim', detail: `${version} · couldn’t check. Try again later.`, error: typeof up.error === 'string' ? up.error : null };
+  if (up.checked_at) return { kind: 'current', led: 'ok', detail: `${version} · up to date` };
+  return { kind: 'unchecked', led: 'dim', detail: `${version} · not checked yet` };
+}
+
+function appUpdateRow() {
+  const u = appUpdateState(store.health);
+  if (!u) return null;
+  // "Check now" stays in every state: a later release can still be found after postponing this
+  // one, and keyboard focus stays on it (same id) when a check finds an update. Next to "Get X"
+  // it steps back to a minor action. aria-disabled, not disabled, while checking: keeps focus too.
+  const action = h('div', { class: 'block-actions' },
+    u.url ? h('a', { class: 'btn btn-key btn-sm', id: 'getUpdate', href: u.url, target: '_blank', rel: 'noopener noreferrer' }, `Get ${u.latest}`, icon('external', 14)) : null,
+    h('button', {
+      type: 'button', class: `btn ${u.url ? 'btn-ghost' : 'btn-key'} btn-sm`, id: 'checkUpdates', 'aria-disabled': u.kind === 'checking' ? 'true' : null, onclick: checkUpdates,
+    }, u.kind === 'checking' ? 'Checking…' : 'Check now'));
+  let note = null;
+  if (u.kind === 'available' && store.health?.packaged) {
+    note = `Quit ${appName()}, then replace it in Applications. Your Library and settings stay. macOS asks you to allow the new copy once.`;
+  } else if (u.kind === 'error') {
+    note = u.error; // the server's short reason, if it gave one
+  }
+  return h('div', { dataset: { spot: 'updates' } },
+    statusRow(u.led, appName(), u.detail, action, note ? h('div', { class: 'adv-help' }, note) : null));
+}
+
+/** Only on request: opening Settings never asks GitHub anything by itself. */
+async function checkUpdates() {
+  if (checkPending || store.health?.updates?.checking) return; // the button only looks disabled
+  checkPending = true;
+  renderSystem();
+  try {
+    const res = await api('/api/system/check-updates', { method: 'POST' });
+    if (res && typeof res === 'object' && store.health) store.health = { ...store.health, updates: res };
+  } catch (e) {
+    toastError(e);
+  } finally {
+    checkPending = false;
+    await loadHealth().catch(() => {});
+    if (visible) {
+      renderSystem();
+      const u = appUpdateState(store.health);
+      if (u) announce(`${appName()}: ${u.detail}.`);
+    }
+  }
+}
+
+function checkUpdatesRow() {
+  const s = store.settings || {};
+  if (!('check_updates' in s)) return null; // older server
+  return row('Check for updates automatically',
+    `Once a day ${appName()} asks GitHub whether a newer app or downloader exists. GitHub sees your IP address; nothing else is sent.`,
+    switchControl({
+      id: 'checkUpdatesAuto', checked: s.check_updates === true, label: 'Check for updates automatically',
+      disabled: (s.locked || []).includes('check_updates'),
+      onChange: async (v) => { if (await save({ check_updates: v }) && v) loadHealth().catch(() => {}); },
+    }), { setting: 'check_updates' });
+}
+
+/** What the downloader row says and offers, from Health (the newer fields are optional). */
+function downloaderState(hth) {
+  const dl = hth?.downloader || {};
+  const packaged = !!hth?.packaged;
+  // An older packaged app reports false: only a new app could update its downloader then.
+  const canUpdate = packaged ? dl.update_supported === true : dl.update_supported !== false;
+  const own = dl.source === 'bundled' || dl.source === 'updated'; // the packaged app's own copy
+  const newer = dl.ok && dl.latest && dl.version && isNewer(dl.latest, dl.version) ? String(dl.latest) : null;
+  const version = `Version ${dl.version || '?'}`;
+  let detail;
+  if (!dl.ok) detail = 'Not available';
+  else if (own) detail = `${version} · ${dl.source === 'updated' ? 'updated' : 'built in'}${newer ? ` · ${newer} is available` : ''}`;
+  else if (packaged && !canUpdate) detail = `${version} · built into the app`;
+  else detail = newer ? `${version} · ${newer} is available` : `${version} — update it if downloads start failing`;
+  const age = dl.age_days;
+  const builtIn = dl.bundled_version || (dl.source !== 'updated' && dl.version) || null;
+  return {
+    led: dl.ok ? 'ok' : 'bad', detail, canUpdate,
+    // The packaged app never fetches a downloader without a click, so the switch would do nothing there.
+    autoFix: canUpdate && !packaged,
+    // After a failed update this also clears it away, so it isn't tried again.
+    canReset: packaged && canUpdate && (dl.source === 'updated' || dl.fallback === true),
+    fallback: dl.fallback === true ? `The update didn’t load. Using built-in ${builtIn || 'version'}.` : null,
+    staleDays: dl.ok && age != null && age > STALE_DOWNLOADER_DAYS ? Math.round(age) : null,
+    replaceApp: packaged && !canUpdate,
+  };
+}
+
+function downloaderRows() {
+  const d = downloaderState(store.health);
+  const actions = h('div', { class: 'block-actions' });
+  if (d.canUpdate) {
+    actions.append(h('button', {
+      type: 'button', class: 'btn btn-key btn-sm', id: 'updateDownloader', 'aria-disabled': dlPending ? 'true' : null,
+      onclick: () => downloaderAction('update', async () => {
+        const res = await api('/api/system/update-downloader', { method: 'POST' });
+        toast(res?.message || (res?.ok ? 'Downloader is up to date.' : 'The update did not work.'), { kind: res?.ok ? 'ok' : 'danger', timeout: 6000 });
+      }),
+    }, icon('retry', 14), dlPending === 'update' ? 'Updating…' : 'Update downloader'));
+  }
+  if (d.canReset) {
+    actions.append(h('button', {
+      type: 'button', class: 'btn btn-ghost btn-sm', id: 'resetDownloader', 'aria-disabled': dlPending ? 'true' : null,
+      onclick: () => downloaderAction('reset', async () => {
+        await api('/api/system/downloader', { method: 'DELETE' });
+        toast('Using the built-in downloader again.', { kind: 'ok' });
+      }),
+    }, dlPending === 'reset' ? 'Switching…' : 'Use built-in version'));
+  }
+  return [
+    h('div', { dataset: { spot: 'downloader' } },
+      statusRow(d.led, 'Downloader (yt-dlp)', d.detail, actions.childElementCount ? actions : null,
+        d.fallback ? h('div', { class: 'adv-help sys-bad' }, d.fallback) : null,
+        d.staleDays != null ? h('div', { class: 'adv-help nudge' },
+          `This version is ${d.staleDays} days old. Sites like YouTube change often${d.canUpdate ? ' — choose “Update downloader”.' : '.'}`) : null,
+        d.replaceApp ? h('div', { class: 'adv-help' }, `Install a newer ${appName()} app to update the built-in downloader. Your Library and output files stay in place.`) : null)),
+    d.autoFix ? row('Fix the downloader automatically', 'When a download fails because the site changed, update the downloader and try once more.',
+      switchControl({
+        id: 'autoUpdateDownloader',
+        checked: (store.settings || {}).auto_update_downloader !== false, label: 'Fix the downloader automatically',
+        onChange: (v) => save({ auto_update_downloader: v }),
+      }), { setting: 'auto_update_downloader' }) : null,
+  ];
+}
+
+/** One downloader request at a time; the row says what is running until Health has the result. */
+async function downloaderAction(kind, run) {
+  if (dlPending) return;
+  dlPending = kind;
+  renderSystem();
+  try { await run(); } catch (e) { toastError(e); }
+  finally {
+    await loadHealth().catch(() => {});
+    dlPending = null;
+    if (visible) renderSystem();
+  }
+}
+
+/** A screen reader hears what changed without moving focus. */
+function announce(message) {
+  if (!refs.live) return;
+  refs.live.textContent = '';
+  setTimeout(() => { refs.live.textContent = message; }, 60);
+}
+
+function aiRows() {
   const ai = store.health?.ai || {};
   refreshAiStorage(ai);
   const canInstall = ai.install_supported === true;
@@ -506,14 +656,12 @@ function renderSystem() {
     aiDetail = ai.reason || 'Not installed. Needed for Split and for Enhance → AI stems.';
   }
   if (!ai.installing && ai.install_ok === false) aiDetail += ' · last install did not finish';
-  if (!ai.installing && canInstall && (!ai.available || outdated)) {
+  // One action for whatever is missing; a working install gets none (repair is only for a broken one).
+  if (!ai.installing && canInstall && (!ai.available || outdated || broken)) {
     const label = outdated ? 'Update AI add-on' : broken ? 'Repair AI add-on'
       : managed && (ai.downloaded_bytes > 0 || ai.state === 'partial') ? 'Resume AI download'
         : managed && ai.removable ? 'Retry AI install' : 'Enable AI features';
     actions.append(aiButton('enableAi', label, 'btn-primary', () => installAi(broken ? { repair: true } : {})));
-  }
-  if (managed && !ai.installing && canInstall && !broken && (ai.available || ai.version)) {
-    actions.append(aiButton('repairAi', 'Repair', 'btn-key', () => installAi({ repair: true })));
   }
   if (managed && ai.installing) {
     actions.append(aiButton('cancelAi', 'Cancel install', 'btn-key', async () => {
@@ -534,24 +682,27 @@ function renderSystem() {
       scheduleStorageRefresh();
     }));
   }
-  const sizes = [];
-  if (managed && ai.download_bytes > 0) sizes.push(`Download: ${fmtBytes(ai.download_bytes)}.`);
-  if (managed && ai.target_installed_bytes > 0) sizes.push(`Unpacked download: ${fmtBytes(ai.target_installed_bytes)}.`);
-  if (managed && ai.installed_bytes > 0) sizes.push(`AI storage used: ${fmtBytes(ai.installed_bytes)}.`);
+  // One size: the download before installing (progress counts against it), the disk used after.
+  let size = null;
+  if (managed && !ai.installing) {
+    if (ai.available || ai.version) {
+      if (ai.installed_bytes > 0) size = `Uses ${fmtBytes(ai.installed_bytes)} on disk.`;
+    } else if (ai.download_bytes > 0 || ai.target_installed_bytes > 0) {
+      size = ai.download_bytes > 0 ? `Download: ${fmtBytes(ai.download_bytes)}.` : `Needs about ${fmtBytes(ai.target_installed_bytes)}.`;
+      size += ' Allow extra space for installing and audio work.';
+    }
+  }
   const help = managed
     ? 'Adds Split and AI stems. One download includes the AI software and both model choices; processing then works offline on this computer.'
     : canInstall ? 'Adds Split and AI stems. Installs AI software in this source environment; models download on first use.'
       : 'Save, Convert, Check, and the Adaptive and Volume only modes work without the AI add-on.';
-  fill('system',
-    !ff.ok && ff.error ? callout('danger', 'Audio engine missing', ff.error) : null,
-    h('div', { dataset: { spot: 'ai' } },
-      // Not installed is a choice, not a fault: a dim light, not a red one.
-      statusRow(ai.installing ? 'on' : ai.available ? 'ok' : 'dim', 'AI add-on', aiDetail,
-        actions.childElementCount ? actions : null,
-        h('div', { class: 'adv-help' }, help),
-        sizes.length ? h('div', { class: 'adv-help' }, `${sizes.join(' ')} Allow extra space for installation and audio work.`) : null),
-      ai.installing || (ai.install_log && (!ai.available || ai.install_ok === false)) ? h('pre', { class: 'install-log', 'aria-label': 'AI installation log' }, ai.install_log || 'Starting…') : null),
-    statusRow(ff.ok ? 'ok' : 'bad', 'Audio engine (ffmpeg)', ff.ok ? `Version ${ff.version || '?'} · ${ff.source === 'bundled' ? 'built in' : 'installed on this computer'}` : (ff.error || 'Not found')));
+  return h('div', { dataset: { spot: 'ai' } },
+    // Not installed is a choice, not a fault: a dim light, not a red one.
+    statusRow(ai.installing ? 'on' : ai.available ? 'ok' : 'dim', 'AI add-on', aiDetail,
+      actions.childElementCount ? actions : null,
+      h('div', { class: 'adv-help' }, help),
+      size ? h('div', { class: 'adv-help' }, size) : null),
+    ai.installing || (ai.install_log && (!ai.available || ai.install_ok === false)) ? h('pre', { class: 'install-log', 'aria-label': 'AI installation log' }, ai.install_log || 'Starting…') : null);
 }
 
 /** Refresh once after AI changes settle, allowing both server storage caches to expire. */
@@ -597,14 +748,18 @@ async function installAi(options = {}) {
 // ---------------------------------------------------------------------------
 function renderStorage() {
   const s = store.settings || {};
+  renderOriginalsInfo(storage.data);
   fill('storage',
     refs.storageInfo,
-    row('Keep work files', 'Keeps the big in-between files (decoded audio, raw stems) after a job finishes. Only useful for troubleshooting — uses a lot of disk.',
-      switchControl({ checked: s.keep_work_files, label: 'Keep work files', onChange: (v) => save({ keep_work_files: v }) }), { setting: 'keep_work_files' }),
-    row('Keep originals for comparing', `Keeps the downloaded or uploaded original of Enhance results in ${appName()}’s own data, so the Library can compare them at full length (about 1 MB per minute for links). Turning it off doesn’t delete the ones already kept.`,
-      switchControl({ checked: s.keep_originals !== false, label: 'Keep originals for comparing', onChange: (v) => save({ keep_originals: v }) }), { setting: 'keep_originals' }),
-    row('Reuse kept originals', 'Links already downloaded use the original kept in the Library instead of downloading it again. The link is still looked up for its title and chapters.',
-      switchControl({ checked: s.reuse_originals !== false, label: 'Reuse kept originals', onChange: (v) => save({ reuse_originals: v }) }), { setting: 'reuse_originals' }));
+    // Everything about kept originals in one place: what is kept now, then the two switches.
+    h('div', { class: 'set-group' },
+      refs.originalsInfo,
+      row('Keep originals', 'For new Enhance results; about 1 MB per minute for links. Turning it off doesn’t delete the ones already kept.',
+        switchControl({ id: 'keepOriginals', checked: s.keep_originals !== false, label: 'Keep originals', onChange: (v) => save({ keep_originals: v }) }), { setting: 'keep_originals' }),
+      row('Reuse kept originals', 'A link you save again uses its kept original instead of downloading it again. Its title and chapters are still looked up.',
+        switchControl({ id: 'reuseOriginals', checked: s.reuse_originals !== false, label: 'Reuse kept originals', onChange: (v) => save({ reuse_originals: v }) }), { setting: 'reuse_originals' })),
+    row('Keep work files', 'For troubleshooting only: keeps the big in-between files (decoded audio, raw stems) after a job finishes. Uses a lot of disk.',
+      switchControl({ id: 'keepWorkFiles', checked: s.keep_work_files, label: 'Keep work files', onChange: (v) => save({ keep_work_files: v }) }), { setting: 'keep_work_files' }));
 }
 
 async function loadStorage() {
@@ -632,7 +787,7 @@ function scheduleStorageRefresh() {
 function renderStorageInfo() {
   const el = refs.storageInfo;
   const d = storage.data;
-  if (!d || d.jobs_bytes == null) { el.hidden = true; return; }
+  if (!d || d.jobs_bytes == null) { el.hidden = true; renderOriginalsInfo(d); return; }
   const finished = [...store.jobs.values()].filter(isFinished).length;
   // Jobs finished or were cleared elsewhere: the sizes are stale, fetch them again.
   if (storage.finished != null && storage.finished !== finished) {
@@ -662,38 +817,44 @@ function renderStorageInfo() {
   if (d.models_bytes) extra.push(`AI add-on / models: ${fmtBytes(d.models_bytes)}.`);
   el.hidden = false;
   clear(el).append(row(
-    `${appName()}’s working data: ${fmtBytes(d.jobs_bytes)} · ${finished} finished job${finished === 1 ? '' : 's'}`,
-    ['Logs, previews and copies kept for each job. Your files in the output folder aren’t counted, and clearing jobs keeps them.', ...extra].join(' '),
-    btn), originalsRow(d));
+    `Job files: ${fmtBytes(d.jobs_bytes)} · ${finished} finished job${finished === 1 ? '' : 's'}`,
+    ['Logs, previews and copies kept for each job, in app data. Files in your output folder aren’t counted, and clearing jobs keeps them.', ...extra].join(' '),
+    btn));
+  renderOriginalsInfo(d);
 }
 
-/** The originals kept for the Library's compare player, with "Delete kept originals". */
-function originalsRow(d) {
-  if (d.originals_bytes == null) return null; // older server
-  const n = d.originals_count || 0;
-  const del = h('button', { type: 'button', class: 'btn btn-ghost btn-danger-text btn-sm', disabled: !n }, icon('trash', 14), 'Delete kept originals');
-  del.addEventListener('click', async () => {
-    const ok = await confirmDialog({
-      title: 'Delete the kept originals?',
-      // "Up to": a copy of an upload shares its disk space with the job's file while that job is kept.
-      message: `This frees up to ${fmtBytes(d.originals_bytes)}. Library results can no longer be compared with their originals. Your output files aren’t touched.`,
-      confirm: 'Delete originals',
+/** What is kept now, with "Delete kept originals". Shown (without numbers) even when /api/storage
+ *  failed, so the switches under it still have their explanation. */
+function renderOriginalsInfo(d) {
+  const known = d && d.originals_bytes != null; // older server or no answer: no numbers
+  const n = known ? d.originals_count || 0 : 0;
+  let del = null;
+  if (known) {
+    del = h('button', { type: 'button', class: 'btn btn-ghost btn-danger-text btn-sm', id: 'deleteOriginals', disabled: !n }, icon('trash', 14), 'Delete kept originals');
+    del.addEventListener('click', async () => {
+      const ok = await confirmDialog({
+        title: 'Delete the kept originals?',
+        // "Up to": a copy of an upload shares its disk space with the job's file while that job is kept.
+        message: `This frees up to ${fmtBytes(d.originals_bytes)}. Library results can no longer be compared with their originals or reworked in Adjust. Your output files aren’t touched.`,
+        confirm: 'Delete originals',
+      });
+      if (!ok) return;
+      del.disabled = true;
+      try {
+        const res = await api('/api/library/originals', { method: 'DELETE' });
+        toast(`Deleted ${res?.deleted ?? n} kept original${(res?.deleted ?? n) === 1 ? '' : 's'} — ${fmtBytes(res?.freed_bytes ?? 0)} freed.`, { kind: 'ok' });
+      } catch (e) {
+        toastError(e);
+      }
+      await loadStorage(); // rebuilds the row (and re-enables the button if that didn't work)
+      refs.originalsInfo.focus({ preventScroll: true });
     });
-    if (!ok) return;
-    del.disabled = true;
-    try {
-      const res = await api('/api/library/originals', { method: 'DELETE' });
-      toast(`Deleted ${res?.deleted ?? n} kept original${(res?.deleted ?? n) === 1 ? '' : 's'} — ${fmtBytes(res?.freed_bytes ?? 0)} freed.`, { kind: 'ok' });
-    } catch (e) {
-      toastError(e);
-    }
-    await loadStorage(); // rebuilds the row (and re-enables the button if that didn't work)
-    refs.storageInfo.focus({ preventScroll: true });
-  });
-  return row(
-    `Kept originals: ${n ? `${fmtBytes(d.originals_bytes)} · ${n} file${n === 1 ? '' : 's'}` : 'none'}`,
-    `Copies of the originals of Enhance results, so the Library can compare them at full length. In ${appName()}’s own data — your output files aren’t touched.`,
-    del);
+  }
+  const amount = !known ? '' : n ? `: ${fmtBytes(d.originals_bytes)} · ${n} file${n === 1 ? '' : 's'}` : ': none';
+  clear(refs.originalsInfo).append(row(
+    `Kept originals${amount}`,
+    'Copies of the originals of Enhance results, in app data. The Library needs them to compare a result at full length, and Adjust to rework it. Your output files aren’t touched.',
+    del));
 }
 
 // ---------------------------------------------------------------------------
@@ -715,7 +876,7 @@ function renderAbout() {
     h('dl', { class: 'facts' },
       [h('dt', null, 'Version'), h('dd', null, `${appName()} ${hth.version || ''}`)],
       hth.output_dir ? [h('dt', null, 'Output folder'), h('dd', null, pathValue(hth.output_dir, 'output folder', 'copyOutputDir'))] : null,
-      hth.data_dir ? [h('dt', null, 'Work folder'), h('dd', null, pathValue(hth.data_dir, 'work folder', 'copyDataDir'))] : null,
+      hth.data_dir ? [h('dt', null, 'App data'), h('dd', null, pathValue(hth.data_dir, 'app data', 'copyDataDir'))] : null,
       hth.logs_dir ? [h('dt', null, 'Logs folder'), h('dd', null, pathValue(hth.logs_dir, 'logs folder', 'copyLogsDir'))] : null,
       hth.limits?.max_duration_s ? [h('dt', null, 'Longest allowed'), h('dd', null, durationLimit(hth.limits.max_duration_s))] : null),
     folderActions,

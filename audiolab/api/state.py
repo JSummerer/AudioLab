@@ -11,11 +11,11 @@ from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, Request
 
-from .. import APP_NAME, __version__, ai, recipes, runtime, system, tasks
+from .. import APP_NAME, __version__, ai, recipes, runtime, system, tasks, updates
 from ..ai.install import AIInstaller
 from ..errors import AudioLabError
 from ..jobs import Job, JobManager
-from ..media import export, ffmpeg, youtube
+from ..media import export, ffmpeg, youtube, ytdlp_update
 from ..settings import LIMITS, SETTINGS
 from .events import Hub
 
@@ -44,6 +44,12 @@ class AppState:
         self.manager.on_finished = self._notify_finished
         self.pcm_stop = threading.Event()  # set on quit: the compare players' decodes stop (ffmpeg.decode_pcm)
 
+    def started(self) -> None:
+        """Once `manager.start()` holds the data folder's instance lock, before any job: delete the packaged
+        app's unused downloader archives. Not earlier — a second launch must not touch the running app's files."""
+        if runtime.is_packaged():
+            ytdlp_update.prune_unused()
+
     def shutdown(self) -> None:
         """Stop all jobs (bounded, see JobManager.shutdown), let the computer sleep again and
         end the live-update streams and the compare players' decodes. Safe to call twice — the desktop
@@ -71,9 +77,9 @@ class AppState:
             raise HTTPException(404, 'Job not found.')
         return job
 
-    def require_local(self) -> None:
+    def require_local(self, message: str = 'Folders can only be opened when AudioLab runs on this computer.') -> None:
         if not self.local:
-            raise HTTPException(403, 'Folders can only be opened when AudioLab runs on this computer.')
+            raise HTTPException(403, message)
 
     def reveal(self, folder: Path | None = None) -> dict[str, Any]:
         """Show a job's or entry's folder in Finder; when it is gone, the output folder instead (said
@@ -138,12 +144,25 @@ class AppState:
 
     def downloader_health(self) -> dict[str, Any]:
         v = self.cached('ytdlp', youtube.ytdlp_version, 60)  # short: jobs may update it (self-repair)
-        return {
+        health = {
             'ok': bool(v),
             'version': v,
             'age_days': youtube.ytdlp_age_days(v),
-            'update_supported': not runtime.is_packaged(),
+            'update_supported': youtube.update_supported(),
+            'source': 'environment',
+            'bundled_version': None,
+            'latest': updates.downloader_latest(),
+            'fallback': False,
         }
+        if runtime.is_packaged():
+            st = ytdlp_update.state()
+            health.update(source=st['source'], bundled_version=ytdlp_update.bundled_version(), fallback=st['fallback'])
+        return health
+
+    def updates_health(self) -> dict[str, Any]:
+        if SETTINGS.get().check_updates:
+            updates.ensure_scheduler(self.system_event)  # the daily check runs in its own thread, never here
+        return updates.cached()
 
     def health_data(self) -> dict[str, Any]:
         ff = self.cached('ffmpeg', ffmpeg.ffmpeg_info, 600)
@@ -154,6 +173,7 @@ class AppState:
             'packaged': runtime.is_packaged(),
             'ffmpeg': {k: ff.get(k) for k in ('ok', 'version', 'source', 'error')},
             'downloader': self.downloader_health(),
+            'updates': self.updates_health(),
             'ai': self.ai_health(),
             'output_dir': str(SETTINGS.output_dir),
             'output_dir_ok': system.folder_writable(SETTINGS.output_dir),  # false: a drive that isn't connected…
@@ -172,7 +192,9 @@ class AppState:
         }
 
     def system_event(self) -> None:
-        self.hub.publish('system', {'ai': self.ai_health(), 'downloader': self.downloader_health()})
+        self.hub.publish(
+            'system', {'ai': self.ai_health(), 'downloader': self.downloader_health(), 'updates': updates.cached()}
+        )
 
     # ---------------------------------------------------------------- probes
     def probe_with_repair(self, url: str) -> dict[str, Any]:
@@ -180,7 +202,7 @@ class AppState:
         try:
             return youtube.probe(url)
         except AudioLabError as e:
-            if e.fix != 'update_downloader' or not SETTINGS.get().auto_update_downloader:
+            if e.fix != 'update_downloader' or not youtube.auto_fix_downloader():
                 raise
             if not youtube.self_repair_update():
                 raise

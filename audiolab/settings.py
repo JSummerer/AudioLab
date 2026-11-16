@@ -8,6 +8,8 @@ Data layout (system.default_data_dir(), override with AUDIOLAB_DATA_DIR):
     <data>/jobs/<job_id>/     one folder per job (job.json, journal.jsonl, work files)
     <data>/library/           one record per finished result + kept originals (see library.py)
     <data>/bin/               tool shims (e.g. bundled ffmpeg exposed as 'ffmpeg')
+    <data>/downloader/        the packaged app's downloader updates (see media/ytdlp_update.py)
+    <data>/updates.json       the last update check (see updates.py)
     <data>/logs/              the log file (on macOS ~/Library/Logs/AudioLab, see system.log_dir)
 Finished files go to the output folder (default ~/Music/AudioLab).
 """
@@ -50,15 +52,16 @@ def default_output_dir() -> Path:
 
 
 def validate_output_location(target: Path) -> None:
-    """Generated audio must never enter the removable managed-runtime tree."""
+    """Finished audio must stay outside AudioLab's own data folder: job cleanup, Library maintenance and the
+    removable AI pack delete files there (e.g. `<data>/jobs/<id>/exports` would lose its audio with the job)."""
     from .errors import AudioLabError
 
-    ai_root = (SETTINGS.data_dir / 'ai').resolve()
+    data_root = SETTINGS.data_dir.resolve()
     resolved = target.resolve()
-    if resolved.is_relative_to(ai_root) or ai_root.is_relative_to(resolved):
+    if resolved.is_relative_to(data_root) or data_root.is_relative_to(resolved):
         raise AudioLabError(
-            'Choose an output folder separate from AudioLab’s AI storage.',
-            hints=['Use a folder such as Music/AudioLab, outside the app data folder.'],
+            'Choose an output folder separate from AudioLab’s app data folder (jobs, Library and AI storage).',
+            hints=['Choose a folder such as Music/AudioLab in Settings → Files, outside the app data folder.'],
         )
 
 
@@ -92,6 +95,10 @@ LIMITS = Limits()
 # ---------------------------------------------------------------------------
 # User preferences (persisted, editable from the UI)
 # ---------------------------------------------------------------------------
+# Off by default: the app contacts GitHub only when the user clicks (docs/MACOS.md, privacy).
+CHECK_UPDATES_DEFAULT = False
+
+
 @dataclass
 class UserSettings:
     output_dir: str = ''  # '' = default_output_dir()
@@ -105,6 +112,7 @@ class UserSettings:
     keep_originals: bool = True  # Library: keep the original of Enhance jobs for comparing
     reuse_originals: bool = True  # a link job uses its recording's kept original instead of downloading again
     auto_update_downloader: bool = True  # on a 'site changed' error: update yt-dlp once and retry
+    check_updates: bool = CHECK_UPDATES_DEFAULT  # ask GitHub at most once a day for a newer app and downloader
     cookies_browser: str = ''  # '' | firefox | chrome | edge | brave | safari | chromium | opera | vivaldi
 
 

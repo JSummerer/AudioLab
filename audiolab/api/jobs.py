@@ -158,7 +158,8 @@ def _clone_source(state: AppState, job_id: str, new_id: str) -> dict[str, Any]:
 
 def _result_source(state: AppState, job_id: str, file_id: str, new_id: str) -> dict[str, Any]:
     """`source_file`: one file of an earlier job's result as the new job's file source (e.g. "Check the
-    result"), linked into the new job's input like a re-run's upload; titled by its file name."""
+    result"), linked into the new job's input like a re-run's upload; titled by its file name. (An
+    Enhance that keeps it as the Library original copies it then: library.record.)"""
     path = _result_file(state.job_or_404(job_id), file_id)  # 404 no such file, 410 gone
     if path.suffix.lower() not in export.UPLOAD_EXT:
         raise HTTPException(400, 'This file has no audio to work with.')
@@ -300,9 +301,15 @@ async def create_job(
         if isinstance(e, (AudioLabError, HTTPException, OSError)):  # OSError: a full disk… (api/app.py)
             raise
         raise HTTPException(400, 'Some of the chosen options are not valid.') from e
-    for jid, src, norm in prepared:
+    for n, (jid, src, norm) in enumerate(prepared):
         title = (norm.get('meta') or {}).get('title') or src.get('title') or ''
-        job = mgr.submit(task, src, norm, title=title, job_id=jid)
+        try:
+            job = mgr.submit(task, src, norm, title=title, job_id=jid)
+        except BaseException:  # closing, or job.json can't be saved: the rest never becomes a job
+            for rest, _src, _norm in prepared[n:]:
+                if mgr.get(rest) is None:
+                    shutil.rmtree(mgr.job_dir(rest), ignore_errors=True)
+            raise
         created.append(mgr.public(job.id))
     return {'jobs': created}
 

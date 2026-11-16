@@ -1,6 +1,6 @@
 # Hardware and storage
 
-For the **AudioLab 2.4.0b6 Mac beta**. [Download and install](MACOS.md) ·
+For the **AudioLab 2.5.0 Mac beta**. [Download and install](MACOS.md) ·
 [Memory](#memory-ram) · [Disk space](#disk-space) · [Speed and models](#speed-and-models) ·
 [Checks and limits](#what-the-app-checks)
 
@@ -16,7 +16,9 @@ For the **AudioLab 2.4.0b6 Mac beta**. [Download and install](MACOS.md) ·
 **The memory and free-space figures are planning recommendations, not tested minimums or guarantees.**
 There is no qualified minimum RAM capacity yet. “Short” here means a recording of a few minutes,
 up to roughly 10 minutes, one job at a time. Longer recordings need more space and often more memory.
-Do not read the table as support for hour-long processing on an 8 GB Mac.
+The memory check now lets Volume only and Adaptive Enhance start on long recordings on an 8 GB Mac.
+On a larger Mac a one-hour job used about 1.2 GB of working memory plus working files on disk, but no
+long job has been tested on an 8 GB machine yet.
 This helps you try hardware you already own; it is **not a reason to buy or upgrade a Mac** for this beta.
 Find your installed memory in **Apple menu → About This Mac**.
 
@@ -51,9 +53,9 @@ explains that display. This is optional troubleshooting, not an installation req
 
 ## Disk space
 
-Reference payloads measured on beta 3, rounded in decimal MB/GB. See the
-[beta 6 release](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b6) for its app download size.
-Beta 6 uses the same AI 1.0.0 payload.
+Reference payloads measured on 2.4.0b3, rounded in decimal MB/GB. See the
+[latest release](https://github.com/JSummerer/AudioLab/releases/latest) for the current app's download size.
+2.5.0 uses the same AI 1.0.0 payload.
 
 | Files | Download | Installed files |
 |---|---:|---:|
@@ -67,8 +69,9 @@ Keep the larger working-space allowance in the table above for actual use. Repai
 an existing installation while preparing its replacement.
 
 Temporary audio can be much larger than the original file. The app checks a task/duration estimate
-plus a 2 GiB allowance before processing. The table shows rounded **beta 6 check thresholds for one
-60-minute job** in decimal GB.
+plus a 2 GiB allowance before processing. The table shows rounded **free-space thresholds for one
+60-minute job** in decimal GB. These disk figures are unchanged since 2.4.0b6; only the memory estimate
+changed in 2.5.0 (see [what the app checks](#what-the-app-checks)).
 
 | Task | Free-space estimate, including that allowance |
 |---|---:|
@@ -84,17 +87,19 @@ on recordings longer than 10 minutes.
 These figures are the app's preflight estimates.
 The estimate does not cover every source sample rate, export format or combination of outputs; even
 the 2 GiB allowance is not guaranteed to remain free after a job. Leave additional room
-for your existing and new recordings, kept originals, other apps and macOS. If work and output folders
-are on different drives, the app checks both drives. Choosing MP3 output does not remove the need for
+for your existing and new recordings, kept originals, other apps and macOS. The estimates above are for
+the drive with app data, where the working files go. The output folder is checked separately: for Enhance
+and Split it needs room only for the results, but for Save / Convert the larger working-space figure above
+still applies there (Check writes nothing there). Choosing MP3 output does not remove the need for
 uncompressed working files during Enhance or Split.
 
-Use **Settings → Storage** for finished working data, and **AI & system → Remove AI add-on** for the
-optional AI files. Kept originals are valuable audio and have a separate deletion control. See
+Use **Settings → Storage → Clear finished jobs** for the files of finished jobs, and
+**Settings → Updates & add-ons → Remove AI add-on** for the optional AI files. Kept originals are valuable audio and have a separate deletion control. See
 [files and cleanup](MACOS.md#files-and-privacy) before removing anything.
 
 ## Speed and models
 
-AI uses the Apple GPU through PyTorch's MPS backend when available; **Settings → AI & system** shows
+AI uses the Apple GPU through PyTorch's MPS backend when available; **Settings → Updates & add-ons** shows
 what was detected. Otherwise it can use the CPU. No extra graphics driver installation is part of
 this Mac beta. More memory primarily gives work room to fit; it is not a promise of proportionally
 faster processing.
@@ -119,26 +124,27 @@ However, on a normal Mac its memory budget uses **85% of installed RAM**, not a 
 memory left after other apps. It does not account separately for each AI model or all GPU allocations.
 Passing that check is not a guarantee against memory pressure or an out-of-memory error.
 
-For example, the current formula estimates about **6.84 GiB** for one hour of Adaptive Enhance.
-That is above the **6.8 GiB** default budget on an 8 GiB Mac, so the app refuses that job even with
-other apps closed. These are formula values, not a new measured benchmark. Closing apps can improve
-actual headroom, but does not raise this installed-RAM budget.
+For example, the formula now estimates about **2.64 GiB** for one hour of Adaptive Enhance (6.84 GiB
+before), inside the **6.8 GiB** default budget on an 8 GiB Mac. Beyond 10 minutes, Volume only and
+Adaptive Enhance work in files on disk, so their estimate grows by only 0.5 GiB per hour (about 6.14 GiB
+at 8 hours). AI stems Enhance keeps the earlier formula (about 7.84 GiB for one hour). These are formula
+values based on measurements on one 48 GB Mac, not a tested minimum. Closing apps can improve actual
+headroom, but does not raise this installed-RAM budget. The estimate assumes the app data folder is on a
+real disk: on a RAM disk (tmpfs, as in some container setups) the working files of a long Enhance job take
+memory too, AudioLab does not detect that, and such a job can run out of memory.
 
-We are keeping those limits unchanged while documenting their scope. The app does not reject every
+The AI estimates are unchanged. The app does not reject every
 AI request solely because a Mac has 8 GB, and it does not certify all 16 GB jobs as safe.
 
 ## What has been tested
 
-The prior b3 app passed short generated-audio core and AI checks, reuse/removal of an existing AI
+The 2.4.0b3 app passed short generated-audio core and AI checks, reuse/removal of an existing AI
 installation, and native-window checks. Both AI model choices passed helper checks. Public-download
-installation/cancel/resume was checked on b2 with this same AI pack. Native-window validation ran on
+installation/cancel/resume was checked on 2.4.0b2 with this same AI pack. Native-window validation ran on
 macOS 15.7.9 arm64; local functional checks used an Apple M4 Pro with 48 GB on macOS 26.6.2.
 **That is a test configuration, not a 48 GB requirement.** macOS 14 is the build target and has not been tested natively.
-See the release notes for each test scope.
-[Beta 3](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b3) ·
-[Beta 4](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b4) ·
-[Beta 5](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b5) ·
-[Beta 6](https://github.com/JSummerer/AudioLab/releases/tag/v2.4.0b6)
+The [latest release notes](https://github.com/JSummerer/AudioLab/releases/latest) describe the current
+build's test scope.
 
 This evidence does not qualify minimum RAM, long-recording performance or every chip. A supported
 minimum needs checks on actual lower-memory Macs, including the app and AI helper together, GPU/system

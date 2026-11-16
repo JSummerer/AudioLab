@@ -20,7 +20,6 @@
 .eq-editor-note, .eq-editor-error { margin: 0; }
 .eq-editor-error { color: var(--danger); }
 .eq-editor-error:empty, .eq-editor-bands:empty { display: none; }
-.eq-editor-text > summary { cursor: pointer; }
 .eq-editor-text[open] > summary { margin-bottom: var(--s-2); }
 
 .eq-plot {

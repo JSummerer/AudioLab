@@ -7,7 +7,7 @@ import { store } from '../../store.js';
 import { state, refs, definePart, isFileLike, RECIPE_LABELS, PROCESSING_LABELS } from './state.js';
 import { shownName } from './names.js';
 import { downloadChoices, enhanceFormatsInOrder, fineTuningChanges } from './options.js';
-import { embeddedCoverNote } from './cover.js';
+import { embeddedCoverNote, coverOptions } from './cover.js';
 import { TASK_ICON } from '../job/index.js';
 
 definePart('sleeve', renderSleeve);
@@ -23,6 +23,7 @@ function loaded() {
   const own = src?.cover?.url; // a picture the user added as the cover
   switch (src?.kind) {
     case 'probing': return { title: 'Looking up the link…', meta: src.url, busy: true };
+    case 'offered': return { title: 'Not looked up yet', meta: src.url, iconName: 'link' };
     case 'url-error': return { title: 'Couldn’t read this link', meta: src.url, iconName: 'link' };
     case 'playlist': {
       const n = src.probe?.entries?.length || 0;
@@ -37,8 +38,9 @@ function loaded() {
       return { title: name.title || src.url, meta: join(name.artist, fmtDuration(src.probe?.duration_s)), art: own || src.probe?.thumbnail, iconName: 'video' };
     }
     case 'file': {
+      // The name without its extension (the source card shows the file's full name).
       const name = shownName(src);
-      return { title: src.meta ? name.title : src.file.name, meta: join(src.meta ? name.artist : null, fmtBytes(src.file.size)), art: own, iconName: 'music' };
+      return { title: name.title || src.file.name, meta: join(src.meta ? name.artist : null, fmtBytes(src.file.size)), art: own, iconName: 'music' };
     }
     case 'job': {
       const name = shownName(src);
@@ -97,6 +99,8 @@ function renderSleeve() {
   if (!el) return;
   const info = loaded();
   const task = state.task === 'download' && isFileLike() ? 'Convert' : TASK_WORD[state.task];
+  // A remembered "Also save a separate image" is under More options: say it here too.
+  const separate = coverOptions(state.source, state.task).save_cover ? 'Cover picture saved as its own file' : null;
   el.classList.toggle('is-empty', !!info.empty);
   el.classList.toggle('is-busy', !!(info.busy || state.busy));
   clear(el).append(
@@ -105,5 +109,5 @@ function renderSleeve() {
       h('p', { class: 'sleeve-eyebrow' }, task),
       h('p', { class: 'sleeve-title' }, info.empty ? 'Nothing loaded yet' : info.title),
       h('p', { class: 'sleeve-meta' }, info.empty ? 'Its cover and name show here.' : info.meta || ''),
-      h('ul', { class: 'sleeve-plan' }, plan().filter(Boolean).map((line) => h('li', null, line)))));
+      h('ul', { class: 'sleeve-plan' }, [...plan(), separate].filter(Boolean).map((line) => h('li', null, line)))));
 }

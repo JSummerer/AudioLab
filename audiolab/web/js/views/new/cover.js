@@ -1,4 +1,4 @@
-// New view — the cover image on the source card (docs/API.md "Cover image"): pick a
+// New view — the cover image under More options (docs/API.md "Cover image"): pick a
 // picture of your own for Save and Enhance, and "Also save a separate image"
 // (`save_cover`: the job puts it next to its files — no download, no Save dialog).
 // The own picture is sent as the `cover` part of POST /api/jobs and is always
@@ -43,6 +43,11 @@ export function coverOptions(src, task) {
   return saveCover && takesCover(src) && SAVE_TASKS.includes(task) ? { save_cover: true } : {};
 }
 
+/** Which cover tools a job of `task` from `src` offers: an own picture and/or the separate image. */
+export const coverToolsFor = (src, task) => ({
+  own: takesCover(src) && COVER_TASKS.includes(task), separate: takesCover(src) && SAVE_TASKS.includes(task),
+});
+
 /** The picture to send with a job of `task`, as [file, name], or null. */
 export function coverUpload(src, task) {
   if (!src?.cover || !takesCover(src) || !COVER_TASKS.includes(task)) return null;
@@ -84,10 +89,16 @@ export function syncCoverPreview() {
 }
 
 // ---------------------------------------------------------------------------
-// On the card: "Use my own image" (+ preview, Remove) and "Also save a separate image"
+// Under More options → Cover art: "Use my own image" (+ preview, Remove) and
+// "Also save a separate image". `onChange` refreshes the folded count.
 // ---------------------------------------------------------------------------
-export function coverTools(src) {
-  if (!takesCover(src)) return null;
+/** The cover tools a job of `task` from `src` offers, as [own picture, separate image] (each may be null). */
+export function coverTools(src, task, { onChange = () => {} } = {}) {
+  const offered = coverToolsFor(src, task);
+  return [offered.own ? ownImageTools(src) : null, offered.separate ? separateImageRow(onChange) : null];
+}
+
+function ownImageTools(src) {
   const input = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp', hidden: true });
   input.addEventListener('change', () => {
     const file = input.files?.[0];
@@ -96,24 +107,30 @@ export function coverTools(src) {
   });
   const pick = h('button', { type: 'button', class: 'btn btn-ghost btn-sm cover-pick', onclick: () => input.click() },
     icon('image', 14), src.cover ? 'Use another image' : 'Use my own image');
-  const save = h('label', { class: 'details-toggle cover-save' },
-    switchControl({ checked: saveCover, onChange: setSaveCover }), 'Also save a separate image');
   const inherited = !src.cover && src.job?.source?.cover_name;
-  return [
-    h('div', { class: 'cover-tools' }, pick, save, input),
-    h('p', { class: 'muted small cover-own-note' },
-      'Save/Convert and Enhance can embed artwork inside supported audio files. A separate image is optional.'),
+  return h('div', { class: 'cover-tools' },
     src.cover ? h('div', { class: 'cover-own' },
       h('img', { class: 'cover-preview', src: src.cover.url, alt: '' }),
       h('div', { class: 'cover-own-text' },
         h('strong', { class: 'small' }, 'Your cover image'),
         h('span', { class: 'muted small cover-own-name', title: src.cover.file.name },
-          `${src.cover.file.name} · ${fmtBytes(src.cover.file.size)} · album art in supported audio formats`)),
+          `${src.cover.file.name} · ${fmtBytes(src.cover.file.size)}`)),
       h('button', {
         type: 'button', class: 'btn btn-ghost btn-sm cover-remove', 'aria-label': 'Remove your cover image',
         onclick: () => removeCover(src),
       }, 'Remove'))
       : null,
-    inherited ? h('p', { class: 'muted small cover-own-note' }, `Uses your cover image from the earlier job (${inherited}).`) : null,
-  ];
+    h('div', { class: 'cover-pick-row' }, pick, input),
+    inherited ? h('p', { class: 'muted small' }, `Uses your cover image from the earlier job (${inherited}).`) : null);
+}
+
+function separateImageRow(onChange) {
+  const sw = switchControl({
+    id: 'saveCover', checked: saveCover, label: 'Also save a separate image',
+    onChange: (on) => { setSaveCover(on); onChange(); },
+  });
+  sw.setAttribute('aria-describedby', 'saveCoverHelp');
+  return h('label', { class: 'switch-row cover-save', for: sw.id }, sw,
+    h('span', { class: 'switch-row-label' }, 'Also save a separate image'),
+    h('span', { class: 'switch-row-help', id: 'saveCoverHelp' }, 'Puts the cover picture next to the files, as its own file.'));
 }

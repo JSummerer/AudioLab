@@ -52,7 +52,7 @@ class ServerAdapter:
         self.events = []
         self.jobs = [{'status': status} for status in statuses]
         self.state = SimpleNamespace(manager=SimpleNamespace(list=lambda: self.jobs), shutdown=self.shutdown)
-        self.config = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(audiolab=self.state)))
+        self.config = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(audiolab=self.state, instance_id='i')))
 
     @property
     def should_exit(self):
@@ -180,3 +180,57 @@ def test_finished_notification_hook_is_local_long_and_terminal_only(local, statu
         system.notify.assert_not_called()
     else:
         system.notify.assert_called_once_with(APP_NAME, expected)
+
+
+def test_a_stale_instance_record_is_not_another_programs_server(tmp_path, monkeypatch):
+    """After a crash another program may answer on the recorded port: only the launch that wrote the record
+    (its ping echoes the id) is reused; without an id on either side it must be AudioLab's own ping answer."""
+    import json
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from fastapi.testclient import TestClient
+
+    from audiolab.api import create_app
+
+    app = create_app(local=False, token='t')
+    client = TestClient(app)  # no lifespan: nothing starts; what the real app answers, served below
+    real = client.get('/api/ping').json()
+    client.close()
+    answer = {}
+
+    class Ping(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = json.dumps(answer).encode()
+            self.send_response(200)
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Ping)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    record = tmp_path / 'instance.json'
+    monkeypatch.setattr(desktop, '_instance_file', lambda: record)
+    url = f'http://127.0.0.1:{server.server_address[1]}'
+    try:
+        mine = {'url': url, 'page': url, 'pid': 1, 'window': True, 'instance': app.state.instance_id}
+        record.write_text(json.dumps(mine))
+        for body, reused in (
+            (real, True),  # this launch's own app
+            ({'ok': True, 'instance': 'another launch'}, False),
+            ({'status': 'up'}, False),
+        ):
+            answer.clear()
+            answer.update(body)
+            assert (desktop.existing_instance() is not None) is reused, body
+        record.write_text(json.dumps({'url': url, 'page': url, 'pid': 1, 'window': True}))  # an older version
+        answer.clear()
+        answer['ok'] = True
+        assert desktop.existing_instance() is not None
+        answer.pop('ok')
+        assert desktop.existing_instance() is None
+    finally:
+        server.shutdown()
+        server.server_close()

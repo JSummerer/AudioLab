@@ -9,13 +9,21 @@ For first-time setup, use the [Mac app guide](MACOS.md) or [source installation 
 ## Your first recording
 
 1. Choose **New → Choose files** and select an audio file, or paste a supported web link and press **Load**.
-2. Pick **Convert** for a file (**Save** for a link), **Enhance** to process it, or **Check** to inspect it. Defaults are a good
-   starting point; **Volume only** enhancement mainly adjusts volume.
-3. Press the main action button. Follow progress in **Activity**, then play or download the result.
+2. A file starts on **Enhance**, a link on **Save**. Pick **Convert** to change a file's format, or **Check**
+   to inspect it. Defaults are a good starting point; **Volume only** enhancement mainly adjusts volume.
+3. Press the main action button. Follow progress in **Activity**, then play the result or open its folder
+   with **Show in Finder** (**Show in folder** on Windows and Linux).
 
 Finished audio goes to **`Music/AudioLab`** in your home folder. Change that in **Settings → Files**.
-Existing output files are kept; a new result gets a numbered name if needed. Removing a Library entry
-preserves your output files, but may remove its kept original copy when no other entry uses it.
+Existing output files are kept; a new result gets a numbered name if needed. A job that fails or is
+cancelled while still working removes the files it had saved in that attempt, and nothing else; a
+finished result is never removed. If AudioLab crashes or is force-quit while a job runs, the files that
+attempt had already saved stay in the output folder: AudioLab deliberately never removes output files at
+a later start. Two rare limits: on drives without hard links (exFAT or FAT USB sticks, some network
+shares), a file another program saves under the very same name in the instant AudioLab claims that name
+can be replaced; and when a failed attempt's folder is removed, an empty folder another program creates
+at that name in the same instant goes with it. Removing a Library entry preserves your output files, but may remove its kept original
+copy when no other entry uses it.
 When enabled, kept original copies live separately in AudioLab's app-data folder and can also be
 cleared in **Settings → Storage**.
 
@@ -26,6 +34,7 @@ The add-on includes both model choices; local files can be processed offline onc
 
 Choose local audio/video files or paste a supported web link. Link availability depends on the source
 site; a local file is the simplest starting point. For a playlist, choose the items to process.
+A link opened from another page (`/?url=…`) waits in the link field until you press **Load**.
 Use only material you have permission to process.
 
 - **Save / Convert:** convert formats, save an original stream, or cut chapters/a pasted tracklist into tracks.
@@ -35,14 +44,19 @@ Use only material you have permission to process.
 - **Check:** inspect measurements and a spectrogram. Tempo, musical key and content type are estimates.
   Frequency range can suggest limitations; it cannot prove a file's encoding history.
 
-**More options** holds format and processing controls. Edit title/artist names, add [cover art](#cover-art),
-or choose several output formats. A multi-file result can be downloaded as a ZIP.
+**More options** holds the name, [cover art](#cover-art), formats and processing controls. **Tracks**
+shows up front for a recording with chapters, a pasted tracklist or more than 10 minutes, else under
+More options. When AudioLab runs on this computer, results are already in your output folder: finished
+jobs and the Library lead with **Show in Finder**. When it runs on another computer, such as a home
+server, you download the files instead, or a multi-file result as one ZIP.
 
 Library keeps Save, Enhance and Split results with their versions. When the original is kept, Enhance
 offers full-length comparison with matched volume, and later jobs on the same link reuse it instead of
 downloading again (Settings → Storage). **Add a file…** brings in a file you already have, such as a
-master from your DAW; it stays where it is. Search and sort the Library from its header; the ⋯ menu
-of a version holds Show in Finder, Open job, Keep only this version and Remove. Removing keeps the
+master from your DAW; it stays where it is. Search and sort the Library from its header. A version
+offers **Show in Finder** on this computer, and its ⋯ menu holds Open job, Keep only this version and
+Remove from Library. A recording's own ⋯ menu holds **Add a version from a file…** (on this computer)
+and **Delete the kept original…** (when one is kept). Removing keeps the
 files unless you switch on **Also move its files to the Trash**; nothing is ever deleted permanently.
 Kept originals use disk space separately from your output folder; manage them in Settings → Storage.
 
@@ -96,26 +110,29 @@ identify which frequencies need correction, so the chart supplies observations w
 proposals. The bells use forward/backward filtering: their magnitude follows the plotted response,
 but their transient behavior differs from a conventional causal EQ and can include pre-onset energy.
 
-Each full-length export gets its own loudness and peak check. A warning means it exceeded the selected
-ceiling or could not be measured; try a lower ceiling or a lossless format when more headroom is needed.
+Each full-length export gets its own loudness and peak check before it is saved. An MP3, AAC or Opus file
+whose encoding pushes its peaks over the ceiling is encoded once more, turned down by at most 2 dB;
+lossless files are never re-encoded. A warning means a file is still over the selected ceiling or could
+not be measured; try a lower ceiling or a lossless format when more headroom is needed.
 The file stays saved. Master readings describe the audio before encoding, and split tracks are not
-individually checked. Library's **Processing details** keeps settings, reasons, actual changes and
+individually checked. Job pages and the Library say this in plain words; **Show details** adds the
+LUFS/dBTP readings and the technical figures behind each line of **What we did**. Library's
+**Processing details** keeps settings, reasons, actual changes and
 file checks even after the job expires. Older entries have only the details they originally recorded.
 
 ## Cover art
 
-![An own cover image with the optional separate-image switch turned off](img/cover-options.png)
-
 AudioLab can put a picture **inside the audio file**, so compatible music players can show it as
-album artwork. You do not need a separate picture file beside the song.
+album artwork. You do not need a separate picture file beside the song. The cover controls for
+Save / Convert and Enhance sit under **More options → Cover art**.
 
-- For **Save / Convert** or **Enhance**, use **Use my own image** to choose a JPG, PNG or WebP.
-  Your chosen picture takes priority over existing artwork.
+- **Use my own image** chooses a JPG, PNG or WebP. Your chosen picture takes priority over existing
+  artwork.
 - Without your own image, **Embed cover art** in **More options** uses a link's thumbnail or an
   audio file's existing cover, when available. This is on by default.
 - Choose **MP3, M4A/AAC, Apple Lossless or FLAC** to embed artwork. AudioLab does not add covers
   to WAV or Opus; **Original** and video downloads are kept without new artwork.
-- **Also save a separate image** is optional. It puts an extra image alongside the finished
+- **Also save a separate image**, in the same place, is optional. It puts an extra image alongside the finished
   audio in your output folder; leave it off if you only want embedded artwork.
 
 These choices create new output files; they do not retag your input file in place. Cover display
@@ -128,7 +145,7 @@ depends on the music player and its supported formats.
 Screenshots use generated sample audio; the displayed loudness difference is specific to that sample.
 
 In **Library**, open a recording's versions and choose **Compare with the original** on an enhanced result.
-This needs a kept original; **Settings → Storage → Keep originals for comparing** controls future jobs.
+This needs a kept original; **Settings → Storage → Keep originals** controls future jobs.
 
 Press **Play**, then switch between **Original** and **Enhanced** to hear the same point in the recording.
 Use the timeline or **−10 s / +10 s** to move around.
@@ -254,7 +271,7 @@ These environment variables are for command-line/server setups. Most desktop use
 | `AUDIOLAB_MAX_PLAYLIST_ITEMS` | 200 | Playlist cap |
 | `AUDIOLAB_MIN_FREE_DISK_GB` | 2 | Extra free-disk allowance added to the job's estimate; not a reservation |
 | `AUDIOLAB_MEMORY_SAFETY_FRACTION` | 0.85 | Share of memory a job may plan to use |
-| `AUDIOLAB_RETENTION_DAYS` | 30 | Delete old job records (never your output files) |
+| `AUDIOLAB_RETENTION_DAYS` | 30 | Delete old job records (never your output files); checked at start and every 6 hours |
 
 Timeouts can also be set: `AUDIOLAB_FFMPEG_TIMEOUT_S`, `AUDIOLAB_YTDLP_PROBE_TIMEOUT_S` and
 `AUDIOLAB_YTDLP_DOWNLOAD_TIMEOUT_S`.

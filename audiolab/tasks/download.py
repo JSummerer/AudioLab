@@ -94,8 +94,8 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
         summary.append(common.tracks_summary(acq, tracks, folder))
         if tracks and untouched:
             summary.append(
-                f'The tracks are {export.FORMATS[track_fmt].label} — cutting needs re-encoding, '
-                f'so only the full {"video" if video else "file"} keeps the original stream.'
+                f'Saved the tracks as {export.FORMATS[track_fmt].label}; only the full '
+                f'{"video" if video else "file"} keeps the original quality (cutting needs re-encoding).'
             )
         if folder:
             files += tracks

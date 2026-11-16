@@ -109,18 +109,24 @@ def _instance_file():
 
 
 def existing_instance() -> dict | None:
-    """The AudioLab already running with this data folder ({url, page, pid, window}), or None."""
+    """The AudioLab already running with this data folder ({url, page, pid, window, instance}), or None.
+    Its ping must echo the id that launch recorded: after a crash, another program may answer on that
+    port, and a new launch would otherwise hand itself over to it and never start."""
     try:
         info = json.loads(_instance_file().read_text())
         with urllib.request.urlopen(info['url'] + '/api/ping', timeout=1.5) as r:
-            return info if r.status == 200 else None
+            answer = json.loads(r.read(4096)) if r.status == 200 else {}
+        if 'instance' in info and 'instance' in answer:
+            return info if answer['instance'] == info['instance'] else None
+        return info if answer.get('ok') is True else None  # a version whose ping or record has no id
     except Exception:
         return None
 
 
-def _remember_instance(url: str, page: str, window: bool) -> None:
+def _remember_instance(url: str, page: str, window: bool, instance: str) -> None:
+    record = {'url': url, 'page': page, 'pid': os.getpid(), 'window': window, 'instance': instance}
     try:
-        _instance_file().write_text(json.dumps({'url': url, 'page': page, 'pid': os.getpid(), 'window': window}))
+        _instance_file().write_text(json.dumps(record))
     except OSError:
         pass
 
@@ -253,7 +259,7 @@ def _run_app(port: int, window: bool, open_browser: bool, headless: bool) -> int
 
         def _open():
             if _wait_until_started(server):
-                _remember_instance(url, ui_url, window=False)
+                _remember_instance(url, ui_url, window=False, instance=server.config.app.state.instance_id)
                 if open_browser:
                     webbrowser.open(ui_url)
 
@@ -280,7 +286,7 @@ def _run_window(webview, server, url: str, ui_url: str, headless: bool) -> int:
             f'The local server did not start. If {APP_NAME} is running in a terminal, quit it there first.', headless
         )
         return 1
-    _remember_instance(url, ui_url, window=True)
+    _remember_instance(url, ui_url, window=True, instance=server.config.app.state.instance_id)
     log.info('App window (pid %s, %s)', os.getpid(), sys.executable)
 
     system.prepare_app_identity(APP_ICON)

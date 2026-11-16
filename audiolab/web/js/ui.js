@@ -368,30 +368,32 @@ export function switchControl({ id, checked, onChange, label, disabled }) {
   return input;
 }
 
-/** Number slider with an "Auto" checkbox (the slider shows once Auto is off). value null = auto. */
-export function autoRange({ min, max, step, value, unit, onChange, autoLabel = 'Auto', fallback }) {
-  const isAuto = value == null;
+/**
+ * A number that is Auto or Custom: two pills (like the other choices), then a slider and its value
+ * once Custom is picked. value null = auto. `label` names the setting for screen readers.
+ */
+export function autoRange({ min, max, step, value, unit, onChange, label = 'Value', fallback }) {
+  let isAuto = value == null;
   const start = isAuto ? (fallback ?? (min + max) / 2) : value;
   const out = h('output', { class: 'range-out' });
-  const range = h('input', { type: 'range', min, max, step, value: start, disabled: isAuto, 'aria-label': 'Value' });
-  const autoId = nextId('auto');
-  const auto = h('input', { type: 'checkbox', id: autoId, checked: isAuto });
-  // On Auto only the checkbox shows: the slider and its value appear once it is off.
+  const range = h('input', { type: 'range', min, max, step, value: start, 'aria-label': `${label} (${unit})` });
+  const slider = h('div', { class: 'auto-range-slider' }, range, out);
   const show = () => {
     out.textContent = `${Number(range.value).toFixed(step < 1 ? 1 : 0).replace('-', '−')} ${unit}`;
-    range.hidden = auto.checked;
-    out.hidden = auto.checked;
+    slider.hidden = isAuto;
   };
   range.addEventListener('input', () => { show(); onChange(Number(range.value)); });
-  auto.addEventListener('change', () => {
-    range.disabled = auto.checked;
-    show();
-    onChange(auto.checked ? null : Number(range.value));
+  const pick = segmented({
+    label, size: 'sm', value: isAuto ? 'auto' : 'custom',
+    options: [{ value: 'auto', label: 'Auto' }, { value: 'custom', label: 'Custom' }],
+    onChange: (v) => {
+      isAuto = v === 'auto';
+      show();
+      onChange(isAuto ? null : Number(range.value));
+    },
   });
   show();
-  return h('div', { class: 'auto-range' },
-    h('label', { class: 'auto-toggle', for: autoId }, auto, autoLabel),
-    range, out);
+  return h('div', { class: 'auto-range' }, pick, slider);
 }
 
 // ---------------------------------------------------------------------------

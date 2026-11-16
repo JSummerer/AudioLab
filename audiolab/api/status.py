@@ -1,19 +1,19 @@
 """App-level routes: ping, health, settings, storage use, the diagnostics report, the
-downloader update, the AI-pack install and opening known app folders — see docs/API.md."""
+downloader update, the update check, the AI-pack install and opening known app folders — see docs/API.md."""
 
 import os
 import tempfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, Request
 from fastapi.responses import PlainTextResponse
 from starlette.concurrency import run_in_threadpool
 
-from .. import ai, diagnostics, library
+from .. import ai, diagnostics, library, updates
 from ..ai.install import require_install_supported
 from ..errors import AudioLabError
-from ..media import youtube
+from ..media import youtube, ytdlp_update
 from ..runtime import is_packaged
 from ..settings import SETTINGS, validate_output_location
 from .state import AppState, State
@@ -23,8 +23,8 @@ router = APIRouter()
 
 # ---------------------------------------------------------------- health
 @router.get('/api/ping')
-def ping():
-    return {'ok': True}
+def ping(request: Request):
+    return {'ok': True, 'instance': request.app.state.instance_id}
 
 
 @router.get('/api/health')
@@ -154,10 +154,34 @@ async def get_diagnostics(state: State, job: str | None = None):
 
 
 # ----------------------------------------------------------- maintenance
+LOCAL_DOWNLOADER = 'The downloader can only be changed on the computer AudioLab runs on.'
+LOCAL_AI = 'The AI add-on can only be changed on the computer AudioLab runs on.'
+
+
 @router.post('/api/system/update-downloader')
 async def update_downloader(state: State):
+    if is_packaged():
+        state.require_local(LOCAL_DOWNLOADER)  # it fetches and runs a new downloader on this computer
     result = await run_in_threadpool(youtube.update_ytdlp)
     state.forget('ytdlp')
+    state.system_event()
+    return result
+
+
+@router.delete('/api/system/downloader')
+async def use_builtin_downloader(state: State):
+    if not is_packaged():
+        raise AudioLabError('Only the AudioLab app has a built-in downloader to go back to.')
+    state.require_local(LOCAL_DOWNLOADER)
+    await run_in_threadpool(ytdlp_update.use_bundled)
+    state.forget('ytdlp')
+    state.system_event()
+    return await run_in_threadpool(state.downloader_health)
+
+
+@router.post('/api/system/check-updates')
+async def check_updates(state: State):
+    result = await run_in_threadpool(updates.check)
     state.system_event()
     return result
 
@@ -166,7 +190,7 @@ async def update_downloader(state: State):
 def install_ai(state: State, options: dict[str, Any] | None = Body(None)):
     repair = (options or {}).get('repair') is True
     if is_packaged():
-        state.require_local()
+        state.require_local(LOCAL_AI)
     else:
         require_install_supported()
     if ai.ai_status().get('available') and not repair:
@@ -184,7 +208,7 @@ def install_ai(state: State, options: dict[str, Any] | None = Body(None)):
 
 @router.post('/api/system/cancel-ai')
 def cancel_ai(state: State):
-    state.require_local()
+    state.require_local(LOCAL_AI)
     if not is_packaged():
         raise AudioLabError('This source installation uses its own package manager.')
     state.installer.cancel()
@@ -193,7 +217,7 @@ def cancel_ai(state: State):
 
 @router.delete('/api/system/ai')
 def remove_ai(state: State):
-    state.require_local()
+    state.require_local(LOCAL_AI)
     if not is_packaged():
         raise AudioLabError(
             'AudioLab only removes its managed Mac add-on, not source Python packages or shared caches.'

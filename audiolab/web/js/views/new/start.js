@@ -5,6 +5,7 @@
 // moved on to another view meanwhile, then a toast offers the way there. Links go with
 // their title and length, so a job started long after the lookup still knows them.
 // An earlier job that was removed meanwhile: its link is sent instead, or its file is asked for again.
+// Several files: after some didn't work, Start retries only those (the others already have their job).
 import { h, icon, clear, shortFolder } from '../../dom.js';
 import { api, upload } from '../../api.js';
 import { store, upsertJob } from '../../store.js';
@@ -21,13 +22,50 @@ import { coverUpload, coverOptions } from './cover.js';
 const REUPLOAD_STATUS = new Set([404, 410]);
 
 definePart('action', renderAction);
+// Only the button's words, after a choice changed elsewhere (redraw() calls it): always what Start will do.
+definePart('actionLabel', () => {
+  const btn = refs.action?.querySelector('.btn-primary');
+  if (btn && !state.busy) btn.textContent = primaryLabel();
+});
 
 function selectedCount() {
   const src = state.source;
   return src?.kind === 'playlist' ? src.selected.size : src?.kind === 'files' ? src.items.length : 1;
 }
 
+/** Keys sorted at every level: the same settings give the same text, whatever order they were set in. */
+const canonical = (v) => (Array.isArray(v) ? v.map(canonical)
+  : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonical(v[k])])) : v);
+
+/** The task and options a batch item was started with: the same ones again would duplicate its job. */
+export const startedWith = (task, options) => JSON.stringify(canonical([task, options]));
+
+/**
+ * The files Start sends: all of them, or — after a batch where some worked and some didn't (or
+ * were stopped) — only the rest, as long as the task and options are the same. With other ones,
+ * every file goes again (those already uploaded reuse their upload).
+ */
+export function batchItems(items, task, options) {
+  const sig = startedWith(task, options);
+  const done = items.filter((it) => it.status === 'done' && it.startedWith === sig);
+  const rest = items.filter((it) => !done.includes(it));
+  return done.length && rest.length ? rest : items;
+}
+
+/** "Retry 2 failed files" / "Start the other 3 files" while only the rest would go, else null. */
+function retryLabel() {
+  const src = state.source;
+  if (src?.kind !== 'files' || state.busy) return null;
+  const items = batchItems(src.items, state.task, buildOptions());
+  if (items.length === src.items.length) return null;
+  const n = items.length;
+  const files = `file${n === 1 ? '' : 's'}`;
+  return items.some((it) => it.status === 'error') ? `Retry ${n} failed ${files}` : `Start the other ${n} ${files}`;
+}
+
 function primaryLabel() {
+  const retry = retryLabel();
+  if (retry) return retry;
   const kind = state.source?.kind;
   const many = kind === 'playlist' || kind === 'files';
   const n = selectedCount();
@@ -53,6 +91,7 @@ function primaryLabel() {
 function blockedReason() {
   const src = state.source;
   if (!src || src.kind === 'invalid') return 'Paste a link or choose a file first.';
+  if (src.kind === 'offered') return 'Press Load to look up the link first.';
   if (src.kind === 'probing') return 'Looking up the link…';
   if (src.kind === 'playlist' && !src.selected.size) return 'Select at least one item.';
   if (src.kind === 'file' && !src.reuseJobId && tooBig(src.file)) return `This file is ${tooBig(src.file)}.`;
@@ -90,8 +129,8 @@ function renderAction() {
   el.append(btn);
   if (state.batch) {
     el.append(h('button', {
-      type: 'button', class: 'btn btn-key', disabled: state.batch.ctl.signal.aborted,
-      onclick: () => state.batch?.ctl.abort(),
+      type: 'button', class: 'btn btn-key', disabled: state.batch.stopped,
+      onclick: () => state.batch?.stop(),
     }, icon('close', 15), 'Stop'));
   }
   el.append(hint);
@@ -271,24 +310,38 @@ async function submitOne(src, task, options, cover) {
   }
 }
 
-/** Several files: upload one after another, one job each, with per-file progress. */
+/**
+ * Several files: upload one after another, one job each, with per-file progress. Stop cancels an
+ * upload only while its bytes are still being sent; once they are, the server may already have made
+ * the job, so its answer is waited for and the job kept (otherwise a retry would make a second one).
+ */
 async function submitFiles(src, task, options) {
-  const items = [...src.items];
-  const batch = { ctl: new AbortController(), index: 0, count: items.length };
+  const items = batchItems(src.items, task, options);
+  const sig = startedWith(task, options);
+  const batch = {
+    index: 0, count: items.length, stopped: false, current: null, upload: null,
+    stop() {
+      batch.stopped = true;
+      if (batch.current && !batch.current.sent) batch.upload?.abort();
+      if (state.source === src) redraw('action');
+    },
+  };
   state.busy = true;
   state.batch = batch;
   const live = () => state.source === src;
   const refresh = () => { if (live()) { redraw('action'); items.forEach(updateItem); } };
-  for (const it of items) { if (it.status !== 'done') { it.status = 'ready'; it.error = null; } }
+  for (const it of items) { it.status = 'ready'; it.error = null; }
   refresh();
   let added = 0;
   let failed = 0;
   for (const it of items) {
-    if (batch.ctl.signal.aborted) break;
+    if (batch.stopped) break;
     batch.index += 1;
     batch.reusing = !!it.jobId;
+    batch.current = it;
     it.status = 'uploading';
     it.pct = 0;
+    it.sent = false;
     refresh();
     try {
       if (!it.jobId && tooBig(it.file)) throw new Error(`This file is ${tooBig(it.file)}.`);
@@ -298,12 +351,15 @@ async function submitFiles(src, task, options) {
         form.append('task', task);
         form.append('options', JSON.stringify(options));
         form.append('source_job', it.jobId);
+        it.sent = true; // a small request: never cut off, so a job it makes is never lost
         try {
-          res = await api('/api/jobs', { method: 'POST', form, signal: batch.ctl.signal });
+          res = await api('/api/jobs', { method: 'POST', form });
         } catch (e) {
           // The earlier job holding the upload was removed: upload again.
           if (!REUPLOAD_STATUS.has(e.status)) throw e;
           it.jobId = null;
+          it.sent = false;
+          if (batch.stopped) throw new DOMException('Stopped', 'AbortError');
         }
       }
       if (!res) {
@@ -311,23 +367,28 @@ async function submitFiles(src, task, options) {
         form.append('task', task);
         form.append('options', JSON.stringify(options));
         form.append('file', it.file, it.file.name);
+        batch.upload = new AbortController();
         res = await upload('/api/jobs', form, (f) => {
           it.pct = f * 100;
+          if (f >= 1) it.sent = true;
           if (live()) updateItem(it);
-        }, batch.ctl.signal);
+        }, batch.upload.signal);
       }
       const job = res?.jobs?.[0];
       (res?.jobs || []).forEach(upsertJob);
       it.jobId = job?.id || it.jobId;
       it.status = 'done';
+      it.startedWith = sig;
       added += 1;
     } catch (e) {
-      if (e.name === 'AbortError') { it.status = it.jobId ? 'done' : 'ready'; break; }
+      if (e.name === 'AbortError') { it.status = 'ready'; break; }
       it.status = 'error';
       it.error = e.hints?.[0] ? `${e.message} ${e.hints[0]}` : e.message;
       failed += 1;
       if (e.status === 401 || e.status === 0) break;
     } finally {
+      batch.current = null;
+      batch.upload = null;
       if (live()) updateItem(it);
     }
   }
@@ -336,8 +397,8 @@ async function submitFiles(src, task, options) {
   if (live()) redraw();
   else redraw('action'); // another source was loaded meanwhile: still drop "Stop" and re-enable the button
   const toActivity = { label: 'Open Activity', run: () => go('#/activity') };
-  if (batch.ctl.signal.aborted) toast(`Stopped. Added ${jobsWord(added)} to Activity.`, { kind: 'info', action: added ? toActivity : null });
-  else if (failed) toast(`Added ${jobsWord(added)}. ${failed} file${failed === 1 ? '' : 's'} didn’t work — see the list.`, { kind: 'danger', timeout: 9000 });
+  if (batch.stopped) toast(`Stopped. Added ${jobsWord(added)} to Activity.`, { kind: 'info', action: added ? toActivity : null });
+  else if (failed) toast(`Added ${jobsWord(added)}. ${failed} file${failed === 1 ? '' : 's'} didn’t work — see the list, then retry ${failed === 1 ? 'it' : 'them'}.`, { kind: 'danger', timeout: 9000 });
   else if (added) {
     const follow = stillHere(src);
     toast(`Added ${jobsWord(added)} to Activity.`, { kind: 'ok', action: follow ? null : toActivity });

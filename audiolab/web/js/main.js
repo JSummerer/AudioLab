@@ -1,13 +1,13 @@
 // Boot + global wiring: the theme, the sidebar (collapse, AI status,
 // running-job badge), the router and its views, drag & drop (files and links),
-// paste-anywhere, deep links (?url=…&task=…), the notice banner (no ffmpeg, an
-// unavailable output folder) and the live connection.
+// paste-anywhere, deep links (?url=…&task=…: the link waits in the field for Load), the
+// notice banner (no ffmpeg, an unavailable output folder) and the live connection.
 import { h, icon, clear, hydrateIcons } from './dom.js';
 import { onAuthRequired, setToken } from './api.js';
 import { store, on, loadHealth, loadSettings, loadJobs, connectEvents, activeCount, deviceLabel, appName } from './store.js';
 import { toastError, tokenDialog, led } from './ui.js';
 import { register, start, go, onRoute, currentRoute, settingsPath } from './router.js';
-import { newView, loadUrl, setFiles, setTask, useJobSource, normalizeUrl, focusLinkField } from './views/new/index.js';
+import { newView, loadUrl, offerLink, setFiles, setTask, useJobSource, normalizeUrl, focusLinkField } from './views/new/index.js';
 import { activityView } from './views/activity.js';
 import { jobView } from './views/job/index.js';
 import { libraryView } from './views/library.js';
@@ -27,7 +27,8 @@ const startToken = new URLSearchParams(location.search).get('token');
 if (startToken) setToken(startToken);
 dropParams('token');
 
-// Deep links (?url=…&task=…, docs/API.md) open New with the link loaded.
+// Deep links (?url=…&task=…, docs/API.md) open New with the link in the field. It is not looked
+// up until the user presses Load: any website can send the browser to this address.
 const TASK_ALIASES = { save: 'download', convert: 'download', split: 'separate', check: 'analyze' };
 const deepLink = (() => {
   const params = new URLSearchParams(location.search);
@@ -59,7 +60,8 @@ const aiChip = document.getElementById('aiChip');
 function renderAiChip() {
   const ai = store.health?.ai || {};
   let state = 'off';
-  let word = 'AI off';
+  // Not a fault: the add-on is optional.
+  let word = ai.install_supported === false ? 'AI add-on unavailable' : 'AI add-on not installed';
   let device = '';
   if (ai.available) { state = 'ok'; word = 'AI ready'; device = ai.device ? deviceLabel(ai.device) : ''; }
   else if (ai.installing) { state = 'on'; word = 'Installing AI…'; }
@@ -113,13 +115,19 @@ document.getElementById('skipLink').addEventListener('click', (e) => {
 
 // ---------------------------------------------------------------------------
 // Sidebar: collapse to an icon rail (remembered in this browser; index.html applies
-// it before first paint). Narrow windows show the tab bar instead, without a toggle.
+// it before first paint). Below 1000 px it starts collapsed, so the page keeps its room;
+// the toggle still opens it for the moment, without changing what is remembered.
+// Narrow windows show the tab bar instead, without a toggle.
 // ---------------------------------------------------------------------------
 const SIDEBAR_KEY = 'audiolab.sidebar';
 const IS_MAC = /Mac/i.test(navigator.platform || navigator.userAgent);
 const sidebarToggle = document.getElementById('sidebarToggle');
 const narrow = matchMedia('(max-width: 759px)');
+const compact = matchMedia('(max-width: 999px)');
 function isCollapsed() { return document.documentElement.dataset.sidebar === 'collapsed'; }
+function rememberedCollapsed() {
+  try { return localStorage.getItem(SIDEBAR_KEY) === 'collapsed'; } catch { return false; }
+}
 
 function applySidebar(collapsed) {
   if (collapsed) document.documentElement.dataset.sidebar = 'collapsed';
@@ -139,10 +147,12 @@ function applySidebar(collapsed) {
 function toggleSidebar() {
   const collapsed = !isCollapsed();
   applySidebar(collapsed);
+  if (compact.matches) return; // a compact window: for now only, not remembered
   try { localStorage.setItem(SIDEBAR_KEY, collapsed ? 'collapsed' : 'expanded'); } catch { /* this page only */ }
 }
 
-applySidebar(isCollapsed());
+applySidebar(compact.matches || isCollapsed());
+compact.addEventListener('change', () => applySidebar(compact.matches || rememberedCollapsed()));
 sidebarToggle.addEventListener('click', toggleSidebar);
 // ⌘\ (Ctrl+\ elsewhere). Alt/Shift aren't refused: some layouts need them for "\".
 document.addEventListener('keydown', (e) => {
@@ -174,31 +184,48 @@ fileInput.addEventListener('change', () => {
 
 // A dragged link (from the address bar or a web page) is loaded like a pasted one. Without
 // preventDefault the window would follow it and replace the app with that page, with no way back.
+// The overlay shows for files and for links from outside the app ("Drop to load this link");
+// plain dragged text may still be a link, but that is only known on drop, so it gets no overlay.
 const overlay = document.getElementById('dropOverlay');
+const overlayTitle = document.getElementById('dropTitle');
+const overlayNote = document.getElementById('dropNote');
+const FILE_TEXT = [overlayTitle.textContent, overlayNote.textContent];
 let dragDepth = 0;
+let innerDrag = false; // a drag that started on this page (a cover, a link): not something to load
+document.addEventListener('dragstart', () => { innerDrag = true; });
+document.addEventListener('dragend', () => { innerDrag = false; });
 const dragTypes = (e) => [...(e.dataTransfer?.types || [])];
 const hasFiles = (e) => dragTypes(e).includes('Files');
 const hasText = (e) => dragTypes(e).some((t) => t === 'text/uri-list' || t === 'text/plain');
+const hasLink = (e) => !hasFiles(e) && dragTypes(e).includes('text/uri-list');
 // Text fields take dropped text themselves (the link field, the tracklist).
 const ownDrop = (e) => !hasFiles(e) && isTextField(e.target);
+// What the overlay is shown for: files, or a link from outside this page.
+const overlayFor = (e) => !innerDrag && (hasFiles(e) || hasLink(e));
 window.addEventListener('dragenter', (e) => {
   if (hasText(e) && !hasFiles(e) && !ownDrop(e)) e.preventDefault();
-  if (!hasFiles(e)) return;
+  if (!overlayFor(e)) return;
   e.preventDefault();
+  if (!dragDepth) {
+    const link = !hasFiles(e);
+    overlayTitle.textContent = link ? 'Drop to load this link' : FILE_TEXT[0];
+    overlayNote.textContent = link ? 'It opens in New, as if you had pasted it.' : FILE_TEXT[1];
+  }
   dragDepth += 1;
   overlay.hidden = false;
 });
 window.addEventListener('dragover', (e) => { if ((hasFiles(e) || hasText(e)) && !ownDrop(e)) e.preventDefault(); });
 window.addEventListener('dragleave', (e) => {
-  if (!hasFiles(e)) return;
+  if (!overlayFor(e)) return;
   dragDepth = Math.max(0, dragDepth - 1);
   if (!dragDepth) overlay.hidden = true;
 });
 window.addEventListener('drop', (e) => {
-  if (!(hasFiles(e) || hasText(e)) || ownDrop(e)) return;
-  e.preventDefault();
   dragDepth = 0;
   overlay.hidden = true;
+  if (!(hasFiles(e) || hasText(e)) || ownDrop(e)) return;
+  e.preventDefault();
+  if (innerDrag) return; // dropped back onto the page it came from
   if (!mounted || document.querySelector('dialog[open]')) return;
   const files = [...(e.dataTransfer.files || [])];
   if (files.length) {
@@ -280,7 +307,7 @@ function mountViews() {
   if (deepLink) {
     history.replaceState(history.state, '', '#/new');
     if (deepLink.task) setTask(deepLink.task);
-    if (deepLink.link) loadUrl(deepLink.link);
+    if (deepLink.link) offerLink(deepLink.link); // waits in the field until the user presses Load
   }
   start(scroller);
 }

@@ -7,10 +7,12 @@ packages or shared model caches.
 """
 
 import hashlib
+import http.client
 import json
 import os
 import re
 import shutil
+import ssl
 import stat
 import tarfile
 import threading
@@ -103,6 +105,28 @@ def _read_catalog(path: Path) -> tuple[dict[str, Any] | None, str | None]:
         return item, None
     except (OSError, ValueError, KeyError, TypeError) as exc:
         return None, f'This app has no compatible AI download ({exc}).'
+
+
+# What makes an installed pack the pack a catalog names. The download URL is deliberately not part of it:
+# the same archive re-hosted elsewhere must not cost users a second multi-hundred-MB download.
+_PACK_IDENTITY = (
+    'schema',
+    'protocol',
+    'version',
+    'platform',
+    'executable',
+    'models',
+    'sha256',
+    'download_bytes',
+    'installed_bytes',
+)
+
+
+def _same_pack(installed: Any, catalog: dict[str, Any] | None) -> bool:
+    """Whether a receipt's catalog (any app's, including 2.4.0b6's full-catalog receipts) is this catalog's pack."""
+    if not isinstance(installed, dict) or not catalog:
+        return False
+    return all(key in installed and installed[key] == catalog.get(key) for key in _PACK_IDENTITY)
 
 
 def _json(path: Path) -> dict[str, Any]:
@@ -370,7 +394,7 @@ class ManagedAI:
         if not self.catalog:
             raise AudioLabError(self.catalog_error or 'This app has no compatible AI download.')
         receipt = _json(self.root / 'active.json')
-        if receipt.get('catalog') != self.catalog:
+        if not _same_pack(receipt.get('catalog'), self.catalog):
             raise AudioLabError('The compatible AI pack is not installed.')
         directory = self.root / self.catalog['version']
         self._directory(directory)
@@ -425,7 +449,11 @@ class ManagedAI:
             if not lock.acquire():
                 result['state'] = self._phase or ('installing' if self.running else 'busy')
                 result['reason'] = 'AI pack is in use or being changed.'
-                if not self.running and receipt.get('catalog') == self.catalog and self._probe_cache is not None:
+                if (
+                    not self.running
+                    and _same_pack(receipt.get('catalog'), self.catalog)
+                    and self._probe_cache is not None
+                ):
                     result.update(self._probe_cache[1], available=True, reason='AI pack is in use.')
                 return result
             self._recover()
@@ -434,7 +462,7 @@ class ManagedAI:
                     _, probe = self._ready(lock, Progress.null())
                     result.update(probe, available=True, reason=None, state='ready')
                 except (AudioLabError, OSError) as exc:
-                    if receipt.get('catalog') == self.catalog:
+                    if _same_pack(receipt.get('catalog'), self.catalog):
                         result.update(state='broken', reason=str(exc))
         except (AudioLabError, OSError) as exc:
             result.update(state='broken', reason=str(exc))
@@ -468,6 +496,30 @@ class ManagedAI:
     def _open(self, request: urllib.request.Request):
         return urllib.request.build_opener(_ReleaseRedirect()).open(request, timeout=10)
 
+    @staticmethod
+    def _network_error(exc: Exception) -> AudioLabError:
+        """A failure to reach or open the download, in plain words (resuming stays possible)."""
+        resume = 'The download resumes where it stopped.'
+        if isinstance(exc, urllib.error.HTTPError):
+            if exc.code in (404, 410):
+                return AudioLabError(
+                    'This app’s AI download is no longer available.',
+                    hints=['Install the newest AudioLab app from GitHub, then enable AI features again.'],
+                )
+            return AudioLabError(f'The AI download server answered with an error (HTTP {exc.code}). Retry later.')
+        if isinstance(exc, urllib.error.URLError) and isinstance(exc.reason, ssl.SSLError):
+            return AudioLabError(
+                'The secure connection to the AI download failed.',
+                hints=['Check the date and time of this computer and any network filter, then retry.'],
+            )
+        if isinstance(exc, urllib.error.URLError):
+            return AudioLabError(
+                'No internet connection to the AI download.', hints=[f'Connect to the internet and retry. {resume}']
+            )
+        return AudioLabError(
+            'The AI download could not start.', hints=[f'Check your internet connection and retry. {resume}']
+        )
+
     def _download(self, progress: Progress) -> Path:
         assert self.catalog is not None
         part, metadata = self.root / 'download.part', self.root / 'download.json'
@@ -494,37 +546,49 @@ class ManagedAI:
             if offset:
                 headers['Range'] = f'bytes={offset}-'
             request = urllib.request.Request(self.catalog['url'], headers=headers)
-            with self._open(request) as response:
-                _download_url(response.geturl())
-                code = response.status
-                if code == 200:
-                    offset = 0  # a server may ignore Range; never append a second full archive
-                elif code == 206:
-                    expected = f'bytes {offset}-{size - 1}/{size}'
-                    if response.headers.get('Content-Range') != expected:
-                        raise AudioLabError('The AI download resumed at the wrong position. Retry the download.')
-                else:
-                    raise AudioLabError('The AI download server returned an unexpected response. Retry later.')
-                length = response.headers.get('Content-Length')
-                if length is not None and (not length.isdigit() or int(length) != size - offset):
-                    raise AudioLabError('The AI download size did not match this app. Retry later.')
-                if response.headers.get('Content-Encoding', 'identity') != 'identity':
-                    raise AudioLabError('The AI download encoding is unsupported.')
-                flags = os.O_WRONLY | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0)
-                flags |= os.O_APPEND if offset else os.O_TRUNC
-                with os.fdopen(os.open(part, flags, 0o600), 'ab' if offset else 'wb') as out:
-                    while True:
-                        progress.check_cancel()
-                        chunk = response.read(min(_BLOCK, size - offset + 1))
-                        if not chunk:
-                            break
-                        if offset + len(chunk) > size:
-                            self._delete(part)
-                            raise AudioLabError('The AI download exceeded its expected size. Retry later.')
-                        out.write(chunk)
-                        out.flush()
-                        offset += len(chunk)
-                    os.fsync(out.fileno())
+            try:
+                with self._open(request) as response:
+                    _download_url(response.geturl())
+                    code = response.status
+                    if code == 200:
+                        offset = 0  # a server may ignore Range; never append a second full archive
+                    elif code == 206:
+                        expected = f'bytes {offset}-{size - 1}/{size}'
+                        if response.headers.get('Content-Range') != expected:
+                            raise AudioLabError('The AI download resumed at the wrong position. Retry the download.')
+                    else:
+                        raise AudioLabError('The AI download server returned an unexpected response. Retry later.')
+                    length = response.headers.get('Content-Length')
+                    if length is not None and (not length.isdigit() or int(length) != size - offset):
+                        raise AudioLabError('The AI download size did not match this app. Retry later.')
+                    if response.headers.get('Content-Encoding', 'identity') != 'identity':
+                        raise AudioLabError('The AI download encoding is unsupported.')
+                    flags = os.O_WRONLY | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0)
+                    flags |= os.O_APPEND if offset else os.O_TRUNC
+                    # read1 returns what has arrived instead of waiting for a whole block: on a slow connection
+                    # a buffered read(256 KiB) could keep a cancelled install running for minutes.
+                    read = getattr(response, 'read1', None) or response.read
+                    with os.fdopen(os.open(part, flags, 0o600), 'ab' if offset else 'wb') as out:
+                        while True:
+                            progress.check_cancel()
+                            try:
+                                chunk = read(min(_BLOCK, size - offset + 1))
+                            except (OSError, http.client.HTTPException) as exc:
+                                raise AudioLabError(
+                                    'The AI download was interrupted. Retry to resume it.',
+                                    hints=['Check your internet connection. The part already downloaded is kept.'],
+                                ) from exc
+                            if not chunk:
+                                break
+                            if offset + len(chunk) > size:
+                                self._delete(part)
+                                raise AudioLabError('The AI download exceeded its expected size. Retry later.')
+                            out.write(chunk)
+                            out.flush()
+                            offset += len(chunk)
+                        os.fsync(out.fileno())
+            except (urllib.error.URLError, TimeoutError, http.client.HTTPException) as exc:
+                raise self._network_error(exc) from exc  # reaching or opening it; read errors are translated above
         if not part.exists() or part.stat().st_size != size:
             raise AudioLabError('The AI download was interrupted. Retry to resume it.')
         digest = hashlib.sha256()
@@ -681,7 +745,8 @@ class ManagedAI:
         except Cancelled:
             self.log.append('AI installation stopped. Retry to resume the download.')
         except Exception as exc:
-            self.log.append(f'AI installation failed: {str(exc)[:500]}')
+            hint = exc.hints[0] if isinstance(exc, AudioLabError) and exc.hints else ''
+            self.log.append(f'AI installation failed: {str(exc)[:500]}{" " + hint if hint else ""}')
         finally:
             try:
                 if staged is not None and staged.exists() and not (self.root / 'activation.json').exists():

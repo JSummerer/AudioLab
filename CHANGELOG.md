@@ -1,421 +1,60 @@
 # Changelog
 
-## Unreleased
+## 2.5.0 (beta), 2026-11-16
 
-Source changes after beta 6; not included in the packaged beta.
+- **Adjust**, new in the Library: pick a 5–30 second passage of a version, edit its EQ on a graph, in fields
+  or as text, add section fades, and hear saved against edited settings on the same passage. Auditions are
+  estimates; Apply to full recording renders and checks a new version and keeps the earlier ones.
+- **Updates & add-ons** replaces "AI & system" in Settings. "Check now" says whether a newer AudioLab or
+  downloader exists and links to its release page; "Check for updates automatically" (off by default) asks
+  once a day. Nothing installs itself.
+- The Mac app can **update its downloader**: "Update downloader" fetches yt-dlp's newest stable release from
+  GitHub and checks its size, checksum and that it starts; the built-in copy (yt-dlp 2026.10.26) stays as
+  the fallback ("Use built-in version"). A link that fails because the site changed offers the button.
+- AI add-on: stays ready when only its download address changes, explains a missing download or connection
+  in plain words, stops a slow download at once on Cancel, shows one size, and offers Repair only when broken.
+- **Safer files:** a job that fails or is cancelled while still working removes the files and folder that
+  attempt saved, so "Try again" reuses the names; nothing else is touched, and a finished result stays even
+  if the Library step is interrupted. At start, AudioLab clears crash leftovers in its app data. For Enhance
+  and Split the output drive needs room only for the results; Save / Convert still needs the full working
+  space there. The output folder may not lie inside app data: one set there by an earlier version is refused
+  before a job starts (choose another in Settings → Files). A job that can't be saved is refused at once.
+- MP3, AAC and Opus files (and their tracks) that the encoder pushes over your peak ceiling are encoded once
+  more, at most 2 dB quieter; lossless files are never re-encoded.
+- **Less memory for long recordings:** on an 8 GB Mac, Volume only and Adaptive Enhance now start up to the
+  8-hour limit (before: refused from about one hour), working in files on disk; AI stems is unchanged.
+- **Faster:** cutting long WAV or FLAC into tracks, Enhance's measurements, and Cancel in Split's last steps.
+- **Simpler New:** a file starts on Enhance, a link on Save. Name and cover art moved into More options;
+  Tracks shows up front only with chapters, a pasted tracklist or over 10 minutes. A link opened from another
+  page (`/?url=…`) waits until you press Load.
+- **Plain words:** in the app, results lead with Show in Finder (downloads and ZIP only when AudioLab runs on
+  another computer); LUFS/dBTP figures appear with Show details. Settings groups kept originals under Storage
+  and says "app data" everywhere. The "Send to AudioLab" bookmarklet is gone: paste or drag a link instead.
+- **Library and window:** a ⋯ menu per recording ("Add a version from a file", "Delete the kept original");
+  the sidebar starts collapsed under 1000 px; after failures in a batch, Start retries only those; without
+  the AI add-on, Split links to setting it up. The interactive API page (`/api/docs`) is gone.
+- **Fixes since 2.4.0b6:** unchanged-setting previews play the saved export; stereo checks and automatic mono
+  bass cover the whole recording; low-mid control leaves events at the very start or end alone; version
+  comparison turns volume matching off when a measurement is missing; "Check the result" uses only the
+  finished file; a start after a crash no longer hands over to another program on the old port.
 
-Visual adjustment workspace (2026-11-12):
-- Library's optional Adjust workspace brings passage selection, graphical and numeric EQ, section
-  fades, saved drafts and paired auditions together. Saved settings and edited settings re-render the
-  same original passage; Original and actual exported-version comparison remain available.
-- New versions retain bounded calibration for contextual auditions. Target-only changes reuse the
-  whole-recording gain where supported. EQ/dynamics auditions remain estimates: full Apply reanalyzes
-  and verifies a new version, preserving earlier outputs. Auto can clear an explicit compression choice;
-  old versions without its provenance require a full Apply for that reset.
-- Exact audition spectra use both channels' energy and declare their range, resolution and gain basis.
-  New versions retain a bounded original-level overview for passage selection. Historical tone charts
-  are labelled as relative, coarse observations; misleading automatic section-EQ proposals are withheld.
-- EQ graph, fields and text share server precision. Section fades agree at the minimum length, and
-  section creation shows any scope added around an audition. Zero-phase bells retain the existing DSP;
-  magnitude similarity to a conventional bell does not imply the same transient response.
-- Adjust says when both audition sides leave out the saved version's whole-recording peak correction
-  and explains that Apply can change their levels and difference. Passage auditions no longer blame
-  peak limiting for their intended difference from the loudness target, and dragging a section edge
-  stops where it stays valid while invalid bounds or fades withhold full-strength notes. An audition
-  left open when the window closes is removed at the next start instead of staying in Activity for
-  the retention period.
+## 2.4.0 betas (b1–b6), 2026-10-20 to 2026-11-09
 
-Rendering and comparison fixes (2026-11-11):
-- Preview changes with unchanged settings plays an available saved export, preserving the full render's
-  processing and codec effects. Changed settings still produce an explicitly labelled section estimate.
-- Stereo checks cover the whole recording. Automatic mono bass skips recordings with an eligible
-  out-of-phase bass passage, even if the overall correlation is positive; an explicit On remains possible.
-- Adaptive low-mid control leaves events touching the start or end alone when a complete rise and return
-  cannot be observed. Section EQ reuses disk-backed buffers on long renders, and AI stem processing's
-  low-mid bypass explanation stays correct when Section EQ is also used.
-- Comparing Library versions disables volume matching when the selected export's measurement is
-  unavailable. Check the result uses the finished file without looking up the original website or
-  carrying over the original's names, cover, duration or tracklist.
+- **b1:** the first self-contained Mac app (macOS 14+, Apple silicon; ad-hoc signed, not notarized) with
+  Save/Convert, Check, Enhance and the Library, and a public source beta with macOS, Windows and Linux CI.
+  A new look ("Sleeve"), a sleeve preview on New, one compare player that keeps both versions on one clock,
+  "Change and start again", and many fixes to cancellation, uploads, errors, covers and playback.
+- **b2–b3:** the optional AI add-on (one download with its own runtime and both models, for offline Split and
+  AI stems) with progress, resume, cancel, repair and removal; later builds reuse an installed AI 1.0.0.
+  Library comparisons keep position and volume matching between versions; clearer cover-art controls.
+- **b4:** whole-file loudness and peak checks for long recordings, adaptive low-mid control instead of a fixed
+  cut, opt-in bass harmonics, Volume only / Adaptive / AI stems, a loudness and peak check per export, a
+  de-esser, and processing details kept in the Library after jobs expire.
+- **b5:** a changes timeline in comparisons, Library previews of changed settings on a passage with Apply to
+  full recording, and disk-backed buffers for Enhance beyond 10 minutes.
+- **b6:** a tone timeline, custom and section EQ, Library versions that say what they are, matched-volume
+  "Compare versions", "Add a file…", moving removed files to the Trash (opt-in), reuse of kept originals for
+  links, the delivered stream's details, "Check the result", destination-named format presets, a 24 dB/octave
+  rumble filter at 20 Hz, and dynamics choices that no longer mistake a long DJ set's drift for a concert.
 
-## 2.4.0b6 (2026-11-09, public beta)
-
-- Check and Enhance show a tone timeline for recordings longer than 3 minutes: how deep bass, mids, top end
-  and four more bands move against the recording's own typical balance, minute by minute, from the whole
-  file. It shows the balance without judging it: on two DJ sets and a concert, changes of 2–5 dB lasting
-  many minutes were common, and they are often the music itself.
-- Section EQ for experts (Fine-tuning and Library previews): EQ bands for chosen parts of a recording,
-  faded in and out at their edges, for example a gentler top end for a brighter first part.
-- Library: removing a version can also move its files to the Trash (off by default; files can be put back
-  from the Trash), and "Keep only this version" removes the other versions of a recording the same way.
-- Library: "Add a file…" adds a file from your disk where it is (no copy), measures its loudness, and can join
-  a recording as another version, so it can be compared at matched volume with AudioLab's versions.
-- Links whose recording already has a kept original reuse that file instead of downloading it again
-  (Settings → Reuse kept originals, on by default).
-- The YouTube sign-in is used only when YouTube refuses a video without it, and then paced, never for ordinary
-  videos: YouTube can block accounts that download a lot. Settings says a spare Google account is safer.
-- The tone timeline marks a link's chapters, and section EQ can suggest bands for a part you pick: half of its
-  difference from the recording's typical balance, at most −2/+1 dB, never a boost in the highs.
-- Results and the Library show the stream a site delivered (e.g. "Opus · 99 kbps · 48 kHz · stereo").
-- After Enhance, "Check the result" checks the finished file; "Check the original" checks the source.
-- Library: a search field, Newest/Largest sorting and a totals line; the less common actions of a version
-  (Show in Finder, Open job, Keep only this version, Remove) moved into a ⋯ menu. The Library loads faster:
-  tone timelines are fetched only when a preview shows them.
-- Enhanced files' tags tell versions apart: "(Enhanced 2)", "(Enhanced 3)" … in the title, and a comment line with
-  the AudioLab version, recipe, loudness target and date. File and folder names are unchanged.
-- Format presets are named by destination ("USB stick, TV & car", "iPhone & Apple Music") and remembered per task.
-
-- Long recordings (20 minutes or more) choose club, dense or wide dynamics from their typical 30-second
-  peak-to-loudness and 3-minute loudness range, not from whole-file loudness range and absolute level.
-  A DJ set's level drift between tracks no longer reads as concert dynamics, so Auto applies the club
-  loudness and glue instead of leaving the set nearly untouched. Shorter pieces keep the previous rule.
-  Calibrated on two DJ sets and one concert; listening preference still needs evidence.
-- The rumble filter is a 24 dB/octave zero-phase filter, at 20 Hz for DJ sets and music (speech keeps
-  60 Hz). The previous one was a soft first-order design at 25 Hz that also took 2.3 dB at 45 Hz and
-  1.4 dB at 60 Hz, cutting kick and sub-bass.
-- Effectively mono recordings (two identical channels) skip the mono-bass step and say so; the analysis
-  calls them "effectively mono" instead of "identical".
-- Custom EQ for experts in Fine-tuning and in Library previews: up to 8 bell bands typed as text
-  (e.g. 160 Hz −3.3 dB Q 2.9), with two starting presets, Sub focus and Clean upper bass. Q values
-  match a DAW's bell.
-- Library previews also offer the loudness target and glue compression, and accept times as mm:ss.
-  Apply to full recording keeps the cover art of the version it starts from.
-- Library versions show what they are under their title (loudness, compression, custom EQ, an unusual
-  sample rate, and which settings you chose), so two Enhance versions no longer look identical. The Library
-  comparison starts at the same loud passage as the job page. New's summary counts fine-tuning changes.
-  The sample-rate note says 48 kHz suits TVs, phones and most players and 44.1 kHz is for CDs.
-- Library can compare two versions of one recording at matched volume ("Compare versions"), and says
-  when versions differ by more than 1 dB in loudness, because louder often sounds better at first.
-- WAV exports of 4 GB or more (for example a 2 h 40 min set at 96 kHz/24-bit) are written as RF64 with a
-  warning instead of a WAV whose header cannot describe the size. FAT32 USB sticks cannot hold such files.
-- The YouTube quality note says about 100–160 kbps (a long mono set measured 99 kbps), and that Premium's
-  256 kbps applies only to official music videos and Art Tracks.
-- "Restore highs" is now called "Brighten muffled highs", to say what it does: it only acts on files
-  whose highs are cut off and adds new harmonics.
-
-## 2.4.0b5 (2026-11-06, public beta)
-
-- Changes timeline in comparison shows measured low-mid, de-esser, compressor and limiter reduction
-  highlights. Selecting a highlight repeats the corresponding passage. Processing details lists
-  static EQ and overall level changes. New timelines survive in Library history.
-- Library can preview changed settings on a selected 5–30 second passage of the kept original, using
-  nearby context and the existing processing chain. Apply to full recording creates and verifies a
-  new full-length version. Preview supports Volume only and Adaptive. Levels and processing can
-  differ when AudioLab uses the whole recording, and the preview audio excludes any effects of the
-  final export format.
-  Bounded decoding keeps MP3/AAC/WebM passage timing aligned with the source. AudioLab reports
-  an error if it cannot establish the seek timing.
-- Enhance beyond 10 minutes uses reusable disk-backed working buffers and bounded processing steps.
-  Scratch allocation, filtering, mixing and gain passes are cancellable, and temporary buffers
-  close on cancellation or failure. Disk preflight includes the added working space.
-  Enhance publishes the master only after its final measurements succeed. Long-run capacity and
-  listening preference still need separate evidence.
-
-## 2.4.0b4 (2026-11-05, public beta)
-
-- Long-recording loudness, dynamics, peaks, clipping and DC checks now cover the whole file with bounded
-  reads. Spectrum, stereo and key still use excerpts, with their measurement basis shown separately.
-- Adaptive low-mid control replaces the automatic whole-recording cut: brief rises are judged against
-  nearby audio, with conservative reduction and total-change limits. Steady warmth and sustained changes
-  can pass unchanged. Auto / Strong / Off lives in More options; reports say what actually happened.
-  These guardrails have generated-signal checks; better perceived sound is not yet established.
-  Brief dips up to two analysis windows do not split a sustained rise into eligible short events.
-- Bass harmonics are independently opt-in. Processing choices now read Volume only / Adaptive / AI stems,
-  keeping existing API values and explaining that AI is a different treatment, not a quality guarantee.
-- Enhance checks loudness and estimated true peak in each saved full-length export. Missed ceilings or
-  unavailable measurements produce explicit warnings; master and encoded-file readings stay distinct.
-- Library retains processing settings, reasons, applied changes and export checks after jobs expire.
-  Failed export checks remain visible while processing details are folded.
-  Full comparisons match the selected export's measured loudness when available. Repeat a section keeps
-  both sides aligned, uses short fades at its boundaries and follows valid ranges between versions;
-  the timeline can mark the final grid point, and seeking to the end exits Repeat.
-- Preview generation checks cancellation; cancelling either previews or file verification stops the job.
-- Processing explanations name the applied filters and added harmonics without promising a better sound
-  or recovery of lost detail. Compression reports distinguish a selected stage from measurable reduction.
-  Level-percentile calculations also tolerate extremely hot finite float samples without overflow.
-- The peak limiter's gain now moves over about 10 ms instead of recovering within 2.5 ms of each peak,
-  including in Volume only mode. The report records how often it worked. These numerical changes do
-  not establish improved sound or the absence of audible artifacts.
-- The clarity lift sits narrower at 3 kHz, out of the S sounds above 5 kHz, and is skipped when the top
-  end is already bright. The lift above 11 kHz runs only on a measured dull top end and never on
-  compressed sources (MP3, AAC, YouTube's Opus). In AI stems mode, the vocals follow the same rule.
-- Check notes a bright top end that can sound sharp when played loud.
-- New de-esser in Adaptive and AI stems: softens S sounds and the hardest cymbal hits only where they jump out
-  against the track's own typical level (up to 3 dB on a mix, 4 dB on a voice). On a mix it can't change
-  the overall tone: the 4.5–9.5 kHz band drops by at most 0.3 dB in total, otherwise it keeps to the biggest
-  spikes. In AI stems mode it treats only the separated vocals, so hi-hats stay untouched. More options → Sharp S
-  sounds: Auto, Strong or Off (`--deess` in the CLI). The summary says how much it did.
-- The top-end measurement counts wide stereo highs at their real level, and Best reports the vocals'
-  actual clarity lift.
-
-## 2.4.0b3 (2026-10-21, public beta)
-
-- Library comparisons carry position, Original/Enhanced choice and volume matching between versions
-  of the same recording. Playback continues when switching with the version button; unrelated recordings
-  and ordinary file players start independently. Recoverable playback errors release the audio output.
-- Cover controls distinguish artwork embedded in supported audio formats from an optional separate image.
-  Summaries respect your own image and format support; successful audio-only fallback records a warning.
-- Retrying an interrupted AI installation reclaims abandoned unpacking files before checking disk space,
-  while preserving recovery data and resumable downloads. Settings refreshes Storage after AI changes settle.
-- Core builds reuse the verified AI 1.0.0 release when its inputs are unchanged. Updating this app does
-  not require downloading an already installed compatible AI pack again; genuinely changed AI inputs
-  require a separately versioned helper.
-- The README offers both a GitHub release page and a clearly labelled direct download. Focused screenshots
-  and linked usage guidance explain enhancement, embedded cover art and comparison controls.
-
-## 2.4.0b2 (2026-10-21, public beta)
-
-- Shorter README puts the Mac download and installation first; usage, server settings and credits
-  live in linked guides. The app and release downloads are unchanged.
-- Hardware guide separates compatibility, provisional 8 GB core / 16 GB AI testing guidance,
-  measured download/installed sizes and duration-dependent working space. Documents existing
-  memory-check limits without claiming a tested RAM minimum or changing the packaged app.
-- Documentation follow-up: direct Mac download, a short installation path, AI progress/completion
-  guidance and navigable update/removal help. The published binary is unchanged; the revised
-  disk-image read-me will be included in future builds.
-- Optional managed AI for the self-contained macOS arm64 app: one explicit download includes the
-  isolated runtime and both Standard/Fine-tuned model choices for offline Split and Best Enhance.
-  A bundled catalog pins the compatible release; the main app's Python packages stay immutable.
-- Settings shows known sizes and installation progress, with resume, cancel, update, repair and
-  confirmed removal of AI-owned files. Recordings, Library, settings and shared/source caches stay.
-  No tester-side Terminal, Python, Homebrew or uv setup is needed. Native library aliases share storage
-  instead of duplicating payloads. Release notes record the actual artifact checks and remaining limits.
-
-## 2.4.0b1 (2026-10-20, public beta)
-
-### Changed
-- Self-contained **macOS Core** beta build and GitHub prerelease delivery path: Python, FFmpeg and
-  Deno travel with the app, with no tester-side Terminal/Python setup. The initial target is macOS
-  14+ on Apple silicon; Intel support remains unqualified. The app uses ad-hoc signing without
-  Apple Developer ID or notarization. Release notes record artifact validation/publication separately.
-- Core includes Save/Convert, Check, Light/Standard Enhance and the Library. Split and Best are
-  unavailable in this package; source installations retain optional AI. Core updates by replacing
-  the app, with no in-app AI installer or automatic pip/downloader package update.
-- Packaged downloader/runtime caches and temporary files stay below the app-data folder; macOS
-  still manages native WebKit data separately. About can open app data and logs. The Mac guide
-  covers the graphical first opening, updates and optional cleanup while preserving output and
-  explaining that app data includes Library/settings and valuable kept originals.
-- The source launcher only replaces its own recognized shortcut. It preserves existing packaged or
-  unrelated apps with the same name. The packaged app refuses the source-only shortcut command.
-  Unavailable maintenance commands explain the next step without a Python traceback.
-- Public source beta with a clean repository history, contributor and security guidance, and automated
-  macOS/Windows/Linux regression checks.
-- Public introduction and package description now focus on local audio files and supported links.
-  The README has a shorter first-use path, with separate installation and usage guides covering
-  updates, safe uninstall, optional AI downloads and explicitly experimental Windows/Linux setup.
-- **A new look ("Sleeve")**, calmer and easier to scan, in light and dark: titles in a serif (New York on a Mac),
-  one blue for actions and the current choice, lists with thin lines instead of boxes, no monospace or capital
-  labels. A finished job opens with its cover and title, then the player and your files; what was done follows.
-- **New** shows what you're making beside the form: a sleeve with the cover (an empty sleeve until something is
-  loaded), the title, what you get and the start button, always in view; in narrower windows as a bar along the
-  bottom. Options read like a sleeve's credits, each label left of its choice.
-- Titles look the same in every browser and on Windows and Linux: where the system has no screen serif of its own
-  (it does in the Mac app and Safari: New York), AudioLab brings one (Source Serif 4, open license, works offline).
-- Simple choices are one row of options with one line about the one you picked and an (i) for details (Save as,
-  Type of audio, Quality, Split into, fine-tuning); several choices are a checklist. Fine-tuning shows only
-  "Auto" until you turn it off. The four tasks on New are plainer, and the picked one stands out more.
-- Folders show short (`~/Music/AudioLab`, the full path when you point at it): the job page, Start, Settings,
-  About. Settings → Files: the output folder with "Open folder" and "Change". About: copy buttons for the paths.
-- Library: the kept original is one line with "Delete original copy" as a quiet red link, "Remove from Library"
-  says what it does, files have labelled Play/Stop buttons, and formats read "WAV 16-bit" instead of "PCM_S16LE".
-- Activity: one list with the status next to each job's task; "Try again" keeps its words on narrow windows.
-- **One player for comparing** the original with the result, on the job page and in the Library. Both versions
-  play on one clock, so switching keeps the exact position (before, they could drift up to about 25 ms apart
-  after each play or seek — a stumble on the beat). Every format compares, also Opus originals on macOS 13, and
-  "Match volume" uses the whole song's loudness difference. Keys: 1 and 2 switch, Space plays and pauses, and on
-  the timeline the arrow keys jump 5 s (Page Up/Down 30 s). Pausing and jumping fade out in a few milliseconds
-  instead of clicking. A part that can't be loaded pauses with "Try again", and a start that stays silent goes
-  back to Play and says so.
-- The job page compares the whole song when its original is kept, starting at a loud passage. Otherwise it plays
-  the 45-second excerpt at its real place in the song ("1:52–2:37 of 4:45" instead of "0:00–0:45") and says why
-  it is only an excerpt. The Library compares with the lossless result when there is one and says which
-  ("Enhanced · WAV 16-bit").
-- "Only the changes" is gone: it was turned up by as much as 40 dB without saying so and mostly sounded like
-  added noise. Light results say "Volume only, plus a safety limiter on a few peaks" when the limiter touched one.
-- Split no longer keeps a copy of the original (nothing compares stems with it, and long uploads took
-  gigabytes). Originals kept by earlier Split jobs stay until you delete them.
-- **Change and start again** on failed and cancelled jobs: back to New with the same source, task and options,
-  to fix what went wrong. When trying the same again can't help, it is the main button.
-- "Do more with this" keeps a pasted tracklist and, for links, the chapters, so the next job can still cut the
-  recording into tracks.
-- Activity: the "Failed" filter is now "Didn't finish" (it also lists cancelled and not started jobs), and
-  "Clear finished" asks first.
-- Error notices also say what you can try. Settings refuse values they can't use instead of quietly saving
-  something else; the output folder must be a full path, for example `~/Music/AudioLab`.
-- The source native-window integration uses macOS APIs from 11.3; installed dependencies can impose
-  newer requirements. The self-contained Core beta targets macOS 14 or newer.
-- Noise reduction is now an explicit choice (Off, Light or Strong). Quiet programme levels cannot reliably
-  identify background noise, so the voice recipe no longer switches it on automatically or diagnoses noise
-  from those levels.
-
-### Fixed
-- Comparison playback aligns WebM chunks with the full decode when using the bundled FFmpeg as well
-  as newer system builds. Storage totals count hard-linked originals once on Windows. Downloader
-  self-repair no longer treats a later job in the same clock tick as a job waiting for an update.
-- Launcher recovery explains how to rebuild an unusable Python environment and how to retry a failed
-  uv bootstrap. The Windows launcher preserves the application's failure exit status after showing it.
-- Removed jobs stay removed even when completion and clearing history happen together. Cancel remains
-  available while originals are hashed or copied into the Library; after final publication starts, it
-  explains that the result is already being saved instead of promising cancellation and finishing as Done.
-  Late work from a stopped attempt cannot change a retried job.
-- On macOS/Linux, cancellation also stops a stubborn child process when its parent has already exited.
-- Upload size limits also apply to streamed requests without a declared length. A permitted cover image
-  no longer consumes the audio file's allowance. Remote cover downloads have size/time bounds and observe
-  job cancellation between network operations.
-- Activity no longer regresses to an older response or restores a job just removed. Rapid settings changes
-  save in order; a failed write leaves active settings unchanged, and damaged saved preferences fall back
-  to valid values. Track and stem players return to Play with a useful message if playback fails.
-- Ctrl+C stops the remaining CLI playlist and input files. Custom access tokens containing URL punctuation
-  work when opening the app.
-- Sparse recordings with sound outside the normal analysis excerpts are no longer reported as entirely
-  silent. Their confirmation scan can be cancelled.
-- Audio analysis reuses measurements it already made. Successful AI enhancement releases an obsolete
-  full-length audio buffer before the remaining processing, reducing unnecessary memory retention.
-- A kept original could belong to another recording: two uploads with the same name and size (say, a re-bounced
-  mix) or two direct file links with the same file name counted as one, so comparing and "Download original"
-  played the other file, and deleting it removed it for both. Originals are now told apart by their content.
-- An output folder on a drive that isn't connected (or one AudioLab can't write to) broke the whole app. Now a
-  notice at the top leads to Settings → Files, jobs stop right away with "The output folder isn't available",
-  and "Show in Finder" says when a folder is gone instead of failing.
-- macOS app window: dropping a link replaced AudioLab with that web page, with no way back; it now loads into New
-  like a pasted link. The window also forgot every remembered choice (collapsed sidebar, More options, Show
-  details, the cover switch) each time it opened.
-- "Add cover art" off was ignored when converting a file that already has a picture.
-- For links, the artist on the card could differ from the one written into the files; both now follow one rule.
-- "Try again" on a live stream or premiere that has ended looks the link up again instead of repeating that it is
-  still running.
-- Playlist items started long after the playlist was looked up lost their title, playlist folder and album tag.
-- The job page offered Download and players for files that were moved or deleted; they are marked "Moved or
-  deleted", as in the Library. A saved file in a format this Mac can't play (Opus/WebM before macOS 14) shows a
-  note with the download instead of a player that never starts.
-- Cancelled jobs say why ("Not started — AudioLab was closed…"), and messages name the "Try again" button, not
-  "Retry". A cancelled job could stay on "Cancelling…" until the page was reloaded.
-- "Do more with this" on a job that was removed meanwhile ended in "Job not found".
-- The file picker offered some file types (.mts, .mpg, .wmv, .m4b and others) that were refused after the upload;
-  they work now. Files over the upload limit are refused before uploading.
-- A full disk or a folder AudioLab can't write to says so, with what to do, instead of "temporary problems often
-  go away" or the tool's raw output. Other unexpected errors show a short message and how to report them.
-- Check now says when a recording is actually clipped (flat-topped samples), separately from peaks that are only
-  close to full scale.
-- Download errors: trouble at the site's end says to try again later, a link that needs a sign-in points to the
-  sign-in setting, and an unknown error no longer starts an automatic downloader update.
-- Hints point to things that exist (Settings → Downloads & sign-in → "Update downloader", "Copy details for a bug
-  report", "Copy system report") instead of terminal commands; a Split refused on a slow computer no longer
-  suggests "Standard quality".
-- A second result of a title with a dot got a garbled folder name ("Song (feat (2). X) (Enhanced)"); it is now
-  "Song (feat. X) (Enhanced) (2)".
-- Smaller fixes: Enhance cut tracks in the format clicked first instead of the first one shown; an empty artist
-  in the name editor didn't remove a file's own artist; Settings → About rounded the length limit to hours ("0 h"
-  for 20 minutes); Storage counted an upload's kept original twice; adding an audio file named like
-  `cover-original.wav` together with your own cover deleted it; a crashed job left its large temporary files
-  behind; adding a long playlist sends far fewer updates; Save without a format (from a script) uses the format
-  set in Settings.
-
-## 2.3.0 — Library, covers and tracklists (Oct 2026)
-
-### New
-- **Library** (sidebar): every Save, Enhance and Split result finished from this version on, grouped by
-  recording with its versions — play, show in Finder, open the job, download, or remove it from the Library
-  (your files stay). Moved or deleted files are marked as such. Entries outlive the automatic job cleanup.
-- **Full-length compare**: the original against the enhanced version over the whole file, time-aligned —
-  switch at any point and keep the position, volume-matched (the louder one is turned down; "Match volume"),
-  jump by track/chapter markers or ±10 s. Both files are streamed; no extra audio files are made.
-- **Kept originals**: Enhance and Split keep the downloaded stream or uploaded file (as it came — about
-  1 MB per minute for links) in AudioLab's own data so the Library can compare. Settings → Storage has
-  "Keep originals for comparing", their size and "Delete kept originals"; the Library can drop one recording's.
-- **Your own cover image**: pick or drop a JPG/PNG/WebP for a link or a file; it goes into every file that
-  can carry one. **Also save the cover as a picture** puts the cover at full size (a link's thumbnail, to
-  edit elsewhere) next to the job's files; finished jobs offer *Save cover to folder*.
-- **Paste a tracklist** for long sets — for links and now also files: checked as you type, with the
-  problems by line and a preview of the tracks it found, then split into tracks.
-- **Format info**: an (i) next to every format says what it is, about how big it gets, where it plays and
-  its limits.
-
-### Changed
-- The global Simple/Advanced switch is gone: Save, Enhance and Split each end with **More options**
-  (remembered; shows "2 changed · Reset" when folded), and everything you set is used. Job pages have
-  **Show details**; Settings → "Show all options by default" sets the starting point.
-- The sidebar can be collapsed to a narrow strip of icons (button next to the logo, or ⌘\); it stays that way.
-- Settings is one column with section tabs at the top; a change shows a small "Saved ✓" next to it instead
-  of a pop-up. Notices are smaller and sit top right.
-- Quitting asks only while a job is actually running (waiting ones are kept as "Not started" for *Retry*).
-- Corrected format descriptions: Apple Lossless isn't "for AirPods" (Bluetooth AirPods don't play
-  lossless), Opus downloads are re-encoded, and FLAC/WAV made from a link add no quality.
-
-### Fixed
-- Enhancing an uploaded file keeps its embedded cover art.
-- Seeking in long files in the players (HTTP Range, Starlette ≥ 0.49.1); `.m4a` files are served as
-  `audio/mp4`.
-
-## 2.2.0 — a proper app (Oct 2026)
-No new processing features — this release is about how AudioLab looks, starts and is built.
-
-### App
-- **A real macOS app**: the first start adds *AudioLab* to your Applications folder; from then on it opens
-  like any other app — its own window, Dock icon and menu ("Quit AudioLab"), no terminal. Starting it again
-  brings the open window to the front. After you replace the folder with a newer version, the app
-  reinstalls what changed on its next start.
-- **Quitting is safe**: closing the window or ⌘Q asks first while jobs are running, then stops them cleanly
-  (no leftover ffmpeg); they can be run again with *Retry*. An AI-features install keeps going after a quit.
-- **New layout**: a sidebar with **New**, **Activity** and **Settings** instead of one long page; each job has
-  its own page (with a Back button) instead of a side panel; Activity groups jobs by day with filters;
-  Settings is a page with sections. On narrow screens the sidebar becomes a bottom tab bar.
-- Startup problems of the app window show a message instead of failing silently; the log moved to
-  `~/Library/Logs/AudioLab` on macOS.
-
-### Code & repository
-- The server is split into small route modules (`audiolab/api/`); everything that differs between macOS,
-  Windows and Linux now lives in one module (`system.py`), so porting means filling in one place.
-- The web UI is split into views (`web/js/views/`), a tiny router and four stylesheets — still no build step.
-- One bounded shutdown path for jobs (cancel, kill child processes, save), also used by Ctrl+C.
-- Dead code removed; consistent formatting and linting (ruff), tests run with pytest; a GitHub Actions check
-  that runs on demand (no automatic runs while the repo is private); Docker files moved to `docker/`.
-- Prototype-era documents removed from the maintained source tree.
-
-## 2.1.0 — hardening & features (Oct 2026)
-
-### New
-- **Split into tracks**: YouTube chapters or a timestamped tracklist in the description turn a DJ set or
-  album upload into one file per track (Save and Enhance, `--split-tracks`).
-- **Light quality — volume only**: one fixed level per type (music −14 LUFS, DJ/club −11, live and voice
-  −16) with true-peak safety, without changing the sound. Good for a playlist or a folder of files (`--light`).
-  About twice as fast as Standard and needs a third of the memory.
-- **Musical key** (estimate, with Camelot code) in Check and Enhance results.
-- **YouTube sign-in from your browser** (opt-in, Settings or `--cookies-from-browser`) for age-restricted
-  videos and "confirm you're not a bot" blocks.
-- Converting a local file keeps its own title/artist/album tags (the file name is only a fallback).
-- Check reports the source's real sample rate, channels and codec, and says when it can't judge the
-  frequency range (pure tones, silence).
-- **Edit title / artist** before saving — used for file names and tags (`--title`, `--artist`).
-- **Several files at once**: drop or choose many files — one job each. The CLI takes several inputs too.
-- **Download all as ZIP** for results with several files (stems, tracks) — handy on Docker/NAS.
-- **"Send to AudioLab" bookmarklet** and deep links (`/?url=…&task=…`); paste a link anywhere in the window.
-- **Self-repairing downloader**: when YouTube changes and a download fails, AudioLab updates yt-dlp
-  once and retries by itself (Settings → can be turned off). Settings shows when the downloader is old.
-- **Bug-report helpers**: "Copy details for a bug report" on failed jobs, "Copy system report" in Settings,
-  `audiolab doctor --report`. Home folder paths are shown as `~`, tokens are never included.
-- **Storage overview** in Settings (space used by AudioLab's own working data).
-- Log file in the data folder (`logs/audiolab.log`, rotating).
-
-### Hardening
-- Local mode refuses requests from other websites (CSRF) and DNS-rebinding hosts.
-- Ctrl+C / closing the terminal now shuts down within seconds even with a browser tab open, and cancels
-  running jobs cleanly (no leftover ffmpeg/downloads). Such jobs say "Stopped because AudioLab was closed".
-- Windows: launcher retries an incomplete first install, works without the `py` launcher and from network
-  shares; shorter file names (MAX_PATH); retries when another program briefly locks a file; process-tree
-  kill is verified; console output never crashes on unusual characters; keeps the PC awake during jobs
-  (also on Linux via systemd-inhibit).
-- Linux launcher explains a missing `python3-venv` and falls back to uv.
-- *Note:* the Windows/Linux items above were written from a code review and have **not yet been run** on
-  those systems.
-- Robustness sweep with unusual inputs (silence, very short files, 5.1 audio, 8–192 kHz, corrupt files,
-  exotic names, NaN samples, white noise, +6 dBFS float files) — friendlier messages instead of crashes;
-  white noise is no longer mistaken for speech.
-- Memory/disk safety checks recalibrated from measurements (Check of long files, float working copies).
-- Faster true-peak limiter (one oversampling per pass), identical output.
-- Docker: dependencies are cached in their own layer (code updates rebuild in seconds); the auto-generated
-  access token is kept across restarts.
-
-## 2.0.0 — the redesign (Oct 2026)
-- The *ClubReady* prototype became AudioLab: one app with four tasks (Save, Enhance, Split, Check),
-  a job queue, a new web UI for beginners and experts, a CLI, Docker images and launchers for
-  macOS/Windows/Linux.
+Versions 2.0 to 2.3 (October 2026) are described in earlier versions of this file.

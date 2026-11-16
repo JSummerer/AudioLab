@@ -51,7 +51,7 @@ bash -n start.sh                                     # when you touched the laun
   These use small DOM/media fakes, not a personal browser. Keep Node installed when running all checks.
 - `tests/test_docs.py` keeps the docs honest: relative links, API routes, settings, split formats and the version
   example are checked against the code. Update the docs when it fails, not the test.
-- The suite has about 690 tests (November 2026): more than a production release needs, but fine for
+- The suite has about 675 tests (November 2026): more than a production release needs, but fine for
   development. Trim it before a production release (see `docs/ROADMAP.md`).
 - CI (`.github/workflows/ci.yml`) runs Python 3.12 checks on macOS, the supported platform, for every pull
   request. Started by hand, it also checks Windows and Linux; do that before a release when they need checking.

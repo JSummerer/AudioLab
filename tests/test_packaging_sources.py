@@ -32,6 +32,21 @@ def sources(monkeypatch):
     return module, row, sleeps
 
 
+def _rejected(sources, monkeypatch, cache, served, match, partial_kept=True):
+    """Serve `served` once: the fetch fails with `match`, is never retried, leaves no final file and keeps the
+    bytes only as `.partial` (for a look)."""
+    module, row, sleeps = sources
+    calls = []
+    monkeypatch.setattr(module.urllib.request, 'urlopen', lambda *a, **k: calls.append(None) or io.BytesIO(served))
+    with pytest.raises(RuntimeError, match=match) as caught:
+        module.fetch('all', cache)
+    assert calls == [None] and sleeps == []
+    assert not (cache / row['filename']).exists()
+    if partial_kept:
+        assert (cache / (row['filename'] + '.partial')).read_bytes() == served
+    return caught.value
+
+
 @pytest.mark.parametrize(
     'error',
     [
@@ -122,19 +137,7 @@ def test_permanent_download_failure_does_not_retry(sources, monkeypatch, tmp_pat
 
 
 def test_download_checksum_mismatch_is_retained_and_never_retried(sources, monkeypatch, tmp_path):
-    module, row, sleeps = sources
-    calls = []
-
-    def corrupt(*args, **kwargs):
-        calls.append(None)
-        return io.BytesIO(b'wrong source')
-
-    monkeypatch.setattr(module.urllib.request, 'urlopen', corrupt)
-    with pytest.raises(RuntimeError, match='Source checksum failed'):
-        module.fetch('all', tmp_path)
-    assert len(calls) == 1 and sleeps == []
-    assert not (tmp_path / row['filename']).exists()
-    assert (tmp_path / (row['filename'] + '.partial')).read_bytes() == b'wrong source'
+    _rejected(sources, monkeypatch, tmp_path, b'wrong source', 'Source checksum failed')
 
 
 @pytest.mark.parametrize('content', [b'original source', b'corrupt cached source'])
@@ -242,20 +245,7 @@ def test_explicit_normalization_accepts_timestamp_changes_under_exact_final_hash
 def test_normalization_keeps_changed_source_identity_as_hard_hash_failure(sources, monkeypatch, tmp_path, change):
     module, row, sleeps = sources
     _normalized_pin(module, row, tmp_path, _example_archive(1))
-    changed = _example_archive(999, change)
-    calls = []
-
-    def open_changed(*args, **kwargs):
-        calls.append(None)
-        return io.BytesIO(changed)
-
-    monkeypatch.setattr(module.urllib.request, 'urlopen', open_changed)
-    cache = tmp_path / 'cache'
-    with pytest.raises(RuntimeError, match='Source checksum failed'):
-        module.fetch('all', cache)
-    assert calls == [None] and sleeps == []
-    assert not (cache / row['filename']).exists()
-    assert (cache / (row['filename'] + '.partial')).read_bytes() == changed
+    _rejected(sources, monkeypatch, tmp_path / 'cache', _example_archive(999, change), 'Source checksum failed')
 
 
 @pytest.mark.parametrize('invalid', ['traversal', 'drive', 'duplicate', 'special', 'escaping-link', 'composed-link'])
@@ -275,20 +265,7 @@ def test_unsafe_normalized_archive_is_rejected_without_retry(sources, monkeypatc
             link = tarfile.TarInfo('second-link')
             link.type, link.linkname = tarfile.SYMTYPE, 'file/../outside'
             entries.append((link, b''))
-    unsafe = _tar_bytes(entries, 999)
-    calls = []
-
-    def open_unsafe(*args, **kwargs):
-        calls.append(None)
-        return io.BytesIO(unsafe)
-
-    monkeypatch.setattr(module.urllib.request, 'urlopen', open_unsafe)
-    cache = tmp_path / 'cache'
-    with pytest.raises(RuntimeError, match='Source normalization failed'):
-        module.fetch('all', cache)
-    assert calls == [None] and sleeps == []
-    assert not (cache / row['filename']).exists()
-    assert (cache / (row['filename'] + '.partial')).read_bytes() == unsafe
+    _rejected(sources, monkeypatch, tmp_path / 'cache', _tar_bytes(entries, 999), 'Source normalization failed')
 
 
 def test_unknown_normalization_fails_before_network(sources, monkeypatch, tmp_path):
@@ -308,19 +285,8 @@ def test_unknown_normalization_fails_before_network(sources, monkeypatch, tmp_pa
 def test_malformed_normalized_archive_is_a_contextual_permanent_failure(sources, monkeypatch, tmp_path, raw):
     module, row, sleeps = sources
     _normalized_pin(module, row, tmp_path, _example_archive(1))
-    calls = []
-
-    def open_malformed(*args, **kwargs):
-        calls.append(None)
-        return io.BytesIO(raw)
-
-    monkeypatch.setattr(module.urllib.request, 'urlopen', open_malformed)
-    cache = tmp_path / 'cache'
-    with pytest.raises(RuntimeError, match='Source normalization failed') as caught:
-        module.fetch('all', cache)
-    assert row['filename'] in str(caught.value) and row['url'] in str(caught.value)
-    assert calls == [None] and sleeps == []
-    assert not (cache / row['filename']).exists()
+    error = _rejected(sources, monkeypatch, tmp_path / 'cache', raw, 'Source normalization failed', partial_kept=False)
+    assert row['filename'] in str(error) and row['url'] in str(error)
 
 
 def test_normalized_cache_is_verified_without_migrating_raw_or_corrupt_cache(sources, monkeypatch, tmp_path):
@@ -381,19 +347,7 @@ def test_normalization_rejects_unreviewed_pax_metadata(sources, monkeypatch, tmp
     info = tarfile.TarInfo('source.py')
     info.pax_headers[key] = value
     raw = _tar_bytes([(info, b'bytes')], 999)
-    calls = []
-
-    def open_metadata(*args, **kwargs):
-        calls.append(None)
-        return io.BytesIO(raw)
-
-    monkeypatch.setattr(module.urllib.request, 'urlopen', open_metadata)
-    cache = tmp_path / 'cache'
-    with pytest.raises(RuntimeError, match='Source normalization failed.*Unsupported PAX metadata'):
-        module.fetch('all', cache)
-    assert calls == [None] and sleeps == []
-    assert not (cache / row['filename']).exists()
-    assert (cache / (row['filename'] + '.partial')).read_bytes() == raw
+    _rejected(sources, monkeypatch, tmp_path / 'cache', raw, 'Source normalization failed.*Unsupported PAX metadata')
 
 
 @pytest.mark.parametrize(
@@ -404,19 +358,7 @@ def test_normalization_rejects_contradictory_or_unknown_mode_bits(sources, monke
     module, row, sleeps = sources
     _normalized_pin(module, row, tmp_path, _example_archive(1))
     raw = _mode_archive(mode, member_type)
-    calls = []
-
-    def open_mode(*args, **kwargs):
-        calls.append(None)
-        return io.BytesIO(raw)
-
-    monkeypatch.setattr(module.urllib.request, 'urlopen', open_mode)
-    cache = tmp_path / 'cache'
-    with pytest.raises(RuntimeError, match='Source normalization failed.*Unexpected file mode bits'):
-        module.fetch('all', cache)
-    assert calls == [None] and sleeps == []
-    assert not (cache / row['filename']).exists()
-    assert (cache / (row['filename'] + '.partial')).read_bytes() == raw
+    _rejected(sources, monkeypatch, tmp_path / 'cache', raw, 'Source normalization failed.*Unexpected file mode bits')
 
 
 def test_unmarked_archive_is_not_normalized(sources, monkeypatch, tmp_path):

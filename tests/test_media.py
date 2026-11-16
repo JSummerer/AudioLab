@@ -27,17 +27,7 @@ def noise_set(tmp_path_factory) -> Path:
     seconds = 10.0
     path = tmp_path_factory.mktemp('media') / 'set.wav'
     run_ffmpeg(
-        [
-            '-f',
-            'lavfi',
-            '-i',
-            f'anoisesrc=d={seconds}:c=white:r={SR}:a=0.3',
-            '-ac',
-            '2',
-            '-c:a',
-            'pcm_s16le',
-            str(path),
-        ]
+        ['-f', 'lavfi', '-i', f'anoisesrc=d={seconds}:c=white:r={SR}:a=0.3', '-ac', '2', '-c:a', 'pcm_s16le', str(path)]
     )
     return path
 
@@ -362,21 +352,8 @@ def test_converted_file_keeps_its_tags(tmp_path):
     )
     src = tmp_path / 'track01.opus'  # Ogg/Opus keeps its tags on the audio stream, not the file
     run_ffmpeg(
-        [
-            '-f',
-            'lavfi',
-            '-i',
-            'sine=f=440:d=2',
-            '-i',
-            str(meta),
-            '-map_metadata',
-            '1',
-            '-map_chapters',
-            '1',
-            '-c:a',
-            'libopus',
-            str(src),
-        ]
+        ['-f', 'lavfi', '-i', 'sine=f=440:d=2', '-i', str(meta), '-map_metadata', '1', '-map_chapters', '1']
+        + ['-c:a', 'libopus', str(src)]
     )
     info = ffmpeg.probe_media(src)
     assert info['tags'] == {
@@ -402,21 +379,8 @@ def test_converted_file_keeps_its_tags(tmp_path):
     # an MP3 with ID3 title/artist under an ugly file name keeps them when converted
     ugly = tmp_path / 'AUD-20260105-WA0007 (1).mp3'
     run_ffmpeg(
-        [
-            '-f',
-            'lavfi',
-            '-i',
-            'sine=f=330:d=2',
-            '-c:a',
-            'libmp3lame',
-            '-id3v2_version',
-            '3',
-            '-metadata',
-            'title=Nice Song',
-            '-metadata',
-            'artist=Nice Artist',
-            str(ugly),
-        ]
+        ['-f', 'lavfi', '-i', 'sine=f=330:d=2', '-c:a', 'libmp3lame', '-id3v2_version', '3']
+        + ['-metadata', 'title=Nice Song', '-metadata', 'artist=Nice Artist', str(ugly)]
     )
     source = {'kind': 'file', 'name': ugly.name, 'path': str(ugly)}
     opts = tasks.validate('download', {'format': 'm4a'}, source)

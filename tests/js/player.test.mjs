@@ -111,6 +111,22 @@ for (const kind of ['tracks', 'stems']) {
     assert.equal(attempts[0].removed, true);
   });
 
+  test(`${kind}: destroy invalidates pending play, errors and later clicks`, async (t) => {
+    const { player, rows: [row], attempts } = setup(t, kind);
+    const pending = row.button.click();
+    player.destroy();
+    playing(row, false);
+    attempts[0].reject(new Error('destroyed'));
+    await pending;
+    attempts[0].fire('error');
+    await row.button.click();
+    assert.equal(row.notice.hidden, true);
+    assert.equal(attempts.length, 1);
+  });
+
+  // Both lists share rowPlayback: its race and retry handling is checked once, on track rows.
+  if (kind === 'stems') continue;
+
   test(`${kind}: an older rejected play does not stop the newer row`, async (t) => {
     const { rows: [a, b], attempts } = setup(t, kind);
     const first = a.button.click();
@@ -157,19 +173,6 @@ for (const kind of ['tracks', 'stems']) {
     attempts[1].resolve();
     await retry;
     playing(row, true);
-  });
-
-  test(`${kind}: destroy invalidates pending play, errors and later clicks`, async (t) => {
-    const { player, rows: [row], attempts } = setup(t, kind);
-    const pending = row.button.click();
-    player.destroy();
-    playing(row, false);
-    attempts[0].reject(new Error('destroyed'));
-    await pending;
-    attempts[0].fire('error');
-    await row.button.click();
-    assert.equal(row.notice.hidden, true);
-    assert.equal(attempts.length, 1);
   });
 
   test(`${kind}: media error after success clears state, and a retry clears the notice`, async (t) => {

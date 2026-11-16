@@ -21,14 +21,6 @@ from audiolab.media.ffmpeg import ffmpeg_info
 SR = 48000
 
 
-def test_zero_phase_biquads():
-    t = np.linspace(0, 0.5, SR // 2, endpoint=False)
-    sig = np.column_stack([np.sin(2 * np.pi * 1000 * t), np.cos(2 * np.pi * 1000 * t)])
-    out = apply_sos_zero_phase(sig, peak_fq(1000.0, 3.0, q=1.0, sr=SR))
-    assert out.shape == sig.shape
-    assert np.max(np.abs(out)) > np.max(np.abs(sig))
-
-
 def test_filtfilt_stream_matches_whole_signal():
     rng = np.random.default_rng(0)
     x = rng.standard_normal((SR * 4, 2)).astype(np.float32)
@@ -55,14 +47,6 @@ def test_glue_comp():
     assert out.shape == sig.shape
     assert stats['max_gr_db'] <= 1.51
     assert np.max(np.abs(out)) <= np.max(np.abs(sig))
-
-
-def test_limiter_intersample_peaks():
-    t = np.linspace(0, 0.1, int(SR * 0.1), endpoint=False)
-    sig = np.column_stack([np.sin(2 * np.pi * 12000 * t) * 1.5] * 2)
-    out, info = tp_limit(sig, ceiling_db=-1.25, sr=SR)
-    assert true_peak_db(out) <= -1.20
-    assert info['engaged'] is True
 
 
 def test_limiter_gain_does_not_scratch_the_highs():

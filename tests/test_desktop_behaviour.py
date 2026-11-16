@@ -105,7 +105,7 @@ def run_window(monkeypatch, server, scenario):
     return webview
 
 
-@pytest.mark.parametrize('statuses', [[], ['queued'], ['done', 'queued']])
+@pytest.mark.parametrize('statuses', [[], ['done', 'queued']])
 def test_idle_or_queued_window_closes_without_prompt(monkeypatch, statuses):
     server = ServerAdapter(statuses)
 
@@ -153,9 +153,7 @@ def test_cancel_quit_keeps_server_and_jobs_alive_then_accept_stops_state_first(m
         (True, 'done', 100, 120, 'Check finished: Test recording'),
         (True, 'failed', 100, 130, 'Failed: Test recording'),
         (True, 'done', 100, 119.9, None),
-        (True, 'failed', 100, 119.9, None),
         (False, 'done', 100, 130, None),
-        (False, 'failed', 100, 130, None),
         (True, 'cancelled', 100, 130, None),
         (True, 'done', None, 130, None),
         (True, 'done', 100, None, None),

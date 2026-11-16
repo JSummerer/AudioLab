@@ -68,13 +68,23 @@ promises. Completed changes belong in [CHANGELOG.md](../CHANGELOG.md).
 - Windows: deleting a job while its preview is still streaming can leave files behind (Windows refuses
   to delete open files); retry the cleanup later.
 - Key detection: report a second candidate (relative major/minor) when confidence is low.
-- AAC on extreme material: on a dense, hard-limited test signal, ffmpeg's built-in AAC encoder raised the
-  peaks 3.4 dB over the ceiling, beyond the 2 dB trim, so that file keeps its warning. On a real pop master
-  AAC overshot by only 1.1 dB (MP3 0.8, Opus 1.4), and one trim fixed it each time. Revisit only if real
-  music shows a miss.
-- Peak-meter gap: on the same test signal, a 24-bit WAV measured −0.88 dBTP after saving while the limiter
-  reported −1.0 (its 4× true-peak meter against the 192 kHz export check). On real music the WAV met −1.00
-  exactly. Align the two meters if real material ever shows a miss.
+- Lossy peaks: the −0.1 dBTP lossy limit and the 0.5 dB re-encode margin rest on one real song and two
+  synthetic signals; confirm them on more recordings. On those, turning a file down lowered its peaks by up
+  to 0.3 dB less than the turn-down for AAC on the real song (0.9 dB on a synthetic signal, and not even
+  steadily), 0.2 dB for Opus and never noticeably for MP3. On a dense, hard-limited signal AAC (+3.6 dBTP)
+  and Opus (+2.1) need more than the 2 dB bound, so those files keep their warning. Measure with the FFmpeg
+  the app ships: Homebrew's FFmpeg 9.0.2 gave AAC and Opus peaks about 0.1 dB apart from the app's 7.1 on
+  the same master.
+- Track cuts are still not checked individually: each is encoded on its own with its full file's turn-down.
+  On the real song, MP3 and Opus tracks stayed under the lossy limit (at most −0.24 and −0.48 dBTP), but AAC
+  tracks cut inside a loud passage peaked up to +2.9 dBTP within 15 ms of their start (+2.75 with the old,
+  larger turn-down too). Save / Convert cuts tracks the same way. Open: check each track like a full file
+  (one decode per track; a retry cannot fix overs of 3 dB), or treat the cut edge.
+- The Library does not keep how much a lossy file was turned down, and its version line shows the loudness
+  target, not the delivered level. An expert choice for lossy peaks is a possible later addition if testers ask.
+- Peak-meter gap: on a dense, hard-limited test signal, a 24-bit WAV measured −0.88 dBTP after saving while
+  the limiter reported −1.0 (its 4× true-peak meter against the 192 kHz export check). On real music the WAV
+  met −1.00 exactly. Align the two meters if real material ever shows a miss.
 - Save / Convert output space: MP3, M4A and Opus count only their file on another drive. WAV, FLAC and
   cutting into tracks still need the full working space there; counting them needs the source's sample rate
   and channels, the number of tracks and a size bound for the embedded cover at preflight.

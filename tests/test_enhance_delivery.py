@@ -10,7 +10,7 @@ from audiolab import library, tasks
 from audiolab.context import TaskContext
 from audiolab.errors import AudioLabError, Cancelled
 from audiolab.jobs import Job, new_job_id
-from audiolab.media import proc
+from audiolab.media import export, proc
 from audiolab.media.verification import PEAK_TOLERANCE_DB, measure_export
 from audiolab.tasks import common, enhance
 
@@ -109,19 +109,19 @@ def test_master_reuses_the_analysis_measurement_of_the_reference(delivery, monke
 
 
 def test_meter_error_and_ceiling_miss_keep_the_exports(delivery, monkeypatch):
-    source, ctx, notes = delivery(('mp3_320', 'wav16', 'wav24'))
+    source, ctx, notes = delivery(('mp3_320', 'wav16', 'wav24', 'aac_256'))
     ctx.options['split_tracks'] = True  # tracks are cut in the first format, the MP3
     cuts = []
     monkeypatch.setattr(common, 'split_into_tracks', lambda *a, **kw: (cuts.append(kw), ([], None))[1])
     private_detail = '/private/work/meter.log'
-    mp3_checks = []
+    lossy_checks = []
 
     def measure(path, *, ceiling_dbtp, progress, duration_s):
         reading = {'integrated_lufs': -14.0, 'ceiling_dbtp': ceiling_dbtp, 'tolerance_db': PEAK_TOLERANCE_DB}
-        if path.suffix == '.mp3':  # over by 0.5 dB as encoded; under once turned down
-            mp3_checks.append(path)
-            over = len(mp3_checks) == 1
-            peak = ceiling_dbtp + (0.5 if over else -0.1)
+        if path.suffix in ('.mp3', '.m4a'):  # over their limit by 0.5 / 0.3 dB as encoded; the AAC stays over
+            lossy_checks.append(path)
+            over = path.suffix == '.m4a' or len(lossy_checks) == 1
+            peak = ceiling_dbtp + (0.3 if path.suffix == '.m4a' else 0.5 if over else -0.1)
             return {
                 **reading,
                 'status': 'warning' if over else 'verified',
@@ -138,7 +138,7 @@ def test_meter_error_and_ceiling_miss_keep_the_exports(delivery, monkeypatch):
     monkeypatch.setattr(enhance, 'measure_export', measure)
     result = enhance.run(ctx, source)
     files = {f['format']: f for f in result['files']}
-    assert files.keys() == {'wav16', 'wav24', 'mp3_320'}
+    assert files.keys() == {'wav16', 'wav24', 'mp3_320', 'aac_256'}
     assert all(Path(f['path']).is_file() for f in files.values())
     unverified = files['wav16']['verification']
     assert unverified['status'] == 'unverified' and unverified['ceiling_met'] is None
@@ -149,14 +149,23 @@ def test_meter_error_and_ceiling_miss_keep_the_exports(delivery, monkeypatch):
     assert missed['true_peak_dbtp'] > missed['ceiling_dbtp']
     assert missed['message'].startswith('The WAV 24-bit file goes over the peak ceiling. For more room,')
     assert missed['message'].endswith('(-0.60 dBTP after saving; ceiling -1.00 dBTP).')
-    for check in (unverified, missed):
+    # Lossy files are checked against the lossy limit, not the -1.0 dBTP ceiling. The AAC stays over it even
+    # after its one re-encode: it is saved, with a warning, and no "turned down" line.
+    aac = files['aac_256']['verification']
+    assert aac['status'] == 'warning' and aac['ceiling_dbtp'] == export.LOSSY_LIMIT_DBTP
+    assert aac['message'] == (
+        'The AAC file goes over the limit for lossy files, even after it was turned down. For more room, use a lower '
+        'peak ceiling or a lossless format (+0.20 dBTP after saving, turned down 0.8 dB; limit -0.10 dBTP).'
+    )
+    for check in (unverified, missed, aac):
         assert check['message'] in result['warnings'] and ('warning', check['message']) in notes
     # The MP3 was encoded once more, turned down, before it was saved: no warning, a plain "What we did" line.
-    assert len(mp3_checks) == 2 and files['mp3_320']['verification']['status'] == 'verified'
-    assert files['mp3_320']['verification']['message'] is None and len(result['warnings']) == 2
-    line = 'Turned the MP3 down slightly so its peaks stay under the limit (-0.6 dB; encoding raises peaks).'
-    assert line in result['summary']
-    assert [kw['trim_db'] for kw in cuts] == [0.6]  # its tracks are turned down just like the full MP3
+    mp3 = files['mp3_320']['verification']
+    assert len(lossy_checks) == 4 and mp3['status'] == 'verified' and mp3['ceiling_dbtp'] == export.LOSSY_LIMIT_DBTP
+    assert mp3['message'] is None and len(result['warnings']) == 3
+    line = 'Turned the MP3 down slightly so its peaks stay under the limit (-1.0 dB; encoding raises peaks).'
+    assert line in result['summary'] and not any('Turned the AAC' in s for s in result['summary'])
+    assert [kw['trim_db'] for kw in cuts] == [1.0]  # its tracks are turned down just like the full MP3
 
 
 @pytest.mark.parametrize(('helper', 'stage'), [('make_previews', 'preview'), ('measure_export', 'export')])

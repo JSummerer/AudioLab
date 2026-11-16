@@ -21,6 +21,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from ..ai import MODELS
+from ..media.export import lossy_codec
 
 # What Enhance accepts (tasks.enhance validates against these; the Library's saved copy is kept to them).
 QUALITIES = ('light', 'standard', 'best')  # light = volume only
@@ -645,9 +646,6 @@ def _band_text(b: dict[str, float]) -> str:
     return f'{b["hz"]:g} Hz {b["db"]:+.1f} dB Q{b["q"]:g}'.replace('-', '−')
 
 
-_LOSSLESS_CODECS = ('pcm', 'flac', 'alac', 'wavpack', 'ape', 'tta', 'truehd', 'mlp')
-
-
 def _highs(key: str, prof: dict[str, Any], p: ChainParams, d: _Decisions) -> None:
     """Keep the recipe's clarity and air lifts only where the measured top end needs them."""
     bw = prof.get('bandwidth') or {}
@@ -673,7 +671,7 @@ def _highs(key: str, prof: dict[str, Any], p: ChainParams, d: _Decisions) -> Non
     if top != 'dull':
         p.air_db = 0.0
         d.set('air_db', 'High-end lift', 'off', 'auto', 'the top end is in balance — more would only add sharpness')
-    elif codec and not codec.startswith(_LOSSLESS_CODECS):
+    elif lossy_codec(codec):
         p.air_db = 0.0
         d.set(
             'air_db',

@@ -122,19 +122,25 @@ def _short(file: dict[str, Any]) -> str:
 
 
 def _check_message(file: dict[str, Any], check: dict[str, Any], trim_db: float) -> str | None:
-    """The warning for a saved file whose check failed or found its peaks over the ceiling, in the shape of
-    the summary lines (a plain sentence; the figures in one trailing bracket)."""
+    """The warning for a saved file whose check failed or found its peaks over its limit (the peak ceiling, or
+    for a lossy file the limit just under full scale: export.peak_limit), in the shape of the summary lines
+    (a plain sentence; the figures in one trailing bracket)."""
     name = _short(file)
     if check['status'] == 'unverified':
         return f'The {name} file was saved, but its loudness and peaks could not be verified.'
     if check['status'] != 'warning':
         return None
     spec = export.FORMATS.get(file.get('format') or '')
-    room = 'a lower peak ceiling or a lossless format' if spec and spec.kind == 'lossy' else 'a lower peak ceiling'
+    lossy = bool(spec and spec.kind == 'lossy')
+    limit, word, room = (
+        ('the limit for lossy files', 'limit', 'a lower peak ceiling or a lossless format')
+        if lossy
+        else ('the peak ceiling', 'ceiling', 'a lower peak ceiling')
+    )
     still, trimmed = (', even after it was turned down', f', turned down {trim_db:.1f} dB') if trim_db else ('', '')
     return (
-        f'The {name} file goes over the peak ceiling{still}. For more room, use {room} '
-        f'({check["true_peak_dbtp"]:+.2f} dBTP after saving{trimmed}; ceiling {check["ceiling_dbtp"]:+.2f} dBTP).'
+        f'The {name} file goes over {limit}{still}. For more room, use {room} '
+        f'({check["true_peak_dbtp"]:+.2f} dBTP after saving{trimmed}; {word} {check["ceiling_dbtp"]:+.2f} dBTP).'
     )
 
 
@@ -183,7 +189,7 @@ def _summary(kind, recipe, chosen_by_user, before, after, report, folder, files,
         lines.append(
             f'Used AI to treat parts of the mix separately ({ai.get("model")} on {str(ai.get("device", "")).upper()}).'
         )
-    for name, trim_db in trimmed:  # (format, dB) of lossy files re-encoded under the ceiling (media.export)
+    for name, trim_db in trimmed:  # (format, dB) of lossy files re-encoded under their limit (media.export)
         lines.append(
             f'Turned the {name} down slightly so its peaks stay under the limit (-{trim_db:.1f} dB; encoding raises peaks).'
         )
@@ -281,12 +287,11 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
     rate = params.sample_rate if params.sample_rate != 48000 else None
     split = bool(opts.get('split_tracks'))
 
-    def check(path: Path, progress) -> dict:
-        """The decoded export's loudness and peaks, measured before the file gets its name."""
+    def check(path: Path, progress, limit: float) -> dict:
+        """The decoded export's loudness and peaks, measured before the file gets its name, against `limit`
+        (export.peak_limit: the master's ceiling, or a lossy format's limit)."""
         try:
-            return measure_export(
-                path, ceiling_dbtp=params.tp_ceiling_db, progress=progress, duration_s=report.get('duration_s')
-            )
+            return measure_export(path, ceiling_dbtp=limit, progress=progress, duration_s=report.get('duration_s'))
         except Cancelled:
             raise
         except AudioLabError:
@@ -294,7 +299,7 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
                 'status': 'unverified',
                 'integrated_lufs': None,
                 'true_peak_dbtp': None,
-                'ceiling_dbtp': params.tp_ceiling_db,
+                'ceiling_dbtp': limit,
                 'ceiling_met': None,
                 'tolerance_db': PEAK_TOLERANCE_DB,
                 'message': None,
@@ -310,6 +315,7 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
         progress=p.sub(0, 65 if split else 100),
         sample_rate=rate,
         check=check,
+        ceiling_dbtp=params.tp_ceiling_db,
     )
     files = common.file_entries(outputs)
     trimmed = []

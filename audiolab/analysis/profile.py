@@ -44,6 +44,13 @@ DC_ALERT = 0.01  # |mean| above -40 dBFS = a real DC offset
 # lifts the highs only when they are clearly dull).
 TOP_END_BRIGHT_DB = -4.0
 TOP_END_DULL_DB = -10.0
+HOT_PEAK_DBTP = -0.5  # a lossless file's peaks are called too hot above this (near the usual 1 dB safety margin)
+
+
+def peaks_too_hot(tp: float, peak_limit_dbtp: float | None = None) -> bool:
+    """Whether Check calls these peaks too hot: above a lossy file's `peak_limit_dbtp` (encoding has already
+    used the master's headroom: media.export.source_peak_limit), else above HOT_PEAK_DBTP."""
+    return tp > (HOT_PEAK_DBTP if peak_limit_dbtp is None else peak_limit_dbtp)
 
 
 # ---------------------------------------------------------------------------
@@ -368,11 +375,13 @@ def profile(
     source_rate: int | None = None,
     check_cancel=None,
     levels: ProgrammeLevels | None = None,
+    peak_limit_dbtp: float | None = None,
 ) -> dict[str, Any]:
     """`channels` / `source_rate`: the source file's own format (reported as `channels` and
     `samplerate`); x itself is the 48 kHz stereo analysis copy. `check_cancel` (optional)
     is called between the measurements. `levels` supplies separately scanned
-    whole-file values when x contains excerpts."""
+    whole-file values when x contains excerpts. `peak_limit_dbtp`: for a lossy source, the
+    peak its peaks are judged against (see `peaks_too_hot`; reported when given)."""
     channels = channels if channels is not None else (x.shape[1] if x.ndim > 1 else 1)
     level_basis = 'whole file' if levels is not None else basis
     silent = (
@@ -393,6 +402,7 @@ def profile(
     else:
         lufs, lra_val, tp = levels.lufs, levels.lra, levels.true_peak_dbtp
         clip_pct, dc, nf = levels.clipped_samples_pct, levels.dc_offset, levels.percentiles
+    tp = round(tp, 2)  # the reported value: the alert, the summary and the UI all judge this one
     check()
     freqs, psd, psd_ch = average_psd(x, sr, channels=True)
     bands = octave_bands_db(freqs, psd)
@@ -420,14 +430,15 @@ def profile(
                 'That distortion is baked in and can only be softened, not undone.',
             }
         )
-    if tp > -0.5:
+    if peaks_too_hot(tp, peak_limit_dbtp):
+        if peak_limit_dbtp is None:
+            why = 'above the −1 dB safety margin, so they may distort on some speakers or after conversion to MP3/AAC'
+        elif tp > 0:
+            why = 'above full scale, so they may distort on some players'
+        else:  # a lossy file over its limit, still under full scale
+            why = 'almost at full scale, with no headroom left'
         alerts.append(
-            {
-                'level': 'warning',
-                'title': 'Peaks are too hot',
-                'message': f'Peaks reach {tp:+.1f} dBTP — above the −1 dB safety margin, so they may '
-                'distort on some speakers or after conversion to MP3/AAC.',
-            }
+            {'level': 'warning', 'title': 'Peaks are too hot', 'message': f'Peaks reach {tp:+.1f} dBTP — {why}.'}
         )
     else:
         alerts.append(
@@ -510,7 +521,8 @@ def profile(
         'stereo_basis': level_basis,
         'is_silent': False,
         'integrated_lufs': round(lufs, 2),
-        'true_peak_dbtp': round(tp, 2),
+        'true_peak_dbtp': tp,
+        **({'peak_limit_dbtp': peak_limit_dbtp} if peak_limit_dbtp is not None else {}),
         'lra': round(lra_val, 2),
         **({'dynamics_density': density} if density is not None else {}),
         **({'tone_timeline': levels.tone_timeline} if levels is not None and levels.tone_timeline else {}),
@@ -537,19 +549,26 @@ def analyze_file(
     progress=None,
     source_rate: int | None = None,
     source_channels: int | None = None,
+    peak_limit_dbtp: float | None = None,
     *,
     include_overview: bool = False,
 ) -> tuple[dict[str, Any], np.ndarray, int]:
     """Profile a (48 kHz reference) file. Returns (profile, samples, sr); the samples
     are handed on to analysis.classify.audio_features to avoid a second read.
     Pass the original file's sample rate / channel count (media.ffmpeg.probe_media)
-    so the report shows the source's format, not the working copy's."""
+    so the report shows the source's format, not the working copy's, and for a lossy
+    source its `peak_limit_dbtp` (see `profile`)."""
     if progress is not None:
         progress(5, 'Reading audio for analysis...')
     info = sf.info(str(path))
     x, sr, basis = load_samples(Path(path))
     check = progress.check_cancel if progress is not None else None
-    fmt = {'channels': source_channels or info.channels, 'source_rate': source_rate, 'check_cancel': check}
+    fmt = {
+        'channels': source_channels or info.channels,
+        'source_rate': source_rate,
+        'check_cancel': check,
+        'peak_limit_dbtp': peak_limit_dbtp,
+    }
     levels = None
     if basis != 'whole file':
         if progress is not None:

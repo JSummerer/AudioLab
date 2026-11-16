@@ -39,7 +39,7 @@ def describe(analysis: dict[str, Any], kind: dict[str, Any]) -> list[str]:
         out.append(f'Overall volume is {loudness_word(lufs)} ({lufs:.1f} LUFS).')
     if analysis.get('is_clipping'):
         out.append('The recording is clipped — some loud peaks are flattened, and that distortion cannot be undone.')
-    elif tp is not None and tp > -0.5:
+    elif tp is not None and prof.peaks_too_hot(tp, analysis.get('peak_limit_dbtp')):
         out.append('Peaks go above the safe limit — it may distort on some speakers.')
     elif tp is not None:
         out.append('Peaks stay below the safe limit.')

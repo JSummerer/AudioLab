@@ -110,10 +110,13 @@ identify which frequencies need correction, so the chart supplies observations w
 proposals. The bells use forward/backward filtering: their magnitude follows the plotted response,
 but their transient behavior differs from a conventional causal EQ and can include pre-onset energy.
 
-Each full-length export gets its own loudness and peak check before it is saved. An MP3, AAC or Opus file
-whose encoding pushes its peaks over the ceiling is encoded once more, turned down by at most 2 dB;
-lossless files are never re-encoded. A warning means a file is still over the selected ceiling or could
-not be measured; try a lower ceiling or a lossless format when more headroom is needed.
+Each full-length export gets its own loudness and peak check before it is saved. Encoding raises the peaks
+of an MP3, AAC or Opus file: it may use the master's headroom up to just under full scale (-0.1 dBTP, or
+your ceiling if that is higher) and is saved as encoded. Only a file that goes over that is encoded once
+more, turned down by the excess plus 0.5 dB, and only when that is at most 2 dB; otherwise it is kept as
+encoded, with a warning. Lossless files are held to the selected ceiling and never re-encoded. A warning
+means a file is still over its limit or could not be measured; try a lower ceiling or a lossless format
+when more headroom is needed. Check judges a lossy file's peaks by the same limit.
 The file stays saved. Master readings describe the audio before encoding, and split tracks are not
 individually checked. Job pages and the Library say this in plain words; **Show details** adds the
 LUFS/dBTP readings and the technical figures behind each line of **What we did**. Library's

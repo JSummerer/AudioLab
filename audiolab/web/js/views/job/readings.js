@@ -16,11 +16,14 @@ export function loudnessWord(l) {
   return 'Very quiet';
 }
 
-export function peakVerdict(tp) {
-  if (tp == null) return { word: '–', level: 'info' };
-  if (tp > -0.1) return { word: 'Clipping', level: 'danger' };
-  if (tp > -1.0) return { word: 'Little headroom', level: 'warning' };
-  return { word: 'Safe', level: 'ok' };
+/** Peaks in a word. `limit` (`analysis.peak_limit_dbtp`, lossy files only): encoding has already used the
+ * master's headroom, so only peaks above it count; otherwise the usual 1 dB margin. Clipping means over full scale. */
+export function peakVerdict(tp, limit = null) {
+  if (tp == null) return { word: '–', level: 'info', note: '' };
+  if (tp > 0) return { word: 'Clipping', level: 'danger', note: 'The loudest moments go above full scale and can distort' };
+  if (tp > (limit ?? -0.1)) return { word: 'No headroom', level: 'danger', note: 'The loudest moments are almost at full scale' };
+  if (limit == null && tp > -1.0) return { word: 'Little headroom', level: 'warning', note: 'Very close to the limit' };
+  return { word: 'Safe', level: 'ok', note: 'No distortion from overs' };
 }
 
 export function dynamicsWord(lra) {
@@ -90,7 +93,7 @@ export function metricsBlock(r) {
       h('span', { class: 'ba-before' }, before), icon('arrow', 14, 'ba-arrow'), h('strong', { class: 'ba-after' }, after));
     return detailsBlock('Original → master', h('div', { class: 'ba-rows' },
       row('Volume', loudnessWord(b.lufs), loudnessWord(a.lufs)),
-      row('Peaks', peakVerdict(b.true_peak_dbtp).word, peakVerdict(a.true_peak_dbtp).word),
+      row('Peaks', peakVerdict(b.true_peak_dbtp, r.analysis?.peak_limit_dbtp).word, peakVerdict(a.true_peak_dbtp).word),
       row('Dynamics', dynamicsWord(b.lra), dynamicsWord(a.lra))));
   }
   const tr = (label, unit, kb, digits = 1) => h('tr', null,
@@ -157,7 +160,7 @@ export function analyzeResult(job, r) {
   const a = r.analysis || {};
   const c = r.classification;
   const bw = a.bandwidth || {};
-  const pk = peakVerdict(a.true_peak_dbtp);
+  const pk = peakVerdict(a.true_peak_dbtp, a.peak_limit_dbtp);
   if (a.is_silent) return silentResult(a);
   const cutoff = bw.cutoff_hz;
   const judged = bw.judged !== false;   // pure tones / near-silence: no meaningful cutoff
@@ -168,9 +171,7 @@ export function analyzeResult(job, r) {
   const verdicts = h('dl', { class: 'verdicts' },
     verdict('Volume', loudnessWord(a.integrated_lufs), 'How loud it sounds overall', null,
       a.integrated_lufs != null ? `${fmtNum(a.integrated_lufs)} LUFS` : null),
-    verdict('Peaks', pk.word,
-      pk.level === 'danger' ? 'The loudest moments go over the limit and can distort'
-        : pk.level === 'warning' ? 'Very close to the limit' : 'No distortion from overs', pk.level,
+    verdict('Peaks', pk.word, pk.note, pk.level,
       a.true_peak_dbtp != null ? `${fmtSigned(a.true_peak_dbtp)} dBTP` : null),
     verdict('Dynamics', dynamicsWord(a.lra), 'Gap between quiet and loud parts', null,
       a.lra != null ? `${fmtNum(a.lra)} LU` : null),

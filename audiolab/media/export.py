@@ -27,6 +27,7 @@ from ..errors import AudioLabError
 from ..util import sanitize_filename, unique_path
 from . import proc
 from .ffmpeg import ffmpeg_path, probe_media, run_ffmpeg
+from .verification import PEAK_TOLERANCE_DB
 
 
 @dataclass(frozen=True)
@@ -546,14 +547,42 @@ def _commit(staging: Path, dst: Path) -> Path:
     raise AudioLabError(f'Could not find a free file name for {dst.name}.')
 
 
-# A lossy encoder rebuilds the waveform, so its peaks can land above the master's (often by 0.2–1 dB on
-# loud masters). One re-encode turned down by the measured excess plus this margin brings them back under.
-TRIM_MARGIN_DB = 0.1
-TRIM_MAX_DB = 2.0  # beyond this the file is kept as encoded, with the check's warning
+# A lossy encoder rebuilds the waveform, so its decoded peaks land above the master's (0.2–1.5 dB on a loud
+# master). That is what the master's headroom is for: a lossy file may use it up to LOSSY_LIMIT_DBTP, just under
+# full scale (never a stricter limit than the master's ceiling, `peak_limit`). Above that, one re-encode turned
+# down by the excess plus TRIM_MARGIN_DB brings it back under. The margin is wide because AAC's and Opus's peaks
+# don't follow a small turn-down exactly (up to 0.3 dB less than the turn-down on a real song).
+LOSSY_LIMIT_DBTP = -0.1
+TRIM_MARGIN_DB = 0.5
+TRIM_MAX_DB = 2.0  # a bound, not a clamp: a file that needs more (margin included) is kept as encoded, with a warning
 
-# Measures a staged export: `check(path, progress)` -> a reading with at least `ceiling_dbtp`,
-# `true_peak_dbtp` and `ceiling_met` (media.verification.measure_export's shape).
-Check = Callable[[Path, Progress], dict]
+# Audio codecs that keep every sample (FFmpeg's names, matched by prefix: pcm_s16le, …); any other is lossy.
+# WavPack counts as lossless although hybrid (lossy) WavPack exists: it is rare, and the verdict is stricter.
+LOSSLESS_CODECS = ('pcm', 'flac', 'alac', 'wavpack', 'ape', 'tta', 'truehd', 'mlp', 'wmalossless')
+LOSSY_PCM = ('pcm_alaw', 'pcm_mulaw')  # companded telephone PCM (G.711): lossy despite the prefix
+
+
+def lossy_codec(codec: str | None) -> bool:
+    """Whether a source's audio codec (`probe_media`'s `audio_codec`) is lossy; an unknown one counts as lossless."""
+    codec = str(codec or '').lower()
+    return bool(codec) and (codec.startswith(LOSSY_PCM) or not codec.startswith(LOSSLESS_CODECS))
+
+
+def peak_limit(fmt: str, ceiling_dbtp: float) -> float:
+    """The true peak a saved file in format `fmt` is checked against: the master's ceiling, or for a lossy
+    format LOSSY_LIMIT_DBTP (the ceiling instead when that is higher)."""
+    return max(LOSSY_LIMIT_DBTP, ceiling_dbtp) if resolve_format(fmt).kind == 'lossy' else ceiling_dbtp
+
+
+def source_peak_limit(codec: str | None) -> float | None:
+    """For a lossy file (by its codec): the true peak above which Check calls its peaks too hot, the same as a
+    lossy Enhance file's (LOSSY_LIMIT_DBTP with the export check's tolerance). None for a lossless or unknown one."""
+    return round(LOSSY_LIMIT_DBTP + PEAK_TOLERANCE_DB, 2) if lossy_codec(codec) else None
+
+
+# Measures a staged export against a true-peak limit: `check(path, progress, limit_dbtp)` -> a reading with at
+# least `ceiling_dbtp` (the limit), `true_peak_dbtp` and `ceiling_met` (media.verification.measure_export's shape).
+Check = Callable[[Path, Progress, float], dict]
 
 
 def transcode(
@@ -587,13 +616,15 @@ def _transcode(
     end_s: float | None = None,
     trim_db: float = 0.0,
     check: Check | None = None,
+    ceiling_dbtp: float | None = None,
 ) -> dict:
     """Convert `src` into format `fmt` at `dst`: {'path', 'verification', 'trim_db'}.
 
     `trim_db` turns the audio down by that many dB (track cuts get their full file's trim).
-    `check` measures the staged file before it gets its name. When a lossy file's peaks come out above
-    the ceiling, it is encoded once more from `src`, turned down by the excess plus TRIM_MARGIN_DB (at
-    most TRIM_MAX_DB), and checked again; that version replaces the first before anything is saved.
+    `check` measures the staged file before it gets its name, against `peak_limit(fmt, ceiling_dbtp)` (the
+    master's ceiling). When a lossy file's peaks come out above that limit, it is encoded once more from
+    `src`, turned down by the excess plus TRIM_MARGIN_DB if that is at most TRIM_MAX_DB, and checked again;
+    that version replaces the first before anything is saved. Otherwise the file is kept as encoded.
     `verification` is the reading of the file as saved, `trim_db` the gain taken off in all (0.0: none).
 
     `cover`: the JPEG to embed (in formats supported by AudioLab). None = no picture: a picture `src`
@@ -696,14 +727,15 @@ def _transcode(
         if check:
             step = progress.sub(50, 75)
             step(0, f'Checking the saved {spec.label}…')
-            verification = check(staging, step)
-            peak, ceiling = verification.get('true_peak_dbtp'), verification.get('ceiling_dbtp')
-            if spec.kind == 'lossy' and verification.get('ceiling_met') is False and None not in (peak, ceiling):
-                excess = round(peak - ceiling + TRIM_MARGIN_DB, 2)
+            limit = peak_limit(spec.key, ceiling_dbtp)
+            verification = check(staging, step, limit)
+            peak = verification.get('true_peak_dbtp')
+            if spec.kind == 'lossy' and verification.get('ceiling_met') is False and peak is not None:
+                excess = round(peak - limit + TRIM_MARGIN_DB, 2)
                 if 0 < excess <= TRIM_MAX_DB:
                     trim_db = round(trim_db + excess, 2)
                     with_art = encode(retry, with_art, -trim_db, progress.sub(75, 90))
-                    verification = check(retry, progress.sub(90, 100))
+                    verification = check(retry, progress.sub(90, 100), limit)
                     os.replace(retry, staging)  # the turned-down version is the one that gets saved
         path = _commit(staging, dst)
         if big_wav:
@@ -730,14 +762,15 @@ def export(
     progress: Progress | None = None,
     sample_rate: int | None = None,
     check: Check | None = None,
+    ceiling_dbtp: float | None = None,
 ) -> list[dict[str, object]]:
     """Write `master` in every requested format into `out_dir`.
 
     Names are '<basename>.<ext>'; when two requested formats share an
     extension (e.g. AAC and ALAC → .m4a) the short format tag is appended:
     '<basename> [ALAC].m4a'. Existing files are never replaced. `cover`: the JPEG to
-    embed; None = no picture (see `transcode`). With `check`, each output also has its
-    `verification` and `trim_db` (see `_transcode`).
+    embed; None = no picture (see `transcode`). With `check` and the master's `ceiling_dbtp`,
+    each output also has its `verification` and `trim_db` (see `_transcode`).
     """
     progress = progress or Progress.null()
     master, out_dir = Path(master), Path(out_dir)
@@ -767,6 +800,7 @@ def export(
             duration_s=duration,
             sample_rate=sample_rate,
             check=check,
+            ceiling_dbtp=ceiling_dbtp,
         )
         path = made['path']
         outputs.append(

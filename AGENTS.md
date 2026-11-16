@@ -6,7 +6,8 @@ The rules here are shared; [CLAUDE.md](CLAUDE.md) adds only Claude-specific tool
 when a check, convention or safety rule changes.
 
 ## Repository
-- This is the only repository, `JSummerer/AudioLab`. `main` is the latest release plus documentation.
+- This is the only repository, `JSummerer/AudioLab`. `main` is the latest release plus merged changes that are
+  not released yet; those are listed under `## Unreleased` at the top of `CHANGELOG.md`.
 - Work happens on short topic branches (`feat/…`, `fix/…`, `docs/…`). A branch reaches `main` only through a
   pull request merged with a merge commit (never squash or rebase); merged branches are deleted.
 - Machine-specific notes live in `CLAUDE.local.md` (gitignored).
@@ -103,8 +104,8 @@ bash -n start.sh                                     # when you touched the laun
 - Endpoint, field or setting: update `docs/API.md` (and tests) in the same change. Settings need the default in
   `settings.py` and a row in the Settings view.
 - New module or a module's role: update `docs/ARCHITECTURE.md`.
-- User-visible behaviour: add it to the current version's entry in `CHANGELOG.md`. Bump `__version__` only for
-  a new release.
+- User-visible behaviour: add it under `## Unreleased` at the top of `CHANGELOG.md` (add the heading if it is
+  missing); a release turns that section into its entry. Bump `__version__` only for a new release.
 
 ## Leave the checkout clean
 - Temporary files (scripts, test renders, reports, screenshots) go in a temp folder outside the repository.

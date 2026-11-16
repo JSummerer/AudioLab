@@ -123,6 +123,11 @@ and they may still list a `difference` preview ("Only the changes", gone in 2.4)
 `is_silent`, `dc_offset`, and the source's own format: `samplerate`, `channels`, `source_audio_codec`,
 `source_bitrate_kbps` (the analysis itself runs on a 48 kHz stereo copy),
 `alerts` (`[{"level": "ok|info|warning|danger", "title", "message"}]`).
+`peak_limit_dbtp` is present only for a lossy source (its codec is not PCM, FLAC, ALAC or another lossless
+one): its peaks count as too hot only above it, -0.05 (the lossy limit of Enhance files plus the export
+check's 0.05 dB tolerance), as encoding has already used the master's headroom. Without it, the peak
+words and alerts keep the usual 1 dB margin. The UI's peak word "Clipping" means a true peak above full
+scale; flat-topped samples have their own alert ("The recording is clipped").
 `tone_timeline` (recordings longer than 3 minutes, from the whole-file level scan; else absent):
 `{"step_s": 60, "bands": [{"key": "deep_bass", "label": "Deep bass", "hz": [30, 80]}, …], "values": [[0.4, -0.2, …], null, …],
 "basis": "…"}` — seven bands (deep bass 30–80 Hz, bass 80–200, low mids 200–500, mids 0.5–2k, upper mids 2–6k,
@@ -160,20 +165,26 @@ mean no reported reduction above that threshold. These highlights exclude static
 and other stages. Old entries without a timeline do not imply no processing.
 
 Each full-length Enhance file has `verification: {status, integrated_lufs, true_peak_dbtp,
-ceiling_dbtp, ceiling_met, tolerance_db, message}`. Status is `verified` (peak within the ceiling),
-`warning` (ceiling missed), or `unverified` (measurement failed). A complete decode measures
+ceiling_dbtp, ceiling_met, tolerance_db, message}`. `ceiling_dbtp` is the limit the file was checked
+against: the master's peak ceiling for a lossless file; for a lossy file (MP3, AAC, Opus) the lossy limit,
+-0.1 dBTP, or the ceiling when that is higher. Status is `verified` (peak within that limit), `warning`
+(limit missed), or `unverified` (measurement failed). A complete decode measures
 integrated loudness at the file's rate and estimates true peak at 192 kHz; `tolerance_db` is 0.05.
 Loudness is `null` below the meter's gate or without a complete 400 ms block; a silent peak is `null`.
 For `unverified`, the readings and `ceiling_met` are `null`. Each file is checked before it gets its
-name. A lossy file (MP3, AAC, Opus) whose peaks come out above the ceiling is encoded once more from the
-same master, turned down by the excess plus 0.1 dB (at most 2 dB), and checked again. Only that version is
-saved, `verification` describes it, and `summary` gets a line such as "Turned the MP3 down slightly so its
-peaks stay under the limit (-0.6 dB; encoding raises peaks)." A miss that remains (a lossless file, or a
-lossy one more than 2 dB over) and a failed measurement keep the saved file; their `message` (also in
-`warnings`) follows the summary-line shape, e.g. "The MP3 file goes over the peak ceiling, even after it
-was turned down. For more room, use a lower peak ceiling or a lossless format (-0.84 dBTP after saving,
-turned down 0.6 dB; ceiling -1.00 dBTP)." `message` is null for a verified file. Split tracks are not
-individually checked.
+name. Encoding raises a lossy file's peaks: it may use the master's headroom up to its limit and is then
+saved as encoded. A lossy file whose peaks come out above its limit is encoded once more from the same
+master, turned down by the excess plus 0.5 dB, and checked again, but only when that turn-down (margin
+included) is at most 2 dB. Only that version is saved, `verification` describes it, and `summary` gets a
+line such as "Turned the AAC down slightly so its peaks stay under the limit (-0.6 dB; encoding raises
+peaks)." A miss that remains (a lossless file, a lossy one that would need more than 2 dB and is kept as
+encoded, or one still over after its re-encode) and a failed measurement keep the saved file; their
+`message` (also in `warnings`) follows the summary-line shape, e.g. "The AAC file goes over the limit for
+lossy files, even after it was turned down. For more room, use a lower peak ceiling or a lossless format
+(+0.20 dBTP after saving, turned down 0.8 dB; limit -0.10 dBTP)." or "The WAV 24-bit file goes over the
+peak ceiling. For more room, use a lower peak ceiling (-0.60 dBTP after saving; ceiling -1.00 dBTP)."
+`message` is null for a verified file. Split tracks are not individually checked; they take the turn-down
+of their format's full file.
 `metrics.after` still describes the master, before export; the checks are measurements at creation,
 not proof that a file has not been edited later or that every decoder will produce identical peaks.
 

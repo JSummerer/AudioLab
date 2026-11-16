@@ -25,8 +25,8 @@ first-opening warning, use the [Mac guide's graphical Open Anyway steps](MACOS.m
 That guide also covers updates, storage and uninstall. The
 [release notes](https://github.com/JSummerer/AudioLab/releases/latest) describe testing and beta limitations.
 
-The **2.5.0** app includes **Save / Convert**, **Check**, and **Volume only/Adaptive Enhance**, plus the
-Library. Settings offers the [optional managed AI download](#optional-ai) for Split and AI stems Enhance.
+The **2.5.1** app includes **Save / Convert**, **Check**, and **Enhance** with **Volume only** or **Tone and volume**,
+plus the Library. Settings offers the [optional managed AI download](#optional-ai) for Split and AI stems Enhance.
 You update the app by replacing it; **Settings → Updates & add-ons** says when a newer version exists and
 updates the downloader inside the app.
 
@@ -107,7 +107,7 @@ Open **Settings → Updates & add-ons → Enable AI features**. When a compatibl
 that app build, Settings shows its download size before installing and the disk space it uses afterwards.
 These describe the release asset, not the RAM needed to process audio. Allow additional free space for downloading, unpacking
 and audio intermediates; no fixed download-size or minimum-RAM promise applies to every release.
-2.5.0 uses the same AI 1.0.0 add-on as the 2.4.0 betas. It is about **570 MB to download** and **1.02 GB installed**.
+2.5.1 uses the same AI 1.0.0 add-on as the 2.4.0 betas. It is about **570 MB to download** and **1.02 GB installed**.
 
 The optional download is self-contained: it includes its own AI runtime and both **Standard** and
 **Fine-tuned** model choices. AudioLab verifies the download and tests the runtime before enabling
@@ -138,8 +138,8 @@ No tested RAM minimum is claimed. Those Mac recommendations do not establish Win
 AI can consume several gigabytes of working memory and considerably more temporary audio space
 than the model files alone. Settings
 reports detected acceleration; CPU-only processing is slower and limited to recordings of 20 minutes
-by default. Try a short local recording first. Shorter recordings and Volume only/Adaptive Enhance reduce
-resource demand. Fine-tuned uses several models and is slower than Standard.
+by default. Try a short local recording first. Shorter recordings and Enhance with "Volume only" or
+"Tone and volume" reduce resource demand. Fine-tuned uses several models and is slower than Standard.
 
 ## Optional AI in source installations
 

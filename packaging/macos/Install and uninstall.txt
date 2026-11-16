@@ -1,4 +1,4 @@
-AudioLab 2.5.0 — Mac beta
+AudioLab 2.5.1 — Mac beta
 
 For Apple silicon Macs with macOS 14 or later.
 Check Apple menu > About This Mac for your chip and macOS version.
@@ -19,7 +19,7 @@ If you choose to trust it, open System Settings > Privacy & Security, find the
 blocked AudioLab entry, click Open Anyway, and follow macOS's confirmation.
 Do not disable Gatekeeper or run commands that remove security protections.
 
-The core app includes Save/Convert, Check and Volume only/Adaptive Enhance.
+The core app includes Save/Convert, Check and Enhance with "Volume only" or "Tone and volume".
 
 OPTIONAL AI
 Open Settings > Updates & add-ons and choose Enable AI features for Split and
@@ -44,9 +44,9 @@ Settings > Updates & add-ons > Check now shows when a newer AudioLab exists and
 links to its release page. The app finds updates but does not install them:
 quit AudioLab and replace AudioLab.app with the newer copy from GitHub Releases.
 Choose Replace in the same Applications folder, eject the disk image, then reopen
-and confirm 2.5.0 in Settings > About. macOS asks again for each new copy
+and confirm 2.5.1 in Settings > About. macOS asks again for each new copy
 (Open Anyway, as above). Your recordings, Library and settings carry over.
-2.5.0 reuses a compatible AI 1.0.0 installation.
+2.5.1 reuses a compatible AI 1.0.0 installation.
 The downloader for web links updates inside the app: Settings > Updates &
 add-ons > Update downloader. Use built-in version goes back to the copy in the
 app. The audio engine updates only with the app.

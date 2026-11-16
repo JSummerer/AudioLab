@@ -213,7 +213,7 @@ sections are sorted and must not overlap, else the whole option is invalid; sect
 loudness and peak control; ignored by Volume only).
 `quality: "best"` uses the AI stage of the recipe (stem-aware EQ for music, voice isolation for speech)
 and requires the AI pack.
-The UI calls these modes **Volume only**, **Adaptive**, and **AI stems**; the API values remain
+The UI calls these modes **Volume only**, **Tone and volume**, and **AI stems**; the API values remain
 `light`, `standard`, `best` for compatibility. AI stems is a different process, not a quality guarantee.
 Noise reduction is explicit-only: choose `denoise: "light"` or `"strong"` when wanted.
 The programme-level percentiles cannot reliably distinguish noise from quiet desired content.
@@ -371,14 +371,14 @@ detail.
 ### Health
 ```jsonc
 {
-  "app": "AudioLab", "version": "2.5.0", "local": true, "packaged": false,
+  "app": "AudioLab", "version": "2.5.1", "local": true, "packaged": false,
   "ffmpeg": {"ok": true, "version": "7.1", "source": "system" | "bundled", "error": null},
   "downloader": {"ok": true, "version": "2026.08.19", "age_days": 47, "update_supported": true,
                  "source": "bundled" | "updated" | "environment", "bundled_version": "2026.08.19" | null,
                  "latest": "2026.10.26" | null, "fallback": false},
   "updates": {"enabled": false, "checking": false, "checked_at": 1763300000.0 | null, "error": null,
-              "app": {"latest": "2.5.1" | null, "available": true,
-                      "url": "https://github.com/JSummerer/AudioLab/releases/tag/v2.5.1" | null}},
+              "app": {"latest": "2.5.2" | null, "available": true,
+                      "url": "https://github.com/JSummerer/AudioLab/releases/tag/v2.5.2" | null}},
   "ai": {"available": false, "device": null, "reason": "AI pack not installed", "install_supported": true, "installing": false,
          "install_log": "…last lines…"},
   "output_dir": "/Users/me/Music/AudioLab", "output_dir_ok": true, "data_dir": "…", "logs_dir": "…",
@@ -554,9 +554,10 @@ New Enhance entries retain `processing: {requested, resolved, applied, metrics}`
 `requested` holds validated recipe, quality, formats, advanced settings and cover/split switches;
 `resolved` holds `{recipe, params, decisions}` and, when available, `bandwidth`
 (`is_lossy_cutoff` and optional `cutoff_hz`) for repeating HF treatment in a short preview.
-New Adaptive versions also retain `resolved.auto_compressor` (`off`, `glue` or `leveler`), the automatic
-decision before an explicit Glue override. New Adaptive/Volume only versions may retain
-`resolved.calibration`, a versioned, finite, path-free object. Missing fields mean unavailable, not zero:
+New versions made with "Tone and volume" also retain `resolved.auto_compressor` (`off`, `glue` or `leveler`).
+This is the automatic decision before an explicit Glue override. New versions made with "Tone and volume"
+or "Volume only" may retain `resolved.calibration`, a versioned, finite, path-free object.
+Missing fields mean unavailable, not zero:
 
 | Calibration field | Meaning and dependency |
 |---|---|
@@ -584,8 +585,8 @@ legacy entries with no check use their original master-based estimate.
 `POST /api/library/{id}/preview` accepts JSON `{start_s, duration_s, advanced: {...}}` and returns a
 single queued Enhance Job. Start must be finite and nonnegative; duration is 5–30 seconds, clipped at
 the actual end only if at least one second remains. It requires a kept original and retained resolved
-settings, and supports Volume only/Adaptive, not AI stems. Unknown/invalid fields return `400`; missing
-entries return `404`, missing originals `410`. Advanced options have the Enhance meanings and numeric
+settings, and supports "Volume only" and "Tone and volume", not "AI stems". Unknown/invalid fields return
+`400`; missing entries return `404`, missing originals `410`. Advanced options have the Enhance meanings and numeric
 limits; preview excludes the AI model option. Retained HF restoration needs its original bandwidth
 facts (or the still-existing source job's analysis); unavailable provenance returns `400`.
 The decode preserves comparison playback's source alignment. WebM/Matroska timing checks are bounded

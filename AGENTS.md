@@ -53,8 +53,9 @@ bash -n start.sh                                     # when you touched the laun
   example are checked against the code. Update the docs when it fails, not the test.
 - The suite has about 690 tests (November 2026): more than a production release needs, but fine for
   development. Trim it before a production release (see `docs/ROADMAP.md`).
-- CI (`.github/workflows/ci.yml`) runs Python 3.12 checks on macOS/Windows/Linux for pull requests or when
-  started by hand, never on pushes.
+- CI (`.github/workflows/ci.yml`) runs Python 3.12 checks on macOS, the supported platform, for every pull
+  request. Started by hand, it also checks Windows and Linux; do that before a release when they need checking.
+  It never runs on pushes.
 - The published AI add-on is pinned to the exact bytes of its inputs (`packaging/ai/published-helper.json`:
   `system.py`, `errors.py`, `context.py`, `runtime.py`, `audiolab/ai/`, …). Editing one makes the Mac build refuse
   to reuse it, which would force a new AI version and a 570 MB re-download for users. Put new code elsewhere

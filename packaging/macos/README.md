@@ -1,8 +1,8 @@
 # Building the macOS tester app
 
 This folder builds the application and its separate optional AI add-on. The main app bundles Python
-and native tools for Save/Convert, Check and Volume only/Adaptive Enhance. Settings can download the
-compatible add-on for Split and AI stems Enhance; testers install neither Python nor uv.
+and native tools for Save/Convert, Check and Enhance with "Volume only" or "Tone and volume". Settings
+can download the compatible add-on for Split and AI stems Enhance; testers install neither Python nor uv.
 
 The **Build macOS tester app** workflow in GitHub Actions is the maintained release path. Start it
 manually from the Actions tab; it creates build artifacts without publishing a release.
@@ -63,9 +63,9 @@ dependency notices are embedded in the app, with source provenance in the releas
 The source Python app retains its existing dependencies and optional AI install workflow.
 
 The core smoke check exercises the **frozen executable** with short generated fixtures. It checks
-each core conversion format, Adaptive Enhance, Check, a localhost link, and HTTP/UI assets.
-The HTTP check saves an Adaptive result, checks that the Library retains its reduction timeline after
-job removal, auditions a five-second excerpt with changed settings, and applies those settings to
+each core conversion format, Enhance with "Tone and volume", Check, a localhost link, and HTTP/UI assets.
+The HTTP check saves a result made with "Tone and volume" and checks that the Library retains its
+reduction timeline after job removal. It auditions a five-second excerpt with changed settings and applies those settings to
 the full recording. It checks the two bounded PCM streams, new exports in the same Library group,
 and the kept original's hash. The check removes external Python from PATH and uses isolated
 data/output folders and localhost requests. It also runs the frozen downloader mode with offline

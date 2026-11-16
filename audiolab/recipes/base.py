@@ -473,7 +473,7 @@ def resolve(
                     'AI stage',
                     'none (fallback)',
                     'auto',
-                    'AI stems processing needs the AI add-on — used Adaptive processing because it is unavailable',
+                    'The AI add-on is unavailable. Used Tone and volume processing instead of AI stems.',
                 )
     p.ai_stage = stage
     if stage == 'stem_eq' and p.presence_db:
@@ -754,7 +754,7 @@ def _resolve_light(
             'Other settings',
             'not used',
             'auto',
-            'Light changes the volume only — bass, compression, noise reduction, mono bass, '
-            'restore highs, harmonics, adaptive low-mids and sharp S sounds need Standard processing',
+            'Volume only changes just the volume. Bass, compression, noise reduction, mono bass, '
+            'restore highs, harmonics, adaptive low-mids and sharp S sounds need Tone and volume processing',
         )
     return p, d.list()

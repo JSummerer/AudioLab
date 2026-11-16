@@ -222,9 +222,9 @@ def _enhance_original(state: State, entry_id: str, body: Any, is_preview: bool):
         raise HTTPException(400, 'This version has no saved Enhance settings.')
     overrides = _overrides(body, is_preview)
     if is_preview and saved['quality'] == 'best':
-        raise HTTPException(400, 'Short previews are available for Volume only and Adaptive processing.')
+        raise HTTPException(400, 'Short previews are available for "Volume only" and "Tone and volume" processing.')
     if is_preview and body.get('paired') and saved['quality'] not in ('light', 'standard'):
-        raise HTTPException(400, 'Adjust is available for Volume only and Adaptive processing.')
+        raise HTTPException(400, 'Adjust is available for "Volume only" and "Tone and volume" processing.')
     if is_preview and body.get('paired') and saved['quality'] == 'light':
         if overrides.keys() - {'target_lufs', 'tp_ceiling_db', 'sample_rate'}:
             raise HTTPException(400, 'Volume only adjusts loudness and peak ceiling.')

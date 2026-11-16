@@ -87,6 +87,60 @@ def test_output_drive_needs_room_for_the_selected_results_not_scratch(tmp_path, 
     preflight(9632.0, work, 'analyze', output_dir=out)
 
 
+def test_save_and_convert_count_their_own_results_on_the_output_drive(tmp_path, monkeypatch):
+    """A one-hour MP3 conversion (144 MB) onto a stick with 1 GB free used to be refused: Save / Convert asked
+    the output drive for the whole working-space figure. Now MP3, M4A and Opus count their file (its size is
+    set by the bitrate); whatever preflight can't bound still needs the whole working-space figure."""
+    import pytest
+
+    from audiolab import resources
+    from audiolab.errors import ResourceGuardError
+    from audiolab.resources import GB, preflight
+
+    work, out = tmp_path / 'work', tmp_path / 'stick'
+    free = {work: 500 * GB, out: 1 * GB}
+    monkeypatch.setattr(resources, 'disk_free_bytes', lambda p: free[p])
+    monkeypatch.setattr(resources, 'memory_report', lambda: {'source': 'unknown', 'available_bytes': 0})
+    monkeypatch.setattr(resources.system, 'folder_writable', lambda p: True)
+    mp3 = {'format': 'mp3', 'embed_cover': True, 'save_cover': True, 'split_tracks': False}
+    for fmt in ('mp3', 'm4a', 'opus'):
+        preflight(3600.0, work, 'download', output_dir=out, options={**mp3, 'format': fmt})
+
+    # Still refused: results that don't fit, or a size preflight can't bound.
+    for seconds, options in [
+        (8 * 3600.0, mp3),  # 1.15 GB of MP3
+        (3600.0, {**mp3, 'format': 'original'}),
+        (3600.0, {**mp3, 'format': 'video'}),
+        (None, mp3),  # unknown length: Save has no second check after decoding
+        # Lossless keeps the source's rate and channels: 10 minutes of 192 kHz 7.1 make 1.84 GB of WAV.
+        (600.0, {**mp3, 'format': 'wav'}),
+        (600.0, {**mp3, 'format': 'flac'}),
+        # Every track embeds the cover; neither how many tracks nor how big the picture is is known here.
+        (3600.0, {**mp3, 'split_tracks': True}),
+    ]:
+        with pytest.raises(ResourceGuardError, match='output folder'):
+            preflight(seconds, work, 'download', output_dir=out, options=options)
+
+
+def test_save_on_one_drive_is_decided_by_the_working_space_as_before(tmp_path, monkeypatch):
+    import pytest
+
+    from audiolab import resources
+    from audiolab.errors import ResourceGuardError
+    from audiolab.resources import GB, preflight
+
+    same = tmp_path / 'drive'
+    need = resources.estimate_disk_bytes(3600, 'download') + int(resources.LIMITS.min_free_disk_gb * GB)
+    monkeypatch.setattr(resources, 'memory_report', lambda: {'source': 'unknown', 'available_bytes': 0})
+    monkeypatch.setattr(resources.system, 'folder_writable', lambda p: True)
+    mp3 = {'format': 'mp3', 'embed_cover': True, 'save_cover': False, 'split_tracks': False}
+    monkeypatch.setattr(resources, 'disk_free_bytes', lambda p: need)
+    preflight(3600.0, same, 'download', output_dir=same, options=mp3)
+    monkeypatch.setattr(resources, 'disk_free_bytes', lambda p: need - 1)
+    with pytest.raises(ResourceGuardError, match='working folder'):
+        preflight(3600.0, same, 'download', output_dir=same, options=mp3)
+
+
 def test_k_blocks_stream_matches_reference_implementation():
     """Chunked K-weighting (bounded memory on 2 h sets) must give the same block
     loudness as filtering the whole signal at once."""

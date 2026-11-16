@@ -4,12 +4,13 @@ Possible next steps after the public beta. These are directions, not a release s
 promises. Completed changes belong in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Beta priorities
-- **Adaptive listening checks:** compare varied permission-cleared recordings at matched volume,
+- **Listening checks for "Tone and volume":** compare varied permission-cleared recordings at matched volume,
   including intentional tonal extremes and no-preference outcomes. Generated tests establish numerical
   safeguards, not improved sound.
 - **Installation feedback:** make first setup and repair easier using reproducible tester reports.
-  Automated regression checks cover macOS, Windows and Linux; fresh-machine setup, OS security prompts
-  and native audio/device behavior need broader qualification. Windows/Linux remain experimental.
+  Automated regression checks run on macOS for every pull request, and on Windows and Linux when started
+  by hand; fresh-machine setup, OS security prompts and native audio/device behavior need broader
+  qualification. Windows/Linux remain experimental.
 - **Final name:** AudioLab is a working name shared with other audio projects. Review naming and
   distribution availability before a wider release or package-index publication.
 - **Better classifier evidence:** evaluate varied, permission-cleared recordings before changing
@@ -22,8 +23,8 @@ promises. Completed changes belong in [CHANGELOG.md](../CHANGELOG.md).
 - **Resource-check accuracy:** distinguish installed RAM from currently available memory in messages;
   include source/output format and output count in disk estimates. Current allowances do not reserve
   memory or disk, so passing preflight is not a guarantee that the job fits.
-- **Memory guard:** beyond 10 minutes, Volume only and Adaptive Enhance are now estimated at the 10-minute
-  figure plus 0.5 GiB per hour. That slope is calculated from measurements on a 48 GB Apple silicon Mac
+- **Memory guard:** beyond 10 minutes, Enhance with "Volume only" or "Tone and volume" is now estimated
+  at the 10-minute figure plus 0.5 GiB per hour. That slope is calculated from measurements on a 48 GB Apple silicon Mac
   (about three times the measured growth). Confirm it on a small machine and in a container. A data folder
   on tmpfs is the case where the mapped working files are not reclaimable; AudioLab does not detect it yet.
 - **Test suite before a production release:** about 690 checks are more than a production release needs.
@@ -68,7 +69,8 @@ promises. Completed changes belong in [CHANGELOG.md](../CHANGELOG.md).
 - Peak-meter gap: on the same test signal, a 24-bit WAV measured −0.88 dBTP after saving while the limiter
   reported −1.0 (its 4× true-peak meter against the 192 kHz export check). On real music the WAV met −1.00
   exactly. Align the two meters if real material ever shows a miss.
-- Give Save / Convert its own output-space estimate: today its output drive must have the full working-space
-  figure free, so a one-hour MP3 conversion (about 144 MB of output) is refused on a separate drive with 1 GB free.
+- Save / Convert output space: MP3, M4A and Opus count only their file on another drive. WAV, FLAC and
+  cutting into tracks still need the full working space there; counting them needs the source's sample rate
+  and channels, the number of tracks and a size bound for the embedded cover at preflight.
 - Release draft: let the Mac build workflow create a draft GitHub release with the DMG, AI catalog and
   checksums attached, so publishing a version is one review and one click.

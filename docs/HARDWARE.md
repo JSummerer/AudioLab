@@ -1,12 +1,12 @@
 # Hardware and storage
 
-For the **AudioLab 2.5.0 Mac beta**. [Download and install](MACOS.md) ·
+For the **AudioLab 2.5.1 Mac beta**. [Download and install](MACOS.md) ·
 [Memory](#memory-ram) · [Disk space](#disk-space) · [Speed and models](#speed-and-models) ·
 [Checks and limits](#what-the-app-checks)
 
 ## What do I need?
 
-| Item | Core tools: Save / Convert, Check, Volume only/Adaptive Enhance | Optional AI: Split and AI stems Enhance |
+| Item | Core tools: Save / Convert, Check, Enhance with "Volume only" or "Tone and volume" | Optional AI: Split and AI stems Enhance |
 |---|---|---|
 | Mac and system | Apple silicon, macOS 14 or later | Same; uses the built-in Apple GPU when available |
 | Memory guidance, provisional | **Already have 8 GB?** Start with short core tasks; this capacity has not been qualified | For early AI testing, we prefer existing Macs with **16 GB or more**; capacity on 8/16 GB has not yet been tested |
@@ -16,7 +16,7 @@ For the **AudioLab 2.5.0 Mac beta**. [Download and install](MACOS.md) ·
 **The memory and free-space figures are planning recommendations, not tested minimums or guarantees.**
 There is no qualified minimum RAM capacity yet. “Short” here means a recording of a few minutes,
 up to roughly 10 minutes, one job at a time. Longer recordings need more space and often more memory.
-The memory check now lets Volume only and Adaptive Enhance start on long recordings on an 8 GB Mac.
+The memory check now lets Enhance with "Volume only" or "Tone and volume" start on long recordings on an 8 GB Mac.
 On a larger Mac a one-hour job used about 1.2 GB of working memory plus working files on disk, but no
 long job has been tested on an 8 GB machine yet.
 This helps you try hardware you already own; it is **not a reason to buy or upgrade a Mac** for this beta.
@@ -55,7 +55,7 @@ explains that display. This is optional troubleshooting, not an installation req
 
 Reference payloads measured on 2.4.0b3, rounded in decimal MB/GB. See the
 [latest release](https://github.com/JSummerer/AudioLab/releases/latest) for the current app's download size.
-2.5.0 uses the same AI 1.0.0 payload.
+2.5.1 uses the same AI 1.0.0 payload.
 
 | Files | Download | Installed files |
 |---|---:|---:|
@@ -77,7 +77,7 @@ changed in 2.5.0 (see [what the app checks](#what-the-app-checks)).
 |---|---:|
 | Save / Convert | About 4.0 GB |
 | Check | About 4.6 GB |
-| Volume only/Adaptive Enhance | About 15.1 GB |
+| Enhance with "Volume only" or "Tone and volume" | About 15.1 GB |
 | AI stems Enhance | About 22.6 GB |
 | Split | About 17.4 GB |
 
@@ -88,9 +88,10 @@ These figures are the app's preflight estimates.
 The estimate does not cover every source sample rate, export format or combination of outputs; even
 the 2 GiB allowance is not guaranteed to remain free after a job. Leave additional room
 for your existing and new recordings, kept originals, other apps and macOS. The estimates above are for
-the drive with app data, where the working files go. The output folder is checked separately: for Enhance
-and Split it needs room only for the results, but for Save / Convert the larger working-space figure above
-still applies there (Check writes nothing there). Choosing MP3 output does not remove the need for
+the drive with app data, where the working files go. The output folder is checked separately and needs
+room only for the results (Check writes nothing there). For Save / Convert that holds for one MP3, M4A or
+Opus file; WAV, FLAC, the original stream, video and cutting into tracks need the working-space figure above
+there too. Choosing MP3 output does not remove the need for
 uncompressed working files during Enhance or Split.
 
 Use **Settings → Storage → Clear finished jobs** for the files of finished jobs, and
@@ -110,12 +111,14 @@ four times the work time. That is upstream guidance, not an AudioLab timing guar
 also loads more model weights, but its total peak RAM is not necessarily four times higher.
 Choosing vocals/instrumental instead of four stems still performs the underlying separation.
 
-**Standard AI model** and **Adaptive processing** are different choices: Adaptive Enhance
-works without AI. AI stems Enhance uses AI in addition to the ordinary processing chain.
+**Standard AI model** and **Tone and volume** are different choices.
+Enhance with "Tone and volume" works without AI. AI stems Enhance uses AI in addition to the ordinary
+processing chain.
 
 CPU-only AI is limited to **20 minutes of input per job by default**. This is an app policy to avoid
 very long CPU jobs, not a hardware minimum or a runtime estimate. There is no reliable
-“minutes per song” promise yet. Use a shorter file or Volume only/Adaptive Enhance when resources are tight.
+“minutes per song” promise yet. Use a shorter file or Enhance with "Volume only" or "Tone and volume"
+when resources are tight.
 
 ## What the app checks
 
@@ -124,9 +127,9 @@ However, on a normal Mac its memory budget uses **85% of installed RAM**, not a 
 memory left after other apps. It does not account separately for each AI model or all GPU allocations.
 Passing that check is not a guarantee against memory pressure or an out-of-memory error.
 
-For example, the formula now estimates about **2.64 GiB** for one hour of Adaptive Enhance (6.84 GiB
-before), inside the **6.8 GiB** default budget on an 8 GiB Mac. Beyond 10 minutes, Volume only and
-Adaptive Enhance work in files on disk, so their estimate grows by only 0.5 GiB per hour (about 6.14 GiB
+For example, the formula now estimates about **2.64 GiB** for one hour of Enhance with "Tone and volume"
+(6.84 GiB before), inside the **6.8 GiB** default budget on an 8 GiB Mac. Beyond 10 minutes, Enhance with
+"Volume only" or "Tone and volume" works in files on disk. Its estimate grows by only 0.5 GiB per hour (about 6.14 GiB
 at 8 hours). AI stems Enhance keeps the earlier formula (about 7.84 GiB for one hour). These are formula
 values based on measurements on one 48 GB Mac, not a tested minimum. Closing apps can improve actual
 headroom, but does not raise this installed-RAM budget. The estimate assumes the app data folder is on a

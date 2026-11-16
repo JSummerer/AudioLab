@@ -16,9 +16,10 @@ no build step; reload the page after editing.
 
 ## Checks
 
-CI runs on pull requests and on manual starts (never on pushes), using Python 3.12 on macOS,
-Windows and Linux. These are generated-signal and unit/integration tests; they do not establish that
-the native UI, fresh-machine setup or optional AI work on every computer.
+CI uses Python 3.12 and never runs on pushes. Every pull request is checked on macOS, the supported
+platform. Windows and Linux are complementary: start the workflow by hand to check all three systems,
+for example before a release when they need checking. These are generated-signal and unit/integration
+tests; they do not establish that the native UI, fresh-machine setup or optional AI work on every computer.
 CI also repeats comparison-playback regressions with the bundled FFmpeg, so an installed system
 version cannot hide differences in the fallback used by a fresh installation.
 
@@ -56,8 +57,8 @@ recipe, format, task, view or support for another OS. The HTTP contract between 
 ## macOS binary delivery
 
 The binary targets macOS 14+ arm64. Its main download includes Save/Convert, Check and
-Volume only/Adaptive Enhance. Settings manages a separate immutable AI helper archive for Split and
-AI stems Enhance, with both offline models. The app never runs pip or changes shared environments.
+Enhance with "Volume only" or "Tone and volume". Settings manages a separate immutable AI helper archive
+for Split and AI stems Enhance, with both offline models. The app never runs pip or changes shared environments.
 Source installation and the Windows/Linux browser paths remain separate.
 See [packaging/macos/README.md](packaging/macos/README.md) for the pinned build environment, selected
 FFmpeg sources/licenses, app entry, smoke checks and release artifacts.

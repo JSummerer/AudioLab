@@ -14,7 +14,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Pull requests check macOS, the supported platform; a manual start also checks Windows and Linux.
+        os: ${{ github.event_name == 'workflow_dispatch' && fromJSON('["ubuntu-latest", "macos-latest", "windows-latest"]') || fromJSON('["macos-latest"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     env:

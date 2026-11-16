@@ -130,12 +130,23 @@ def format_bytes_per_s(key: str, rate: int) -> float:
 
 def estimate_output_bytes(duration_s: float, task: str, options: dict | None) -> int | None:
     """What a job leaves in the output folder (no scratch), from its validated options: Enhance every
-    selected format plus the first one again as Tracks, Split two or four stems. None when that isn't known
-    (no options, Save, an unknown format): then the output folder needs as much as the working folder."""
+    selected format plus the first one again as Tracks, Split two or four stems, Save / Convert one MP3, M4A
+    or Opus file (its bitrate sets the size whatever the source's rate and channels). None when that isn't
+    known (no options, an unknown format; Save / Convert keeping the original or a video, writing WAV or FLAC
+    at the source's unknown rate and channels, or cutting tracks that each embed the cover): then the output
+    folder needs as much as the working folder. A saved cover and the file's one embedded picture are inside
+    OUTPUT_MARGIN_BYTES; each item of a batch or playlist is its own job."""
     seconds = max(0.0, duration_s)
     if task == 'analyze':
         return 0  # Check writes nothing there
     try:
+        if task == 'download' and options is not None:
+            from .media.export import DOWNLOAD_FORMATS, FORMATS
+
+            key = DOWNLOAD_FORMATS.get(options.get('format'))
+            if not key or '-b:a' not in FORMATS[key].codec_args or options.get('split_tracks'):
+                return None
+            return int(seconds * format_bytes_per_s(key, MASTER_RATE))  # the rate doesn't matter for a bitrate
         if task == 'enhance' and options is not None:
             rate = int((options.get('advanced') or {}).get('sample_rate') or MASTER_RATE)
             formats = list(options.get('formats') or [])
@@ -204,7 +215,7 @@ def preflight(
             hints.append(
                 f'Split a shorter piece, or use {faster}.'
                 if task == 'separate'  # Split has no other quality to fall back on
-                else f'Use Adaptive processing (no AI) for long recordings, or use {faster}.'
+                else f'Use Tone and volume processing (no AI) for long recordings, or use {faster}.'
             )
 
         mem = memory_report()
@@ -225,7 +236,9 @@ def preflight(
 
     need = estimate_disk_bytes(duration_s or 600.0, task, quality) + int(LIMITS.min_free_disk_gb * GB)
     # The output folder only receives the results; never ask it for more than the working folder needs.
-    results = estimate_output_bytes(duration_s or 600.0, task, options)
+    # Save has no second check once the length is known (Enhance has one after decoding): no guess for it.
+    unknown = duration_s is None and task == 'download'
+    results = None if unknown else estimate_output_bytes(duration_s or 600.0, task, options)
     out_need = need if results is None else min(need, results + OUTPUT_MARGIN_BYTES)
     checks = [('working folder', work_dir, need)]
     if task != 'analyze':

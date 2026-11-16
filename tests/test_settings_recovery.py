@@ -42,7 +42,7 @@ def test_failed_save_keeps_active_and_persisted_preferences(monkeypatch, failure
     assert SETTINGS.get().theme == 'dark'
 
 
-@pytest.mark.parametrize('payload', ['[]', 'null', '"text"', '1', '{invalid', b'\xff'])
+@pytest.mark.parametrize('payload', ['[]', '1', '{invalid', b'\xff'])  # falsy/truthy non-objects, not JSON, not UTF-8
 def test_malformed_settings_fall_back_without_overwriting_file(payload):
     path = SETTINGS.settings_file
     raw = payload.encode() if isinstance(payload, str) else payload

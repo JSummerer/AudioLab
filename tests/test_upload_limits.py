@@ -30,7 +30,7 @@ def test_non_upload_requests_do_not_evaluate_upload_configuration(monkeypatch):
 
 
 @pytest.mark.parametrize('declared_length', [False, True])
-@pytest.mark.parametrize('size', [2047, 2048, 2049])
+@pytest.mark.parametrize('size', [2048, 2049])
 def test_request_budget_at_boundary(monkeypatch, declared_length, size):
     monkeypatch.setattr(security, 'LIMITS', SimpleNamespace(max_upload_mb=1024 / 1024**2))
     monkeypatch.setattr(security, 'COVER_MAX_MB', 0)

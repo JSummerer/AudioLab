@@ -14,7 +14,9 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
+from audiolab.api import create_app
 from audiolab.context import Progress, TaskContext
 from audiolab.errors import AudioLabError, Cancelled, ResourceGuardError
 from audiolab.jobs import JobManager
@@ -81,10 +83,6 @@ def test_settings_are_checked(tmp_path):
 
 
 def test_settings_api_refuses_bad_values(tmp_path, monkeypatch):
-    from fastapi.testclient import TestClient
-
-    from audiolab.api import create_app
-
     monkeypatch.delenv('AUDIOLAB_OUTPUT_DIR')
     SETTINGS.update({'output_dir': str(tmp_path / 'music')})
     with TestClient(create_app(local=False, token='t', manager=new_manager(tmp_path / 'jobs'))) as c:
@@ -100,10 +98,7 @@ def test_settings_api_refuses_bad_values(tmp_path, monkeypatch):
 @pytest.mark.skipif(os.name != 'posix' or os.geteuid() == 0, reason='needs POSIX permissions (and not root)')
 def test_unreachable_output_folder(tmp_path, monkeypatch):
     """An output folder on a drive that isn't connected: the app keeps working and Settings can fix it."""
-    from fastapi.testclient import TestClient
-
     from audiolab import system
-    from audiolab.api import create_app
 
     monkeypatch.setattr(system, 'reveal', lambda path: None)
     monkeypatch.delenv('AUDIOLAB_OUTPUT_DIR')
@@ -683,10 +678,6 @@ def _wav_bytes(seconds=1.0, sr=48000):
 
 
 def test_http_api(tmp_path):
-    from fastapi.testclient import TestClient
-
-    from audiolab.api import create_app
-
     mgr = new_manager(tmp_path / 'jobs')
     app = create_app(local=False, token='secret', manager=mgr)
     with TestClient(app) as c:
@@ -757,10 +748,6 @@ def test_http_api(tmp_path):
 
 
 def test_an_upload_that_never_becomes_a_job_leaves_no_folder(tmp_path):
-    from fastapi.testclient import TestClient
-
-    from audiolab.api import create_app
-
     mgr = new_manager(tmp_path / 'jobs')
     client = TestClient(create_app(local=False, token='t', manager=mgr))  # no lifespan: nothing else starts
     mgr._stopping = True  # the app began to close while the upload was arriving
@@ -789,10 +776,6 @@ def test_diagnostics_redaction():
 
 def test_browser_safety(tmp_path):
     """Local mode has no token: other websites and DNS-rebinding hosts must be refused."""
-    from fastapi.testclient import TestClient
-
-    from audiolab.api import create_app
-
     mgr = new_manager(tmp_path / 'jobs')
     with TestClient(create_app(local=True, manager=mgr), base_url='http://127.0.0.1:8765') as c:
         assert c.get('/api/jobs').status_code == 200
@@ -904,9 +887,6 @@ def test_retry_looks_a_link_up_again(tmp_path, monkeypatch):
     finally:
         m.shutdown()
 
-    from fastapi.testclient import TestClient
-
-    from audiolab.api import create_app
     from audiolab.api.jobs import _clone_source
 
     app = create_app(local=False, token='t', manager=new_manager(tmp_path / 'jobs2'))
@@ -977,9 +957,6 @@ def test_split_after_separation_is_cancellable_and_matches_the_ai_helpers(tmp_pa
 
 def test_unexpected_errors_answer_in_plain_words(tmp_path, monkeypatch):
     """No bare "Internal Server Error": a JSON 500 with hints; a full disk or a read-only folder says so."""
-    from fastapi.testclient import TestClient
-
-    from audiolab.api import create_app
     from audiolab.media import export
 
     mgr = new_manager(tmp_path / 'jobs')
@@ -1021,10 +998,6 @@ def test_unexpected_errors_answer_in_plain_words(tmp_path, monkeypatch):
 def test_playlist_items_keep_their_titles(tmp_path):
     """Items picked long after the lookup (cache expired) still get their title, playlist folder and album."""
     import json
-
-    from fastapi.testclient import TestClient
-
-    from audiolab.api import create_app
 
     mgr = new_manager(tmp_path / 'jobs')
     with TestClient(create_app(local=False, token='t', manager=mgr)) as c:

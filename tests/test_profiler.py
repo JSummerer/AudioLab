@@ -158,19 +158,9 @@ def test_top_end_bright_dull_normal():
 def test_profile_keys_and_alerts():
     x = _club(20.0)
     rep = profile(x, SR, 20.0, 'whole file')
-    for key in (
-        'integrated_lufs',
-        'true_peak_dbtp',
-        'lra',
-        'bandwidth',
-        'bands_db',
-        'mud_excess_db',
-        'top_end_db',
-        'noise_floor_db',
-        'stereo',
-        'dynamics_style',
-        'alerts',
-    ):
+    for key in ('integrated_lufs', 'true_peak_dbtp', 'lra', 'bandwidth', 'bands_db', 'mud_excess_db', 'top_end_db'):
+        assert key in rep, key
+    for key in ('noise_floor_db', 'stereo', 'dynamics_style', 'alerts'):
         assert key in rep, key
     assert all(a['level'] in ('ok', 'info', 'warning', 'danger') for a in rep['alerts'])
 

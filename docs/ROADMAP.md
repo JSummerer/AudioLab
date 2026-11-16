@@ -27,8 +27,11 @@ promises. Completed changes belong in [CHANGELOG.md](../CHANGELOG.md).
   at the 10-minute figure plus 0.5 GiB per hour. That slope is calculated from measurements on a 48 GB Apple silicon Mac
   (about three times the measured growth). Confirm it on a small machine and in a container. A data folder
   on tmpfs is the case where the mapped working files are not reclaimable; AudioLab does not detect it yet.
-- **Test suite before a production release:** about 690 checks are more than a production release needs.
-  Keep the ones that guard user files, cancellation, exports and the HTTP contract; merge or drop the rest.
+- **Test suite before a production release:** a first pass in November 2026 removed 20 Python and 4 JavaScript
+  tests that repeated others (about 675 Python checks remain). A further cut means accepting a risk: the
+  release-build checks (`test_packaging_sources.py`, `test_source_seed.py`) and the cover-image hardening
+  (`test_thumbnails.py`) are the candidates. Keep the ones that guard user files, cancellation, exports and the
+  HTTP contract.
 
 ## Bigger features
 - **App shortcuts on Windows/Linux**: a Start-menu entry / `.desktop` file, filled in where macOS already has
@@ -43,6 +46,9 @@ promises. Completed changes belong in [CHANGELOG.md](../CHANGELOG.md).
 - **Track-aware DJ processing**: snap AI windows and per-track loudness to track boundaries
   (2.1 already *cuts* sets into tracks from chapters/tracklists; detecting boundaries without a tracklist
   is open).
+- **Partly finished jobs**: when a job fails late, keep the files that were already complete and mark the job
+  "partly finished" (a new job state). Today a failed or cancelled attempt removes everything it saved, so a
+  finished MP3 goes with a failed WAV; that stays the rule until then.
 - **Folder batch**: pick a whole folder (several files at once already work).
 - **Library, later steps** (left out of 2.3 on purpose): "Locate…" for a moved file (needs a native file
   picker in the app window); finding moved files automatically (a relocation scan); retention or a size cap for kept originals

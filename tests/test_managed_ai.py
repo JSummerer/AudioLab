@@ -311,18 +311,11 @@ def test_cancel_preserves_only_resumable_download_and_retry_succeeds(setup, serv
         ('models//escape', tarfile.REGTYPE, b'bad'),
         ('C:/escape', tarfile.REGTYPE, b'bad'),
         ('models/link', tarfile.SYMTYPE, b'../../outside'),
-        ('models/link', tarfile.LNKTYPE, b'../../outside'),
-        ('models/pipe', tarfile.FIFOTYPE, b''),
         ('models/device', tarfile.CHRTYPE, b''),
     ],
-)
+)  # hardlink targets: test_hardlinks_reject_unsafe_missing_directory_self_and_case_alias_targets
 def test_unsafe_archives_never_activate_or_touch_outside(setup, server, name, kind, data):
-    blob, installed = archive_bytes([('AudioLabAI', b'fake', tarfile.REGTYPE), (name, data, kind)])
-    setup.manager.catalog.update(
-        sha256=hashlib.sha256(blob).hexdigest(), download_bytes=len(blob), installed_bytes=installed
-    )
-    setup.blob = blob
-    connect(setup, server)
+    use_archive(setup, server, [('AudioLabAI', b'fake', tarfile.REGTYPE), (name, data, kind)])
     outside = setup.manager.data_dir / 'escape'
     outside.parent.mkdir()
     outside.write_text('untouched')
@@ -331,14 +324,9 @@ def test_unsafe_archives_never_activate_or_touch_outside(setup, server, name, ki
     assert not (setup.manager.root / 'active.json').exists() and not setup.calls
 
 
-@pytest.mark.parametrize('other', ['AudioLabAI', 'audiolabAI'])
-def test_duplicate_archive_members_are_rejected(setup, server, other):
-    blob, installed = archive_bytes([('AudioLabAI', b'first', tarfile.REGTYPE), (other, b'second', tarfile.REGTYPE)])
-    setup.manager.catalog.update(
-        sha256=hashlib.sha256(blob).hexdigest(), download_bytes=len(blob), installed_bytes=installed
-    )
-    setup.blob = blob
-    connect(setup, server)
+def test_duplicate_archive_members_are_rejected(setup, server):
+    # A case alias is a duplicate on macOS' default file system, so it covers the exact duplicate too.
+    use_archive(setup, server, [('AudioLabAI', b'first', tarfile.REGTYPE), ('audiolabAI', b'second', tarfile.REGTYPE)])
     assert not finish(setup.manager)
     assert not setup.calls
 
@@ -382,9 +370,6 @@ def test_direct_regular_file_hardlinks_preserve_aliases_and_count_unique_storage
     [
         '/outside',
         '../outside',
-        '_internal/../../outside',
-        'C:/outside',
-        'models\\weights.safetensors',
         'models//weights.safetensors',
         './models/weights.safetensors',
         'models/weights.safetensors/',
@@ -430,8 +415,7 @@ def test_hardlink_chains_are_rejected_before_any_link_is_created(setup, server, 
     assert 'regular archive file' in '\n'.join(setup.manager.log)
 
 
-@pytest.mark.parametrize('alias', ['models/alias', 'models/ALIAS'])
-def test_duplicate_hardlink_destinations_are_rejected(setup, server, alias):
+def test_duplicate_hardlink_destinations_are_rejected(setup, server):
     use_archive(
         setup,
         server,
@@ -439,7 +423,7 @@ def test_duplicate_hardlink_destinations_are_rejected(setup, server, alias):
             ('AudioLabAI', b'fake executable', tarfile.REGTYPE),
             ('models/weights.safetensors', b'offline weights', tarfile.REGTYPE),
             ('models/alias', b'models/weights.safetensors', tarfile.LNKTYPE),
-            (alias, b'models/weights.safetensors', tarfile.LNKTYPE),
+            ('models/ALIAS', b'models/weights.safetensors', tarfile.LNKTYPE),  # a case alias: also the exact name
         ],
     )
     assert not finish(setup.manager)

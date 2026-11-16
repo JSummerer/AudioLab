@@ -12,8 +12,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from fastapi.testclient import TestClient
 
 from audiolab import library
+from audiolab.api import create_app
 from audiolab.jobs import JobManager, new_job_id
 from audiolab.media import ffmpeg, youtube
 from audiolab.media.ffmpeg import run_ffmpeg
@@ -134,10 +136,6 @@ def test_entry_written_on_finish_and_outlives_the_job(manager):
 
 
 def test_enhance_processing_and_export_check_survive_job_removal(manager, monkeypatch):
-    from fastapi.testclient import TestClient
-
-    from audiolab.api import create_app
-
     secret = '/private/work/model/checkpoint.th'
 
     def runner(job, ctx):
@@ -262,10 +260,6 @@ def test_remove_entry_keeps_files_and_drops_unreferenced_original(manager):
 
 
 def test_library_api_files_range_and_storage(tmp_path, manager):
-    from fastapi.testclient import TestClient
-
-    from audiolab.api import create_app
-
     job = run_job(manager)
     with TestClient(create_app(local=False, token='t', manager=manager)) as c:
         h = {'X-AudioLab-Token': 't'}
@@ -325,10 +319,6 @@ def test_library_api_files_range_and_storage(tmp_path, manager):
 
 
 def test_tracklist_preview_endpoint(manager):
-    from fastapi.testclient import TestClient
-
-    from audiolab.api import create_app
-
     with TestClient(create_app(local=False, token='t', manager=manager)) as c:
         h = {'X-AudioLab-Token': 't'}
         text = '0:00 Artist A - Opening\nno time here\n03:00 Second\n02:00 Back'
@@ -348,9 +338,6 @@ def test_tracklist_preview_endpoint(manager):
 
 
 def test_compare_file_and_pcm_routes(manager, monkeypatch):
-    from fastapi.testclient import TestClient
-
-    from audiolab.api import create_app
     from audiolab.media import ffmpeg, proc
 
     monkeypatch.setattr(proc, '_POLL_S', 0.01)  # short ffmpeg runs: don't wait 0.2 s for each
@@ -426,10 +413,6 @@ def _wav() -> bytes:
 
 
 def test_own_cover_upload_checked_and_kept_for_reruns(tmp_path, manager):
-    from fastapi.testclient import TestClient
-
-    from audiolab.api import create_app
-
     png = _png(tmp_path / 'art.png').read_bytes()
     with TestClient(create_app(local=False, token='t', manager=manager)) as c:
         h = {'X-AudioLab-Token': 't'}
@@ -507,10 +490,6 @@ def test_own_cover_upload_checked_and_kept_for_reruns(tmp_path, manager):
 
 def test_save_cover_of_a_link_job(manager, monkeypatch):
     """POST /api/jobs/{id}/cover for a link: its thumbnail at full size, WebP as a JPEG."""
-    from fastapi.testclient import TestClient
-
-    from audiolab.api import create_app
-
     fetched = []
 
     def urlopen(req, timeout=20):
@@ -535,10 +514,6 @@ def test_save_cover_of_a_link_job(manager, monkeypatch):
 
 
 def test_drop_one_original_and_the_keep_originals_setting(manager):
-    from fastapi.testclient import TestClient
-
-    from audiolab.api import create_app
-
     SETTINGS.update({'keep_originals': False})
     off = run_job(manager)
     assert library.public(library.get(off.id))['original']['kept'] is False
@@ -558,10 +533,7 @@ def test_drop_one_original_and_the_keep_originals_setting(manager):
 
 
 def test_reveal_entry_opens_its_folder(manager, monkeypatch):
-    from fastapi.testclient import TestClient
-
     from audiolab import system
-    from audiolab.api import create_app
 
     opened = []
     monkeypatch.setattr(system, 'reveal', opened.append)
@@ -661,10 +633,6 @@ def test_split_keeps_no_original(manager):
 
 
 def test_storage_counts_a_linked_original_once(manager):
-    from fastapi.testclient import TestClient
-
-    from audiolab.api import create_app
-
     entry = upload_job(manager, 'big.wav', b'W' * 200_000)  # its kept original is a hard link to the upload
     with TestClient(create_app(local=False, token='t', manager=manager)) as c:
         h = {'X-AudioLab-Token': 't'}
@@ -679,10 +647,6 @@ def test_storage_counts_a_linked_original_once(manager):
 def test_a_kept_original_never_shares_bytes_with_a_file_of_the_user(tmp_path, manager):
     """An imported file re-run as Enhance is linked into the job (no copy up front), but the original the
     Enhance keeps is a copy: editing the user's file in place must never change it."""
-    from fastapi.testclient import TestClient
-
-    from audiolab.api import create_app
-
     users = tmp_path / 'Music' / 'Set.wav'
     users.parent.mkdir()
     users.write_bytes(b'U' * 200_000)
@@ -700,10 +664,6 @@ def test_a_kept_original_never_shares_bytes_with_a_file_of_the_user(tmp_path, ma
 
 def test_own_cover_next_to_an_upload_called_cover_original(tmp_path, manager):
     """An audio file named like the cover's own files must survive storing the cover (also on a re-run)."""
-    from fastapi.testclient import TestClient
-
-    from audiolab.api import create_app
-
     png = _png(tmp_path / 'art.png', '64x64').read_bytes()
     with TestClient(create_app(local=False, token='t', manager=manager)) as c:
         h = {'X-AudioLab-Token': 't'}

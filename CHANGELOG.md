@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Command-line batches continue past missing inputs. A failed or cancelled command cleans up its own unfinished exports.
+
 - Enhance keeps MP3, AAC (.m4a) and Opus files as loud as the master unless their peaks really go over:
   encoding may use the master's headroom up to just under full scale (−0.1 dBTP), and only a file over that
   is encoded once more, turned down by the excess plus 0.5 dB. On a test song, MP3 was 0.9 dB, AAC 1.2 dB

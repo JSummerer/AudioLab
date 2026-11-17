@@ -1,9 +1,9 @@
 """What one job attempt created in the output folder, so a failed or cancelled attempt can remove exactly that.
 
-JobManager opens a record around each attempt (`recording`). `media.export` notes every file as it gets its
+JobManager and the CLI open a record around each attempt (`recording`). `media.export` notes every file as it gets its
 final name, with the identity of the finished temporary file it came from (a link or a rename keeps the
 inode, so nothing that appears at that name meanwhile can be taken for it), and `tasks.common.output_folder`
-notes the folder it makes. Outside an attempt (the CLI, a cover saved later from the job page) nothing is
+notes the folder it makes. Outside an attempt (for example, saving a cover later from the job page) nothing is
 recorded. The record is a context variable, so it belongs to the worker thread running that attempt.
 
 `Created.discard` never raises and removes only what is still the very thing recorded:

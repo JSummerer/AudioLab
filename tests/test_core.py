@@ -466,7 +466,10 @@ def test_output_cleanup_never_takes_a_stranger_for_its_own(tmp_path, monkeypatch
         stems.mkdir()
         outputs.created_folder(stems)
 
+    moved = []
+
     def swap_then_rename(a, b):  # replaced between the identity check and the move aside
+        moved.append(Path(a))
         if Path(a) == mine:
             os.unlink(a)
             Path(a).write_bytes(b'stranger 2')
@@ -477,6 +480,7 @@ def test_output_cleanup_never_takes_a_stranger_for_its_own(tmp_path, monkeypatch
     monkeypatch.setattr(os, 'rename', swap_then_rename)
     created.discard()
     monkeypatch.undo()
+    assert swapped not in moved  # a file already replaced is never even moved aside
     assert swapped.read_bytes() == b'stranger 1' and mine.read_bytes() == b'stranger 2'
     assert sorted(p.name for p in out.iterdir()) == ['Mine.wav', 'Stems', 'Stems moved', 'Swapped.wav']
 

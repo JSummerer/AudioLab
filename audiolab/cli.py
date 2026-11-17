@@ -65,18 +65,19 @@ class ConsoleProgress:
 
 
 def _source_for(value: str) -> dict[str, Any]:
+    from .errors import AudioLabError
     from .media.youtube import is_url
 
     if is_url(value):
         return {'kind': 'url', 'url': value}
     p = Path(value).expanduser()
     if not p.is_file():
-        sys.exit(f'Not a link and no such file: {value}')
+        raise AudioLabError(f'Not a link and no such file: {value}')
     return {'kind': 'file', 'name': p.name, 'path': str(p.resolve()), 'size_bytes': p.stat().st_size}
 
 
 def _run_task(task: str, value: str, options: dict[str, Any], args) -> int:
-    from . import tasks
+    from . import outputs, tasks
     from .context import TaskContext
     from .errors import AudioLabError, Cancelled
     from .settings import SETTINGS
@@ -84,7 +85,11 @@ def _run_task(task: str, value: str, options: dict[str, Any], args) -> int:
     if getattr(args, 'out', None):
         os.environ[ENV_PREFIX + 'OUTPUT_DIR'] = str(Path(args.out).expanduser().resolve())
     spec = tasks.get(task)
-    source = _source_for(value)
+    try:
+        source = _source_for(value)
+    except (AudioLabError, OSError) as e:
+        _print_error(e)
+        return 1
     if source['kind'] == 'url':
         from .media import youtube
 
@@ -126,8 +131,12 @@ def _run_task(task: str, value: str, options: dict[str, Any], args) -> int:
     ctx = TaskContext(
         'cli', work, opts, stages, emit_state=printer, emit_note=lambda kind, msg, detail: notes.append((kind, msg))
     )
+    created = outputs.Created()
+    returned = False
     try:
-        result = spec.run(ctx, source)
+        with outputs.recording(created):
+            result = spec.run(ctx, source)
+        returned = True
     except KeyboardInterrupt:
         ctx.cancel()
         printer.done()
@@ -142,6 +151,8 @@ def _run_task(task: str, value: str, options: dict[str, Any], args) -> int:
         _print_error(e)
         return 1
     finally:
+        if not returned:
+            created.discard()
         if not getattr(args, 'keep', False):
             shutil.rmtree(work.parent, ignore_errors=True)
     printer.done()

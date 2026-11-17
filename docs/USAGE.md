@@ -201,6 +201,9 @@ in the current app; listening to Original and Enhanced is the supported comparis
 
 ## Command line
 
+A batch continues past a missing input. If a command fails or you cancel it during processing, AudioLab removes the outputs from that attempt. Files from earlier completed inputs stay. The `--keep` flag keeps working files for inspection.
+
+
 From the project folder, the executable is `.venv/bin/audiolab` on macOS/Linux or
 `.\.venv\Scripts\audiolab.exe` in Windows PowerShell. Substitute that path for `audiolab` below unless
 your virtual environment is activated. Windows shells do not expand `*.mp3` like a POSIX shell;

@@ -280,7 +280,7 @@ function syncBanner() {
   const ff = hth.ffmpeg;
   let next = null;
   if (ff && ff.ok === false) {
-    next = [ff.error || 'The audio engine (ffmpeg) is missing, so nothing can be processed.', 'Details', () => go(settingsPath('system'))];
+    next = [ff.error || 'The audio engine (ffmpeg) is missing, so nothing can be processed.', 'Details', () => go(settingsPath('ffmpeg'))];
   } else if (hth.output_dir_ok === false) {
     next = [`The output folder isn’t available: ${hth.output_dir || ''}.`, 'Change folder', () => go(settingsPath('output'))];
   }

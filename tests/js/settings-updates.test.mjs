@@ -245,7 +245,7 @@ test('yt-dlp versions compare part by part as numbers', () => {
 
 test('Settings groups, legacy links, focused controls and diagnostic disclosure survive redraws', () => {
   const s = setup({
-    local: true, ai: { install_supported: true }, ffmpeg: { ok: true },
+    local: true, ai: { install_supported: true }, ffmpeg: { ok: false, error: 'Executable missing' },
     updates: { app: {} }, downloader: { can_update: true }, formats: { download: [] },
   }, { settings: { cookies_browser: '', output_dir: '/example', check_updates: false } });
   s.run('body.children = []; settingsView.mount(body); renderAll()');
@@ -253,6 +253,11 @@ test('Settings groups, legacy links, focused controls and diagnostic disclosure 
     ['General', 'Output defaults', 'Downloads', 'AI add-on', 'Storage', 'Help']);
   const disclosure = () => s.find('settingsMaintenance');
   assert.ok(!disclosure().open);
+  assert.ok(s.run('reveal("ffmpeg", {smooth: false, flash: false})'));
+  assert.equal(disclosure().open, true);
+  assert.equal(s.context.document.activeElement, s.find('ffmpegSpot'));
+  assert.match(text(s.context.document.activeElement), /Executable missing/);
+  disclosure().open = false;
   for (const id of ['keepWorkFiles', 'copyReport', 'downloaderSpot']) assert.ok(disclosure().contains(s.find(id)), id);
   assert.ok(s.find('settings-storage').contains(s.find('keepOriginals')));
   for (const [link, section, focus] of [

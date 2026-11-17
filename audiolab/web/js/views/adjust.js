@@ -14,7 +14,7 @@ import {
   DEFAULT_FADE_S, MAX_SECTIONS,
 } from '../section-eq.js';
 import { toneChart, toneObservation } from '../tone-chart.js';
-import { snapshotDraft, restoreDraft, draftWriter } from '../adjust-draft.js';
+import { DRAFT_FIELD_LIMIT, snapshotDraft, restoreDraft, draftWriter } from '../adjust-draft.js';
 import { adjustmentOverview } from '../adjust-overview.js';
 import { auditionRequests, pairedAudition } from '../adjust-audition.js';
 import { PROCESSING_LABELS } from './new/state.js';
@@ -44,7 +44,7 @@ const button = (label, onclick, style = 'key') => h('button', {
 }, label);
 const control = (label, input) => h('label', { class: 'adjust-control small' }, h('span', null, label), input);
 const timeInput = (value, oninput) => h('input', {
-  class: 'field field-sm', type: 'text', autocomplete: 'off', spellcheck: 'false', value, oninput,
+  class: 'field field-sm', type: 'text', maxlength: DRAFT_FIELD_LIMIT, autocomplete: 'off', spellcheck: 'false', value, oninput,
 });
 let viewLoad = null;
 let workspace = null;
@@ -379,7 +379,7 @@ function createWorkspace(entry, signal) {
     for (const [key, label, min, max] of numbers) {
       if (light && key === 'bass_db') continue;
       const input = h('input', {
-        class: 'field field-sm adjust-level', type: 'text', inputmode: 'decimal', autocomplete: 'off',
+        class: 'field field-sm adjust-level', type: 'text', maxlength: DRAFT_FIELD_LIMIT, inputmode: 'decimal', autocomplete: 'off',
         placeholder: Number.isFinite(params[key]) ? String(params[key]) : 'Saved value',
       });
       const value = draft.values[key];

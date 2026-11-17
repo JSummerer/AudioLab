@@ -557,29 +557,34 @@ def _decode(path: Path, offset: int, frames: int, progress: Progress, seek: bool
         Path(tmp).unlink(missing_ok=True)
 
 
+class _NoSeekAlignment(Exception):
+    """An inconclusive probe, which the success cache must not retain."""
+
+
 def _seek_shift(path: Path, cancel_event: threading.Event | None, *, bounded: bool = False) -> int | None:
     try:
         st = path.stat()
     except OSError:
         return 0
-    return _measured_shift(str(path), st.st_size, st.st_mtime_ns, cancel_event, bounded)
+    try:
+        return _measured_shift(str(path), st.st_size, st.st_mtime_ns, cancel_event, bounded)
+    except _NoSeekAlignment:
+        return None
 
 
 @lru_cache(maxsize=32)
-def _measured_shift(
-    path: str, size: int, mtime_ns: int, cancel_event: threading.Event | None, bounded: bool
-) -> int | None:
+def _measured_shift(path: str, size: int, mtime_ns: int, cancel_event: threading.Event | None, bounded: bool) -> int:
     """Frames to trim later after a seek into this file, measured once. Matroska keeps timestamps in whole
     milliseconds, so ffmpeg can place the audio a little off after a seek (YouTube's WebM Opus, whose frames
     start at x.5 ms: 1 ms early). The same passage is decoded from the start and by a seek and lined up.
-    None when the file ends first or is silent at every place tried. Compare and previews only try early positions. 0 when a passage
-    with sound lines up with no whole-frame shift (a fractional one stays: under a millisecond)."""
+    Compare and previews only try early positions. Cache a measured shift, including zero, so a later
+    request can retry an inconclusive probe without decoding an arbitrarily long prefix."""
     n, stop = 10 * PCM_GRID, Progress.null(cancel_event)
     for at in (25, 250, PCM_ALIGNMENT_LIMIT // PCM_GRID):  # at 1 s, 10 s and 25 s
         at *= PCM_GRID
         via = np.frombuffer(_decode(Path(path), at, n, stop, seek=True), np.float32)
         if len(via) < 2 * n:
-            return None  # the file ends before this passage
+            raise _NoSeekAlignment  # the file ends before this passage
         if np.abs(via).max() < 1e-3:
             continue  # silence lines up with any shift
         ref = np.frombuffer(_decode(Path(path), at - PCM_GRID, n + 2 * PCM_GRID, stop), np.float32)
@@ -590,7 +595,7 @@ def _measured_shift(
                     return -lag
         if not bounded:
             return 0  # full comparison retains its existing fallback for fractional shifts
-    return None
+    raise _NoSeekAlignment
 
 
 def render_spectrogram(src: Path, dst_png: Path, progress: Progress | None = None) -> Path:

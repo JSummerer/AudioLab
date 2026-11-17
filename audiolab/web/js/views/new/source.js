@@ -71,14 +71,23 @@ export function loadUrl(text) {
 export function offerLink(text) {
   const value = String(text || '').trim();
   if (refs.input) refs.input.value = value;
-  editLink(value, true);
+  setPendingLink(value, true);
+}
+
+function currentLinkText() {
+  const src = state.source;
+  return (src?.url || src?.job?.source?.url || src?.text || '').trim();
 }
 
 /** Typing changes the pending source immediately, without moving the caret or issuing a lookup. */
-export function editLink(text, external = state.source?.external === true) {
+export function editLink(text) {
+  const value = text.trim();
+  if (value !== currentLinkText()) setPendingLink(value, state.source?.external === true);
+}
+
+function setPendingLink(value, external) {
   probeCtl?.abort();
   probeCtl = null;
-  const value = text.trim();
   state.source = value ? { kind: 'offered', url: value, external } : null;
   redraw();
 }
@@ -86,6 +95,7 @@ export function editLink(text, external = state.source?.external === true) {
 /** A paste into the link field: looked up at once, except while a link from another page waits
  *  there — then Load stays the only thing that starts a lookup. */
 export function pasteLink(text) {
+  if (text.trim() === currentLinkText()) return;
   if (state.source?.external) offerLink(text);
   else loadUrl(text);
 }

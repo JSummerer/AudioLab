@@ -103,6 +103,23 @@ test('a drag creates one undo step and invalid numeric or text drafts remain rev
   assert.deepEqual(editor.read().bands, saved);
 });
 
+test('Adjust limits raw EQ text, preset additions and invalid numeric rows to what a draft can save', (t) => {
+  setup(t);
+  const editor = graphicalEqField({ bands: saved, savedBands: saved });
+  const gain = named(editor, 'Band 1 Gain (dB)');
+  enter(gain, '9'.repeat(129));
+  assert.equal(gain.value, '9'.repeat(128));
+  assert.equal(editor.snapshot().numbers[0].db, gain.value);
+  enter(gain, '1');
+  const raw = named(editor, 'Custom EQ as text');
+  assert.equal(raw.attrs.get('maxlength'), '4096');
+  const full = '#' + 'x'.repeat(4095);
+  enter(raw, full);
+  click(editor, 'Sub focus');
+  assert.equal(editor.snapshot().text, full, 'a preset cannot overflow the draft or overwrite existing text');
+  assert.ok(find(editor.el, (node) => node.textContent.includes('Shorten the EQ text')));
+});
+
 test('a cut-only curve summarizes its flat skirt as 0.0 dB, not −0.0', (t) => {
   setup(t);
   const editor = graphicalEqField({ bands: [{ hz: 160, db: -3.31, q: 2.865 }] });
@@ -160,6 +177,8 @@ test('re-entering Adjust follows another window’s saved or discarded revision 
   const reopen = async () => { adjustView.hide(); await adjustView.show(id); };
   const next = () => new Promise((resolve) => setImmediate(resolve));
   await adjustView.show(id);
+  assert.equal(number().attrs.get('maxlength'), '128');
+  assert.equal(find(root, (n) => n.attrs.get('spellcheck') === 'false').attrs.get('maxlength'), '128');
   enter(number(), '-12');
   adjustView.hide(); // normal navigation flushes the first window's edit
   await next();

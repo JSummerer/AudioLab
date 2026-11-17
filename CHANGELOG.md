@@ -6,7 +6,8 @@
   and available saved versions of the same recording.
 
 - Adjust saves unfinished edits with their Library version, including incomplete EQ and section inputs.
-  Reopening the version restores its draft. Discard draft returns to the saved settings.
+  Reopening the version restores its draft. The editor enforces the length limits on saved inputs.
+  Discard draft returns to the saved settings.
 - Enhance offers **Balance parts separately** for music and DJ sets, **Isolate voice** for speech, and
   **AI when supported** for Auto. Concerts have no AI option. Adjust works with saved versions that
   used the non-AI chain, including those that fell back from a requested AI option.
@@ -16,14 +17,14 @@
   affected track in the warning.
 
 - Settings groups controls under General, Output defaults, Downloads, AI add-on, Storage and Help.
-  Help keeps maintenance and diagnostics in a disclosure. Existing Settings links still work.
+  Help keeps maintenance and diagnostics in a disclosure. Details on a missing audio engine opens its diagnostic.
 - New uses the formats in Settings on a fresh load and keeps your choices between jobs. Enhance starts
   with MP3 alone on new installs. Split shows the full format names.
-- Editing a link in New waits for Load. Editing a local file’s name preserves untouched embedded tags.
+- Changing a link in New waits for Load. Extra spaces around the same link keep it loaded. Editing a local file’s name preserves untouched embedded tags.
   Submission errors stay beside Start until you retry or change the source.
 - Enhance and Check describe their adjustments and measurements. Brighten muffled highs is an on/off
   switch, and the Library explains how the kept original is used for comparison and Adjust.
-- Compare reports when it cannot align a late WebM passage. Seeking no longer decodes an entire long introduction to find that point.
+- Compare reports when it cannot align a late WebM passage. A later request retries the bounded alignment check.
 
 - Saving a track uses the playlist you submitted, even if you looked up the same track in another playlist.
 

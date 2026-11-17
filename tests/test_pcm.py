@@ -94,3 +94,6 @@ def test_unaligned_late_seek_never_decodes_a_long_prefix(tmp_path, monkeypatch):
     with pytest.raises(AudioLabError, match='line up'):
         ffmpeg.decode_pcm(src, 3600 * ffmpeg.PCM_RATE, ffmpeg.PCM_GRID)
     assert max(offsets) <= 25 * ffmpeg.PCM_RATE
+    offsets.clear()
+    assert ffmpeg._seek_shift(src, None) is None
+    assert offsets == [s * ffmpeg.PCM_RATE for s in (1, 10, 25)]

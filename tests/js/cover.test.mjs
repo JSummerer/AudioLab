@@ -292,9 +292,16 @@ test('typing replaces the pending or loaded source and requires Load; ordinary p
   assert.equal(s.state.source.kind, 'offered');
   assert.match(s.run('blockedReason()'), /Press Load/);
   s.run('pasteLink("https://example.com/third")');
+  const probing = s.state.source;
+  s.run('editLink("  https://example.com/third ")');
+  assert.equal(s.state.source, probing);
   finish({ title: 'Third' });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(s.state.source.kind, 'url');
+  const loaded = s.state.source;
+  s.run('pasteLink("https://example.com/third ")');
+  s.run('editLink(" https://example.com/third")');
+  assert.equal(s.state.source, loaded);
   s.run('editLink("https://example.com/fourth")');
   assert.equal(s.state.source.url, 'https://example.com/fourth');
   assert.match(s.run('blockedReason()'), /Press Load/);

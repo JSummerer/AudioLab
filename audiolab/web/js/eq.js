@@ -162,10 +162,10 @@ let uid = 0;
  * `onInput({ text, bands, errors })` runs after every edit (typing or a preset).
  * Returns { el, textarea, read() → parseEq result, set(text, { notify }) }.
  */
-export function eqField({ id, text = '', label = 'Custom EQ', onInput }) {
+export function eqField({ id, text = '', label = 'Custom EQ', onInput, maxLength }) {
   const base = id || `eq-${++uid}`;
   const ta = h('textarea', {
-    id: base, class: 'field eq-text', rows: 3, spellcheck: 'false', autocomplete: 'off',
+    id: base, class: 'field eq-text', rows: 3, maxlength: maxLength, spellcheck: 'false', autocomplete: 'off',
     placeholder: EXAMPLE, 'aria-label': label, 'aria-describedby': `${base}-note ${base}-errors`,
   });
   ta.value = text;
@@ -197,7 +197,14 @@ export function eqField({ id, text = '', label = 'Custom EQ', onInput }) {
   function addPreset(p) {
     const have = new Set(parseEq(ta.value).bands.map((b) => bandText(b)));
     const lines = p.bands.map((b) => bandText(b)).filter((line) => !have.has(line));
-    if (lines.length) ta.value = [ta.value.replace(/\s+$/, ''), ...lines].filter(Boolean).join('\n');
+    if (lines.length) {
+      const next = [ta.value.replace(/\s+$/, ''), ...lines].filter(Boolean).join('\n');
+      if (maxLength != null && next.length > maxLength) {
+        note.textContent = `Shorten the EQ text before adding this preset (limit ${maxLength} characters).`;
+        return;
+      }
+      ta.value = next;
+    }
     const result = update();
     if (!result.errors.length) note.textContent = lines.length ? `${p.label}: ${p.desc}` : `${p.label} is already in the list.`;
   }

@@ -1,6 +1,10 @@
 // The persistent draft contains editor inputs only. Saved settings always come from the Library.
 import { canonicalEq } from './eq.js';
 
+// Keep editor input within the Adjust draft document limits (adjust_drafts.py).
+export const DRAFT_FIELD_LIMIT = 128;
+export const DRAFT_EQ_TEXT_LIMIT = 4096;
+
 export function snapshotDraft(draft, graphs) {
   const savedGraphs = {};
   for (const id of ['global', ...draft.sections.map((part) => part.id)]) {

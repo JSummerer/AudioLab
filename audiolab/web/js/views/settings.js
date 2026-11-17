@@ -18,7 +18,7 @@ const SECTIONS = [
   ['ai-addon', 'AI add-on'], ['storage', 'Storage'], ['help', 'Help'],
 ];
 // Spots inside a section → the section holding them.
-const SPOTS = { ai: 'ai-addon', updates: 'help', downloader: 'help', diagnostics: 'help', cookies: 'downloads', output: 'defaults' };
+const SPOTS = { ai: 'ai-addon', updates: 'help', downloader: 'help', diagnostics: 'help', ffmpeg: 'help', cookies: 'downloads', output: 'defaults' };
 const OLD_SECTIONS = { files: 'output', look: 'general', system: 'updates', about: 'diagnostics' };
 const STALE_DOWNLOADER_DAYS = 60;
 const SIGN_IN_BROWSERS = [
@@ -492,8 +492,9 @@ function renderHelp() {
     h('summary', { id: 'maintenanceSummary' }, 'Maintenance and diagnostics'),
     h('div', { class: 'set-rows' },
       downloaderRows(),
-      !ff.ok && ff.error ? callout('danger', 'Audio engine missing', ff.error) : null,
-      statusRow(ff.ok ? 'ok' : 'bad', 'Audio engine (ffmpeg)', ff.ok ? `Version ${ff.version || '?'} · ${ff.source === 'bundled' ? 'built in' : 'installed on this computer'}` : (ff.error || 'Not found')),
+      h('div', { id: 'ffmpegSpot', class: 'set-rows', tabindex: '-1', dataset: { spot: 'ffmpeg' } },
+        !ff.ok && ff.error ? callout('danger', 'Audio engine missing', ff.error) : null,
+        statusRow(ff.ok ? 'ok' : 'bad', 'Audio engine (ffmpeg)', ff.ok ? `Version ${ff.version || '?'} · ${ff.source === 'bundled' ? 'built in' : 'installed on this computer'}` : (ff.error || 'Not found'))),
       row('Keep work files', 'For troubleshooting only: keeps the big in-between files (decoded audio, raw stems) after a job finishes. Uses a lot of disk.',
         switchControl({ id: 'keepWorkFiles', checked: s.keep_work_files, label: 'Keep work files', onChange: (v) => save({ keep_work_files: v }) }), { setting: 'keep_work_files' }),
       diagnosticRows()));

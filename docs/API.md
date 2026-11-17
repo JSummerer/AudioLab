@@ -331,7 +331,8 @@ In the native app window, the confirmed system dialog returns selection IDs. The
 `X-AudioLab-Desktop` header for the current window. IDs are scoped to the operation and held in
 memory; invalid window context returns `403`, a missing selection `410`, and an unavailable
 chosen file or folder `400`. The New job reads its chosen file in place and retains a private
-reference for Retry. Existing upload, typed import and settings fields still work in browser mode.
+reference for Retry. When a finished render’s source has changed, the job keeps its output files
+and reports the Library publication failure in its warnings. Existing upload, typed import and settings fields still work in browser mode.
 
 Settings updates publish active values only after the file is saved successfully. A failed write returns
 `500` and keeps the previous active values. Each update merges with the latest saved preferences.
@@ -367,7 +368,7 @@ automatically replacing the saved file.
 | `GET /api/library/{id}/overview` | – | retained original sample-peak overview `{basis: "original_sample_peak", duration_s, bin_duration_s, peaks}` with at most 512 contiguous bins, maximum absolute sample across both channels; `404` without a saved overview/entry, `410` without the kept original. Library `has_overview` advertises availability; opening Adjust does not rescan old originals |
 | `GET /api/library/{id}/pcm/{file_id}` | `?offset=<frame>&frames=<n>` | PCM chunk (below) of one file of the entry (`original` or a result). `404` unknown entry/file, `410` moved or deleted, `400` off the grid |
 | `GET /api/library/{id}/files/{file_id}` | `?download=1` optional | one file of a Library entry (`file_id` from its `files`, incl. `original`): inline with Range support for the players, or as an attachment with `download=1`. `404` unknown entry/file, `410` moved or deleted |
-| `POST /api/library/{id}/files/{file_id}/locate` | `{"native_file": "…"}` (from the Locate picker) | Updated Library entry. Desktop context required (`403` otherwise). `404` if the entry or file is gone from the Library, `410` for an expired selection, `400` when the recorded path is occupied, the file has no stored identity, or the selected file does not match |
+| `POST /api/library/{id}/files/{file_id}/locate` | `{"native_file": "…"}` (from the Locate picker) | Updated Library entry. Desktop context required (`403` otherwise). `404` if the entry or file is gone from the Library, `410` for an expired selection, `400` when a different file occupies the recorded path, or the selected file cannot be verified |
 | `POST /api/library/{id}/files/{file_id}/reveal` | – | Opens the current parent of an existing Library file. `403` when not local, `404` unknown entry or file, `410` when the file is unavailable |
 | `POST /api/library/{id}/reveal` | – | opens the entry's folder (the current parent when all available files share one relocated folder) (only when `health.local`): `{"ok": true}`, or `{"ok": true, "fallback": "output"}` when that folder is gone and the output root was opened instead (say so). Neither there → `400` "This folder isn't there any more: <path>." with hints. Never creates a folder. `404` unknown |
 | `DELETE /api/library/{id}` | `?trash_files=1` optional | `{"deleted": id, "original_removed": bool, "freed_bytes": b, "trashed": [names], "trash_failed": [names]}` — forgets the entry; its kept original is deleted with it unless another entry still uses that file. Output files stay unless the user opts in with `trash_files=1`: then the entry's files that still exist (results, tracks, saved cover, an imported file; an AudioLab output folder left empty — never an imported file's folder) go to the system Trash — never a permanent delete. `trashed`/`trash_failed` name the files (a file that can't go to the Trash stays where it is; a file another entry still uses stays and is in neither list). If the Trash is unavailable on this system: `409` with a plain message and hints, nothing removed. `404` unknown |
@@ -600,7 +601,9 @@ file name (or the request's `title`).
 They can be played, compared with other versions of their group and removed like any entry.
 For Library result files, `locatable` reflects whether the record has a saved file identity.
 The desktop can relink a missing file after a same-drive move or rename, including imported files recorded
-with an identity. A located file has `located: true`. An external relocation sets `can_trash: false`, and Remove and Keep only leave that file
+with an identity. A new selection can confirm an edit in place to a located or natively imported
+file at its recorded path if its device and inode still match. Historical job measurements stay as recorded.
+A located file has `located: true`. An external relocation sets `can_trash: false`, and Remove and Keep only leave that file
 in place. The file's original job record is unaffected.
 New Enhance entries retain `processing: {requested, resolved, applied, metrics}` after job removal.
 `requested` holds validated recipe, quality, formats, advanced settings and cover/split switches;

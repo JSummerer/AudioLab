@@ -272,7 +272,7 @@ def describe_source(analysis: dict[str, Any], acq: Acquired) -> dict[str, Any]:
     return analysis
 
 
-def cover_art(ctx: TaskContext, acq: Acquired) -> Path | None:
+def cover_art(ctx: TaskContext, acq: Acquired, source: dict[str, Any]) -> Path | None:
     """The picture to embed, always a JPEG ≤ export.COVER_MAX_PX: the user's own (always used),
     else — with `embed_cover` on — the link's thumbnail or the cover an uploaded file carries
     (Enhance exports from a decoded master, which has none of its own)."""
@@ -284,13 +284,18 @@ def cover_art(ctx: TaskContext, acq: Acquired) -> Path | None:
         return youtube.download_thumbnail(acq.thumbnail, scratch_dir(ctx) / 'cover.jpg', progress=ctx.progress)
     if acq.metadata.get('has_cover'):
         try:
-            return export.cover_jpeg(acq.path, scratch_dir(ctx) / 'cover.jpg')
+            if '_native_identity' in source:
+                source_path(source)
+            cover = export.cover_jpeg(acq.path, scratch_dir(ctx) / 'cover.jpg')
+            if '_native_identity' in source:
+                source_path(source)
+            return cover
         except AudioLabError as e:  # a broken picture must not cost the audio
             ctx.note('warning', f'Could not take over the cover image: {e}')
     return None
 
 
-def cover_source(source: dict[str, Any]) -> str | None:
+def cover_source(source: dict[str, Any], acq: Acquired | None = None) -> str | None:
     """Where the job's cover comes from (the rule of `cover_art`): 'own' (the user's image), 'link'
     (the link's thumbnail) or 'file' (the picture an uploaded file carries); None when it has none."""
     if _own_cover(source):
@@ -298,6 +303,8 @@ def cover_source(source: dict[str, Any]) -> str | None:
     if _thumbnail(source):
         return 'link'
     if source.get('kind') == 'file':
+        if acq is not None:  # describing a finished render: use the file facts read at acquisition
+            return 'file' if acq.metadata.get('has_cover') else None
         path = source_path(source)
         if path.is_file():
             info = ffmpeg.probe_media(path)
@@ -345,6 +352,7 @@ def save_cover(
             )
             if export.picture_size(pic) is None:
                 pic = export.cover_jpeg(source_path(source), Path(tmp) / 'embedded.jpg', max_px=None)
+            source_path(source)  # refuse an embedded cover if the picked file changed during extraction
         progress.check_cancel()
         path = export.save_picture(pic, folder, stem)
     entry = file_entries(

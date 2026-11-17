@@ -84,8 +84,10 @@ the same secret. Only desktop-server pages disallow embedding and child frames. 
 immediate supported files by name, up to the same 50-file limit as the New list.
 
 Native New and Library import sources retain a private canonical path and a filesystem fingerprint
-(device, inode, size and nanosecond modification time). The job checks that fingerprint before and after
-processing and during Library publication. Older two-field references require a fresh selection.
+(device, inode, size and nanosecond modification time). The job checks that fingerprint before processing and during
+Library publication. Imports also recheck it after the task because the file itself is the result.
+A completed render stands on its own. If Library publication detects a changed source, the job
+finishes with its output files and a warning that the Library entry could not be added.
 Enhance copies its native original and verifies the staged bytes against the source hash before publishing.
 Library import checks the original file before playback or opt-in Trash. Settings folder selections
 use device and inode so ordinary changes inside the folder don't invalidate the selection.
@@ -96,8 +98,10 @@ and multi-file selections skip that lookup.
 
 Locate records a result file's device, inode, size and nanosecond modification time during Library
 publication. Under the Library lock, it checks that the former path is unoccupied and the picked file
-matches that saved identity, then atomically changes the Library reference. Device and inode are
-filesystem-specific, so copied, cross-volume and edited files may need to be added again. This check
+matches that saved identity, then atomically changes the Library reference. A fresh selection at
+the saved path can confirm an in-place edit to a previously located or natively imported file when
+its device and inode still match. This preserves the existing Trash policy. Files copied to
+another volume need to be added again. This check
 uses filesystem metadata rather than reading or hashing the selected audio. Entries without a saved
 identity cannot be verified because the grouping key can come from a different file. Located files
 outside their recorded output root are omitted from Trash actions, and Library reads check that the

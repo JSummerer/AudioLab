@@ -591,7 +591,7 @@ function fileRow(c, entry, f) {
     const canLocate = store.health?.local && nativeWindow();
     actions = [
       h('span', { class: 'lib-missing', title: canLocate && f.locatable === false ? 'This entry has no saved file identity.' : null },
-        icon('alert', 14), canLocate && f.locatable === false ? 'Moved or deleted. Add it again.' : 'Moved or deleted'),
+        icon('alert', 14), canLocate && f.locatable === false ? 'Moved or deleted. Add it again.' : 'Moved, changed or deleted'),
       canLocate && f.locatable ? h('button', {
         type: 'button', class: 'btn btn-ghost btn-sm', 'aria-label': `Locate ${f.name}`,
         onclick: (e) => locateFile(entry, f, e.currentTarget),
@@ -978,10 +978,12 @@ function trashSwitch(label, help) {
 }
 
 /** What the Trash did, as a toast line; files it couldn't move get their own warning. */
-function trashResult(res, done) {
+function trashResult(res, done, entries) {
   const moved = res?.trashed?.length || 0;
   const failed = res?.trash_failed || [];
-  toast(`${done}${moved ? ` ${moved} file${moved === 1 ? '' : 's'} moved to the Trash.` : ''}`, { kind: 'ok' });
+  const keptOutside = entries.some((entry) => entry.files?.some((f) => f.exists && f.can_trash === false));
+  const keptNote = keptOutside ? ' Files located outside the output folder stayed in place.' : '';
+  toast(`${done}${moved ? ` ${moved} file${moved === 1 ? '' : 's'} moved to the Trash.` : ''}${keptNote}`, { kind: 'ok' });
   if (failed.length) {
     const names = failed.slice(0, 3).join(', ') + (failed.length > 3 ? ` and ${failed.length - 3} more` : '');
     toast(`Couldn’t move ${failed.length === 1 ? 'this file' : `${failed.length} files`} to the Trash, so ${failed.length === 1 ? 'it stays' : 'they stay'} where ${failed.length === 1 ? 'it is' : 'they are'}: ${names}.`,
@@ -1010,7 +1012,7 @@ async function removeEntry(entry) {
   const toTrash = !!trash?.on();
   try {
     const res = await api(`${libPath(entry.id)}${toTrash ? '?trash_files=1' : ''}`, { method: 'DELETE' });
-    trashResult(res, toTrash ? 'Removed from the Library.' : 'Removed from the Library. Your files stay where they are.');
+    trashResult(res, toTrash ? 'Removed from the Library.' : 'Removed from the Library. Your files stay where they are.', toTrash ? [entry] : []);
   } catch (e) {
     toastError(e); // 409: the Trash isn't available here, nothing was removed
   }
@@ -1036,7 +1038,7 @@ async function keepOnly(entry) {
   try {
     const res = await api(libPath(entry.id, 'keep-only'), { method: 'POST', json: { trash_files: !!trash?.on() } });
     const removed = res?.removed ?? n;
-    trashResult(res, `Kept this version. ${removed} other${removed === 1 ? '' : 's'} removed from the Library.`);
+    trashResult(res, `Kept this version. ${removed} other${removed === 1 ? '' : 's'} removed from the Library.`, others);
   } catch (e) {
     toastError(e);
   }

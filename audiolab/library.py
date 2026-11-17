@@ -427,7 +427,7 @@ def _stored_identity(item: dict[str, Any]) -> list[int] | None:
 
 
 def locate_file(entry_id: str, file_id: str, candidate: Path) -> dict[str, Any] | None:
-    """Relink one missing Library file by the identity captured when it was first recorded."""
+    """Relink a moved file or confirm an in-place edit to a previously selected file."""
     with _lock:
         entry = get(entry_id)
         if entry is None:
@@ -442,7 +442,15 @@ def locate_file(entry_id: str, file_id: str, candidate: Path) -> dict[str, Any] 
                 hints=['Add the file to the Library again.'],
             )
         previous = _resolve(entry, item.get('path'))
-        if previous is None or os.path.lexists(previous):
+        selected = _file_identity(candidate)
+        reconfirm = (
+            candidate == previous
+            and (item.get('_located') or item.get('_native_import'))
+            and selected is not None
+            and selected[:2] == identity[:2]  # same device and inode; the user picked the edited file again
+            and selected != identity
+        )
+        if previous is None or (not reconfirm and os.path.lexists(previous)):
             raise AudioLabError(
                 'There is already a file or folder at the saved location.', hints=['Refresh the Library.']
             )
@@ -450,21 +458,24 @@ def locate_file(entry_id: str, file_id: str, candidate: Path) -> dict[str, Any] 
             candidate.suffix.lower() != previous.suffix.lower()
             or not _no_link(candidate)
             or _inside(_real(candidate), _real(SETTINGS.data_dir), strict=False)
-            or _file_identity(candidate) != identity
+            or (not reconfirm and selected != identity)
         ):
             raise AudioLabError(
                 'That isn’t the same file AudioLab saved here.',
                 hints=['Choose the original file, moved or renamed on the same drive.'],
             )
-        root = Path(entry['root'])
-        item.update(
-            path=_relative(str(candidate), root),
-            name=candidate.name,
-            _located=True,
-            _keep_in_place=not _plain_inside(candidate, root),
-        )
-        if _file_identity(candidate) != identity or os.path.lexists(previous):
+        if _file_identity(candidate) != selected or (not reconfirm and os.path.lexists(previous)):
             raise AudioLabError('The file changed while it was being located.', hints=['Choose it again.'])
+        if reconfirm:
+            item.update(_identity=selected, size_bytes=selected[2])
+        else:
+            root = Path(entry['root'])
+            item.update(
+                path=_relative(str(candidate), root),
+                name=candidate.name,
+                _located=True,
+                _keep_in_place=not _plain_inside(candidate, root),
+            )
         _write(entry)
         return entry
 

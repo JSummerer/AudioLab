@@ -22,6 +22,11 @@ FORMATS = tuple(export.DOWNLOAD_FORMATS)  # mp3, m4a, opus, flac, wav, original,
 _TRACK_FORMAT_FOR_CODEC = {'opus': 'opus_160', 'vorbis': 'opus_160', 'aac': 'aac_256'}
 
 
+def _check_source_format(source: dict[str, Any], fmt: str) -> None:
+    if source.get('kind') != 'url' and fmt in ('original', 'video'):
+        raise AudioLabError('For files, pick a format to convert to (MP3, M4A, FLAC, WAV or Opus).')
+
+
 def validate(options: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
     default = SETTINGS.get().download_format
     if source.get('kind') == 'file' and default in ('original', 'video'):
@@ -29,8 +34,7 @@ def validate(options: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
     fmt = str(options.get('format') or default).lower()
     if fmt not in FORMATS:
         raise AudioLabError(f'Unknown format "{fmt}".')
-    if source.get('kind') == 'file' and fmt in ('original', 'video'):
-        raise AudioLabError('For files, pick a format to convert to (MP3, M4A, FLAC, WAV or Opus).')
+    _check_source_format(source, fmt)
     tracklist = common.clean_tracklist(options.get('tracklist'), source)
     return {
         'format': fmt,
@@ -49,6 +53,7 @@ def stages(options: dict[str, Any], source: dict[str, Any]):
 
 def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
     fmt = ctx.options['format']
+    _check_source_format(source, fmt)  # only a download can move its scratch file into the output folder
     video = fmt == 'video'
     acq = common.acquire(ctx, source, ctx.stage('acquire'), task='download', video=video)
     out_root = common.output_root(acq)
@@ -56,7 +61,7 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
     split = ctx.options.get('split_tracks')
     untouched = fmt in ('original', 'video')
     # None: no picture at all — "Add cover art" off also keeps a converted file's own picture out
-    cover = common.cover_art(ctx, acq) if split or not untouched else None
+    cover = common.cover_art(ctx, acq, source) if split or not untouched else None
 
     p = ctx.stage('convert')
     src = acq.path
@@ -107,7 +112,7 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
             'headline': headline,
             'output_dir': str(Path(f['path']).parent),
             'files': files,
-            'cover_source': common.cover_source(source),
+            'cover_source': common.cover_source(source, acq),
             'previews': [{'key': 'file:f0', 'label': 'Play'}] if f['playable'] else [],
             'summary': summary,
             'warnings': [],

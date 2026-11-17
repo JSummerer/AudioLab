@@ -58,6 +58,7 @@ def run_job(job, ctx) -> dict[str, Any]:
     if native:
         source_path(job.source)
     result = get(job.task).run(ctx, job.source)
-    if native:
+    if native and job.task == 'import':
+        # The selected file itself is the import result. Rendered files stand on their own.
         source_path(job.source)
     return result

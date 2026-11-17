@@ -5,18 +5,22 @@ import os
 import shutil
 import struct
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import numpy as np
 import pytest
+import soundfile as sf
 from fastapi.testclient import TestClient
 
 from audiolab import library, system, tasks
 from audiolab.api import create_app
 from audiolab.errors import AudioLabError
 from audiolab.jobs import JobManager
-from audiolab.media import ffmpeg
+from audiolab.media import export, ffmpeg, proc
 from audiolab.native_inputs import MAX_FILES, NativeInputs, source_path
+from audiolab.tasks import common, download
 
 ORIGIN = 'http://127.0.0.1:19999'
 
@@ -207,6 +211,50 @@ def test_kept_original_of_native_job_is_an_independent_copy(native, tmp_path):
     assert kept.read_bytes() == b'original audio'
 
 
+def test_finished_render_survives_replacement_of_picked_source(native, tmp_path, monkeypatch):
+    picked = tmp_path / 'Source.wav'
+    samples = 0.2 * np.sin(2 * np.pi * 440 * np.arange(48000) / 48000)
+    sf.write(picked, samples, 48000)
+    selection = pick(native, 'files', picked)['files'][0]['selection']
+    source = native.get(selection, 'job').source()
+    options = tasks.validate('enhance', {'quality': 'light', 'formats': ['wav16']}, source)
+    save = export.export
+
+    def replace_source_after_export(*args, **kwargs):
+        outputs = save(*args, **kwargs)
+        picked.rename(tmp_path / 'Moved.wav')
+        picked.write_bytes(b'unrelated audio')
+        return outputs
+
+    monkeypatch.setattr(export, 'export', replace_source_after_export)
+    monkeypatch.setattr(proc, '_POLL_S', 0.01)
+    mgr = JobManager(runner=tasks.run_job, stages_for=tasks.stages_for, workers=1)
+    finished = Event()
+    mgr.on_finished = lambda _job: finished.set()
+    mgr.start()
+    try:
+        job = mgr.submit('enhance', source, options)
+        assert finished.wait(30)
+        saved = json.loads((mgr.job_dir(job.id) / 'job.json').read_text())
+        assert saved['status'] == 'done', saved.get('error')
+        output = Path(saved['result']['files'][0]['path'])
+        assert sf.info(output).frames == len(samples)
+        assert any('Not added to the Library' in note for note in saved['result']['warnings'])
+        assert library.get(job.id) is None and not list(library.originals_dir().iterdir())
+    finally:
+        mgr.shutdown()
+
+
+@pytest.mark.parametrize('fmt', ['original', 'video'])
+def test_download_run_refuses_to_move_a_local_source(tmp_path, fmt, monkeypatch):
+    path = tmp_path / 'Source.wav'
+    path.write_bytes(b'original audio')
+    monkeypatch.setattr(common, 'acquire', lambda *a, **kw: common.Acquired(path, 'Source'))
+    with pytest.raises(AudioLabError, match='pick a format to convert to'):
+        download.run(Mock(options={'format': fmt}), {'kind': 'file', 'path': str(path)})
+    assert path.read_bytes() == b'original audio'
+
+
 def finished_file(path, task='download'):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b'original audio')
@@ -271,9 +319,17 @@ def test_locate_updates_library_only_and_protects_result_outside_output_root(nat
         assert job.result['files'][0]['path'] == str(old)
         assert client.post(endpoint, json=body, headers=headers).status_code == 400
 
+        rewrite_in_place(new, b'audio with edited tags')
+        assert client.get(media_url).status_code == 410
+        key = pick(native, 'locate', new)['files'][0]['selection']
+        refreshed = client.post(endpoint, json={'native_file': key}, headers=headers)
+        assert refreshed.status_code == 200
+        assert refreshed.json()['files'][0]['can_trash'] is False
+        assert client.get(media_url).content == b'audio with edited tags'
+
         removed = client.delete(entry_url, params={'trash_files': True}).json()
         assert removed['trashed'] == [] and new.is_file() and trashed == []
-        assert client.post(endpoint, json=body, headers=headers).status_code == 404
+        assert client.post(endpoint, json={'native_file': key}, headers=headers).status_code == 404
     finally:
         client.close()
 
@@ -295,6 +351,8 @@ def test_located_file_inside_root_can_be_trashed_but_replacement_cannot(tmp_path
 
     entry = library.get(first_job.id)
     assert not library.public(entry)['files'][0]['exists']
+    with pytest.raises(AudioLabError):
+        library.locate_file(first_job.id, 'f0', first_moved)
     assert library.remove(first_job.id, trash_files=True)['trash_failed'] == [first_moved.name]
     assert library.remove(second_job.id, trash_files=True)['trashed'] == [second_moved.name]
     assert trashed == [second_moved]
@@ -388,9 +446,18 @@ def test_native_import_through_jobs_and_library_refuses_a_later_replacement(nati
             client.post('/api/jobs', data={'task': 'analyze', 'source_job': job.id, 'source_file': 'f0'}).status_code
             == 410
         )
+        # A fresh choice explicitly confirms the current file for the Library. The job keeps its old identity.
+        key = pick(native, 'locate', audio)['files'][0]['selection']
+        refreshed = client.post(
+            f'/api/library/{job.id}/files/f0/locate', json={'native_file': key}, headers=desktop_headers(native)
+        )
+        assert refreshed.status_code == 200
+        assert client.get(f'/api/library/{job.id}/files/f0').content == b'other recording'
+        assert client.get(f'/api/jobs/{job.id}/files/f0').status_code == 410
+        rewrite_in_place(audio, b'another unconfirmed edit')
         assert library.remove(job.id, trash_files=True)['trashed'] == []
         library.trash.move_to_trash.assert_not_called()
-        assert audio.read_bytes() == b'other recording'
+        assert audio.read_bytes() == b'another unconfirmed edit'
     finally:
         client.close()
 
@@ -439,14 +506,6 @@ def test_native_kept_original_validates_source_staging_and_existing_copy(native,
     with pytest.raises(AudioLabError, match='could not verify'):
         library.record(replacement)
     assert library.get(replacement.id) is None
-
-
-def test_older_two_field_native_fingerprint_requires_a_new_selection(tmp_path):
-    path = tmp_path / 'Old.wav'
-    path.write_bytes(b'original')
-    st = path.stat()
-    with pytest.raises(AudioLabError, match='verified again'):
-        source_path({'path': str(path), '_native_identity': [st.st_dev, st.st_ino]})
 
 
 def test_duration_reads_one_explicitly_selected_file_with_a_bounded_header_probe(native, tmp_path, monkeypatch):

@@ -32,7 +32,7 @@ def _identity(path: Path, folder: bool) -> tuple[tuple[int, ...], int]:
 
 def checked_path(path: Path, identity: tuple | list, *, folder: bool = False) -> Path:
     current, _ = _identity(path, folder)
-    if current != tuple(identity):
+    if not isinstance(identity, (tuple, list)) or current != tuple(identity):
         raise AudioLabError('The selected file or folder changed or was replaced.', hints=['Choose it again.'])
     return path
 
@@ -40,10 +40,7 @@ def checked_path(path: Path, identity: tuple | list, *, folder: bool = False) ->
 def source_path(source: dict) -> Path:
     path = Path(source.get('path') or '')
     if '_native_identity' in source:
-        identity = source['_native_identity']
-        if not isinstance(identity, (tuple, list)) or len(identity) != 4:
-            raise AudioLabError('This older selection needs to be verified again.', hints=['Choose the file again.'])
-        checked_path(path, identity)
+        checked_path(path, source['_native_identity'])
     return path
 
 

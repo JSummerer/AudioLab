@@ -196,7 +196,7 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
         'headline': f'Split into {stems_saved} stems',
         'output_dir': str(folder),
         'files': files,
-        'cover_source': common.cover_source(source),
+        'cover_source': common.cover_source(source, acq),
         'previews': previews,
         'summary': summary,
         'warnings': warnings,

@@ -43,7 +43,8 @@ Use only material you have permission to process.
 In the app window, **Choose files** reads the selected audio and video files where they are. You can
 select several at once. **Choose folder** adds up to 50 supported files directly in the chosen folder,
 in name order. Each starts its own job. Keep the selected file unchanged and at its current path until
-the job finishes. Choose it again if you move or edit it. For a single file, AudioLab shows Tracks
+the job finishes. If it changes after the audio is rendered, the finished files stay available on
+the job page. A warning explains when the Library could not keep the result and its original. For a single file, AudioLab shows Tracks
 for long recordings when it can read the duration. Enhance can save a separate original copy for comparisons.
 File drops and the browser's file chooser upload the files and use the server's upload limit.
 Settings → Output defaults and Library → Add a file use the system picker in the app window. Local browser
@@ -76,6 +77,8 @@ Kept originals use disk space separately from your output folder; manage them in
 
 For missing Library files recorded since this feature was added, **Locate…** lets you choose the same
 file after moving or renaming it on the same drive. Choose the file with its original extension.
+If you edit a located or natively imported file in place, use **Locate…** and select it again to
+confirm the change. Its saved measurements still describe the original run.
 For older entries, or files copied to another drive, use **Add a file…** to add them again.
 Locate updates playback and comparison in the Library. Use **Show folder** beside a located file to
 open its current folder. Job history stays as recorded. A file located

@@ -295,7 +295,7 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
     tags = common.tags_for(
         acq, f' {common.version_label("Enhanced", version)}', common.made_by(recipe.name, params.target_lufs)
     )
-    cover = common.cover_art(ctx, acq)
+    cover = common.cover_art(ctx, acq, source)
     rate = params.sample_rate if params.sample_rate != 48000 else None
     split = bool(opts.get('split_tracks'))
 
@@ -389,7 +389,7 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
         'headline': ('Volume evened out' if opts.get('quality') == 'light' else f'Enhanced as {recipe.name}'),
         'output_dir': str(folder),
         'files': files + track_files,
-        'cover_source': common.cover_source(source),
+        'cover_source': common.cover_source(source, acq),
         **({'tracks_dir': str(tracks_dir)} if tracks_dir else {}),
         'previews': previews,
         **({'excerpt': excerpt} if excerpt else {}),

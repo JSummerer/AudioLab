@@ -29,14 +29,16 @@
 - Saving a track uses the playlist you submitted, even if you looked up the same track in another playlist.
 
 - Use **Locate…** in the app window to reconnect a missing Library file recorded by this version,
-  after moving or renaming it on the same drive. Files located outside the recorded output folder
-  stay where they are when the Library entry is removed. Open the file's current folder from its row.
+  after moving or renaming it on the same drive. If you retag an imported or located file in place,
+  choose it again to confirm the edit. Removing a version tells you when files located outside the
+  output folder stayed in place. Open a located file’s current folder from its row.
 
 - In the app window, choose one or several files or a folder from New, choose the output folder
   in Settings, and pick files to add to the Library. New reads files chosen in the app where they
   are, so they need no upload and the browser upload size limit does not apply. A folder adds up
   to 50 supported files at its top level. Choosing a single file shows Tracks for long recordings
-  when its duration can be read. Choose the file again if it changes before a job finishes.
+  when its duration can be read. A finished render stays available in the job if its source moves or
+  changes. AudioLab reports when it could not save a Library entry or keep the original.
 - If the app window fails to open, AudioLab stops its local server and reports the failure.
 
 - Library lookups reject a damaged record whose ID differs from its filename.

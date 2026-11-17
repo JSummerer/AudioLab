@@ -373,6 +373,7 @@ function fillCard(c, entry) {
   c.toggles = new Map();
   const files = (entry.files || []).filter((f) => f.kind !== 'original' && f.kind !== 'track');
   const tracks = (entry.files || []).filter((f) => f.kind === 'track').sort((a, b) => (a.track ?? 0) - (b.track ?? 0));
+  const tracksOpen = c.el.querySelector('.lib-tracks')?.open;
   c.processing = processingDetails(entry, files, c.processing?.open);
   c.stage = h('div', { class: 'lib-stage', id: `${c.el.id}-player`, hidden: true });
   const when = dateText(entry.created_at, true);
@@ -390,7 +391,7 @@ function fillCard(c, entry) {
     files.length ? h('ul', { class: 'files' }, files.map((f) => fileRow(c, entry, f))) : null,
     c.processing,
     tracks.length ? h('details', {
-      class: 'disclosure lib-tracks', open: keep && tracks.some((t) => t.id === player.what),
+      class: 'disclosure lib-tracks', open: tracksOpen || keep && tracks.some((t) => t.id === player.what),
     }, h('summary', null, `Tracks (${tracks.length})`), h('ul', { class: 'files' }, tracks.map((f) => fileRow(c, entry, f)))) : null,
     c.stage]);
   if (keep) attachPlayer(c);
@@ -555,7 +556,15 @@ function fileRow(c, entry, f) {
   const label = f.label || f.stem || f.name;
   let actions;
   if (!f.exists) {
-    actions = h('span', { class: 'lib-missing' }, icon('alert', 14), 'Moved or deleted');
+    const canLocate = store.health?.local && nativeWindow();
+    actions = [
+      h('span', { class: 'lib-missing', title: canLocate && f.locatable === false ? 'This entry has no saved file identity.' : null },
+        icon('alert', 14), canLocate && f.locatable === false ? 'Moved or deleted. Add it again.' : 'Moved or deleted'),
+      canLocate && f.locatable ? h('button', {
+        type: 'button', class: 'btn btn-ghost btn-sm', 'aria-label': `Locate ${f.name}`,
+        onclick: (e) => locateFile(entry, f, e.currentTarget),
+      }, 'Locate…') : null,
+    ];
   } else {
     const play = f.playable ? h('button', {
       type: 'button', class: 'btn btn-ghost btn-sm lib-play', 'aria-controls': c.stage.id,
@@ -581,6 +590,24 @@ function fileRow(c, entry, f) {
         f.exists && f.size_bytes ? h('span', { class: 'file-size-inline' }, ` · ${fmtBytes(f.size_bytes)}`) : null)),
     h('span', { class: 'file-size' }, f.exists ? fmtBytes(f.size_bytes) : ''),
     h('div', { class: 'lib-file-actions' }, actions));
+}
+
+async function locateFile(entry, file, button) {
+  button.disabled = true;
+  try {
+    const choice = await chooseNative('locate');
+    if (!choice) return;
+    if (!choice.files[0]) throw new Error('Choose the moved file.');
+    await api(libPath(entry.id, `files/${encodeURIComponent(file.id)}/locate`), {
+      method: 'POST', desktop: true, json: { native_file: choice.files[0].selection },
+    });
+    toast('File location updated.', { kind: 'ok' });
+    await load();
+  } catch (e) {
+    toastError(e);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 /** A saved cover's picture in place of the icon (the icon when it won't load). */
@@ -816,7 +843,7 @@ async function revealEntry(entry) {
 // (off by default, and never a permanent delete). An imported file can go too: the switch names its folder.
 // ---------------------------------------------------------------------------
 /** An entry's files that are still there and could go to the Trash (the kept original is AudioLab's own). */
-const trashable = (entry) => (entry.files || []).filter((f) => f.exists && f.kind !== 'original');
+const trashable = (entry) => (entry.files || []).filter((f) => f.exists && f.kind !== 'original' && f.can_trash !== false);
 
 /** Where an imported file is, for reading: "~/Music/Masters" (no raw path). */
 const importFolder = (entry) => shortFolder(String(trashable(entry)[0]?.path || '').replace(/[\\/][^\\/]*$/, ''));

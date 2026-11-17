@@ -70,6 +70,12 @@ and **Delete the kept original…** (when one is kept). Removing keeps the
 files unless you switch on **Also move its files to the Trash**; nothing is ever deleted permanently.
 Kept originals use disk space separately from your output folder; manage them in Settings → Storage.
 
+For missing Library files recorded since this feature was added, **Locate…** lets you choose the same
+file after moving or renaming it on the same drive. Choose the file with its original extension.
+For older entries, or files copied to another drive, use **Add a file…** to add them again.
+Locate updates playback and comparison in the Library. Job history stays as recorded. A file located
+outside its recorded output root stays in place even when you opt to move other files to the Trash.
+
 For links, the YouTube sign-in (Settings → Downloads & sign-in) is used only when YouTube refuses a
 video without it. YouTube can block accounts that download a lot; a spare Google account is safer.
 

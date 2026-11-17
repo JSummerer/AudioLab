@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Use **Locate…** in the app window to reconnect a missing Library file recorded by this version,
+  after moving or renaming it on the same drive. Files located outside the recorded output folder
+  stay where they are when the Library entry is removed.
+
 - In the app window, choose one or several files or a folder from New, choose the output folder
   in Settings, and pick files to add to the Library. New reads files chosen in the app where they
   are, so they need no upload and the browser upload size limit does not apply. A folder adds up

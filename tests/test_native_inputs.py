@@ -1,6 +1,7 @@
 """The desktop picker, HTTP capability scope, and private job references without opening a window."""
 
 import json
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -201,3 +202,99 @@ def test_kept_original_of_native_job_is_an_independent_copy(native, tmp_path):
     assert isinstance(kept, Path) and not kept.samefile(source)
     source.write_bytes(b'changed audio')
     assert kept.read_bytes() == b'original audio'
+
+
+def finished_file(path, task='download'):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b'original audio')
+    mgr = JobManager(runner=lambda *_: {}, stages_for=lambda *_: [])
+    job = mgr.submit(task, {'kind': 'file', 'name': path.name, 'path': str(path)}, {})
+    job.result = {'output_dir': str(path.parent), 'files': [{'id': 'f0', 'path': str(path)}]}
+    assert library.record(job)
+    return mgr, job
+
+
+def test_locate_updates_library_only_and_protects_result_outside_output_root(native, tmp_path, monkeypatch):
+    old = tmp_path / 'out' / 'Recording.wav'
+    mgr, job = finished_file(old)
+    new = old.rename(tmp_path / 'Moved.wav')
+    copied = tmp_path / 'Copy.wav'
+    shutil.copy2(new, copied)
+    link = tmp_path / 'Alias.wav'
+    link.symlink_to(new)
+    trashed = []
+    monkeypatch.setattr(library.trash, 'move_to_trash', trashed.append)
+    headers = desktop_headers(native)
+    client = window_client(native, manager=mgr)
+    entry_url = f'/api/library/{job.id}'
+    media_url = f'{entry_url}/files/f0'
+    endpoint = f'{media_url}/locate'
+    try:
+        missing = client.get(entry_url).json()['files'][0]
+        assert not missing['exists'] and missing['locatable'] and '_identity' not in missing
+        assert client.post(endpoint, json={'path': str(new)}, headers=headers).status_code == 400
+        key = pick(native, 'locate', copied)['files'][0]['selection']
+        assert client.post(endpoint, json={'native_file': key}, headers=headers).status_code == 400
+        key = pick(native, 'files', new)['files'][0]['selection']
+        assert client.post(endpoint, json={'native_file': key}, headers=headers).status_code == 410
+        key = pick(native, 'locate', link)['files'][0]['selection']
+        assert client.post(endpoint, json={'native_file': key}).status_code == 403
+
+        old.write_bytes(b'occupied')
+        body = {'native_file': key}
+        assert client.post(endpoint, json=body, headers=headers).status_code == 400
+        assert client.get(entry_url).json()['files'][0]['path'] == old.name
+        old.unlink()
+
+        fixed = client.post(endpoint, json=body, headers=headers)
+        assert fixed.status_code == 200, fixed.text
+        file = fixed.json()['files'][0]
+        assert file['name'] == new.name and file['path'] == str(new) and file['exists'] and not file['can_trash']
+        assert client.get(media_url).content == b'original audio'
+        assert job.result['files'][0]['path'] == str(old)
+        assert client.post(endpoint, json=body, headers=headers).status_code == 400
+
+        removed = client.delete(entry_url, params={'trash_files': True}).json()
+        assert removed['trashed'] == [] and new.is_file() and trashed == []
+        assert client.post(endpoint, json=body, headers=headers).status_code == 404
+    finally:
+        client.close()
+
+
+def test_located_file_inside_root_can_be_trashed_but_replacement_cannot(tmp_path, monkeypatch):
+    first = tmp_path / 'out' / 'First.wav'
+    second = first.with_name('Second.wav')
+    _, first_job = finished_file(first)
+    _, second_job = finished_file(second)
+    first_moved = first.rename(first.with_name('First new.wav'))
+    second_moved = second.rename(second.with_name('Second new.wav'))
+    trashed = []
+    monkeypatch.setattr(library.trash, 'move_to_trash', trashed.append)
+
+    assert library.locate_file(first_job.id, 'f0', first_moved)
+    assert library.locate_file(second_job.id, 'f0', second_moved)
+    first_moved.rename(first.with_name('Kept.wav'))
+    first_moved.write_bytes(b'unrelated replacement')
+
+    entry = library.get(first_job.id)
+    assert not library.public(entry)['files'][0]['exists']
+    assert library.remove(first_job.id, trash_files=True)['trash_failed'] == [first_moved.name]
+    assert library.remove(second_job.id, trash_files=True)['trashed'] == [second_moved.name]
+    assert trashed == [second_moved]
+
+
+def test_locate_refuses_legacy_entry_without_independent_file_identity(tmp_path):
+    old = tmp_path / 'out' / 'Master.wav'
+    _, job = finished_file(old, task='import')
+    entry = library.get(job.id)
+    # A group may be an imported file's content key, or it may have been supplied
+    # when adding a version of some other file. It does not identify the old import.
+    assert entry['group'].startswith('file:')
+    entry['files'][0].pop('_identity')
+    library._write(entry)
+    candidate = old.rename(old.with_name('Master new.wav'))
+
+    assert not library.public(entry)['files'][0]['locatable']
+    with pytest.raises(AudioLabError, match='no saved identity') as exc:
+        library.locate_file(job.id, 'f0', candidate)
+    assert exc.value.hints == ['Add the file to the Library again.']

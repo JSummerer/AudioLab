@@ -89,6 +89,15 @@ now resolves to a different file, choose it again. Working data and covers still
 and Library originals that came from direct native inputs are copied. Library import retains its existing
 ownership and Trash rules.
 
+Locate records a result file's device, inode, size and nanosecond modification time during Library
+publication. Under the Library lock, it checks that the former path is unoccupied and the picked file
+matches that saved identity, then atomically changes the Library reference. Device and inode are
+filesystem-specific, so copied, cross-volume and edited files may need to be added again. This check
+uses filesystem metadata rather than reading or hashing the selected audio. Entries without a saved
+identity cannot be verified because the grouping key can come from a different file. Located files
+outside their recorded output root are omitted from Trash actions, and Library reads check that the
+located path still points to the same file. Job records and output ownership roots stay as recorded.
+
 ### Platform code
 Everything that differs between macOS, Windows and Linux lives in `system.py`; other modules call its
 functions and never branch on the platform themselves. The only exceptions are the Windows ffmpeg shim

@@ -68,8 +68,8 @@ def _file(entry: dict, file_id: str) -> Path:
     p = library.file_path(entry, file_id)
     if p is None:
         raise HTTPException(404, 'File not found.')
-    if not p.is_file():
-        raise HTTPException(410, 'This file was moved or deleted.')
+    if not library.file_exists(entry, file_id, p):
+        raise HTTPException(410, 'This file was moved, changed or deleted.')
     return p
 
 
@@ -183,7 +183,7 @@ def _preview_spec(state: State, entry: dict, body: dict, options: dict, override
         files.sort(key=lambda f: export.FORMATS[f['format']].kind != 'lossless')
         for file in files:
             path = library.file_path(entry, file['id'])
-            if path is not None and path.is_file():
+            if path is not None and library.file_exists(entry, file['id'], path):
                 spec['saved_export'] = {'path': str(path), 'format': file['format']}
                 spec['applied'] = entry['processing'].get('applied') or {}
                 break
@@ -198,8 +198,9 @@ def _entry_covers(entry: dict, folder: Path) -> dict[str, str]:
     keys: dict[str, str] = {}
     folder.mkdir(parents=True, exist_ok=True)
     for f in entry.get('files') or []:
-        path = library.file_path(entry, f.get('id') or '')
-        if path is None or not path.is_file():
+        file_id = f.get('id') or ''
+        path = library.file_path(entry, file_id)
+        if path is None or not library.file_exists(entry, file_id, path):
             continue
         spec = export.FORMATS.get(f.get('format') or '')
         try:
@@ -294,6 +295,18 @@ def library_file(entry_id: str, file_id: str, download: bool = False):
 @router.get('/api/library/{entry_id}/pcm/{file_id}')
 def library_pcm(state: State, entry_id: str, file_id: str, offset: int = 0, frames: int = 0):
     return serve_pcm(_file(_entry(entry_id), file_id), offset, frames, state.pcm_stop)
+
+
+@router.post('/api/library/{entry_id}/files/{file_id}/locate')
+def locate_file(request: Request, state: State, entry_id: str, file_id: str, body: Any = Body(None)):
+    if not isinstance(body, dict) or body.keys() != {'native_file'}:
+        raise HTTPException(400, 'Choose the missing file in the app window.')
+    picked = native_selection(request, state, body['native_file'], 'locate')
+    entry = library.locate_file(entry_id, file_id, picked.checked_path())
+    if entry is None:
+        raise HTTPException(404, 'This file is no longer in the Library.')
+    state.forget('storage')
+    return library.public(entry, state.manager.get(entry.get('job_id') or '') is not None)
 
 
 @router.post('/api/library/{entry_id}/reveal')

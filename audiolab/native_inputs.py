@@ -15,7 +15,7 @@ from .settings import SETTINGS
 
 MAX_FILES = 50
 MAX_SELECTIONS = 4 * MAX_FILES
-PURPOSES = {'files': 'job', 'batch': 'job', 'import': 'import', 'output': 'output'}
+PURPOSES = {'files': 'job', 'batch': 'job', 'import': 'import', 'locate': 'locate', 'output': 'output'}
 
 
 def _identity(path: Path, folder: bool) -> tuple[tuple[int, int], int]:
@@ -66,9 +66,10 @@ class Selection:
 
 def _selection(path: Path, purpose: str) -> Selection:
     path = path.resolve(strict=True)
-    if purpose != 'output':
-        if path.suffix.lower() not in export.UPLOAD_EXT or path.is_relative_to(SETTINGS.data_dir.resolve()):
-            raise AudioLabError('Choose an audio or video file outside AudioLab’s data folder.')
+    if purpose != 'output' and path.is_relative_to(SETTINGS.data_dir.resolve()):
+        raise AudioLabError('Choose a file outside AudioLab’s data folder.')
+    if purpose in ('job', 'import') and path.suffix.lower() not in export.UPLOAD_EXT:
+        raise AudioLabError('Choose a supported audio or video file.')
     identity, size = _identity(path, folder=purpose == 'output')
     if purpose != 'output' and not size:
         raise AudioLabError('This file is empty (0 bytes).', hints=['Choose another file.'])

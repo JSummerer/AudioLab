@@ -364,9 +364,71 @@ def _file_item(f: dict[str, Any], root: Path, task: str, stem: str | None = None
     item.update({k: f[k] for k in ('track', 'start_s', 'end_s') if f.get(k) is not None})
     if stem:
         item['stem'] = stem
+    if identity := _file_identity(Path(f['path'])):
+        item['_identity'] = identity
     if kind == 'enhanced' and (verification := processing.verification(f.get('verification'))) is not None:
         item['verification'] = verification
     return item
+
+
+def _file_identity(path: Path) -> list[int] | None:
+    try:
+        st = path.stat()
+        if stat.S_ISREG(st.st_mode) and st.st_ino:
+            return [st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns]
+    except OSError:
+        pass
+    return None
+
+
+def _stored_identity(item: dict[str, Any]) -> list[int] | None:
+    identity = item.get('_identity')
+    if isinstance(identity, list) and len(identity) == 4 and all(type(n) is int for n in identity) and identity[1] > 0:
+        return identity
+    return None
+
+
+def locate_file(entry_id: str, file_id: str, candidate: Path) -> dict[str, Any] | None:
+    """Relink one missing Library file by the identity captured when it was first recorded."""
+    with _lock:
+        entry = get(entry_id)
+        if entry is None:
+            return None
+        item = next((f for f in entry.get('files') or [] if f.get('id') == file_id), None)
+        if item is None or file_id == ORIGINAL:
+            return None
+        identity = _stored_identity(item)
+        if identity is None:
+            raise AudioLabError(
+                'AudioLab has no saved identity for this file.',
+                hints=['Add the file to the Library again.'],
+            )
+        previous = _resolve(entry, item.get('path'))
+        if previous is None or os.path.lexists(previous):
+            raise AudioLabError(
+                'There is already a file or folder at the saved location.', hints=['Refresh the Library.']
+            )
+        if (
+            candidate.suffix.lower() != previous.suffix.lower()
+            or not _no_link(candidate)
+            or _inside(_real(candidate), _real(SETTINGS.data_dir), strict=False)
+            or _file_identity(candidate) != identity
+        ):
+            raise AudioLabError(
+                'That isn’t the same file AudioLab saved here.',
+                hints=['Choose the original file, moved or renamed on the same drive.'],
+            )
+        root = Path(entry['root'])
+        item.update(
+            path=_relative(str(candidate), root),
+            name=candidate.name,
+            _located=True,
+            _keep_in_place=not _plain_inside(candidate, root),
+        )
+        if _file_identity(candidate) != identity or os.path.lexists(previous):
+            raise AudioLabError('The file changed while it was being located.', hints=['Choose it again.'])
+        _write(entry)
+        return entry
 
 
 def add_file(entry_id: str, f: dict[str, Any]) -> bool:
@@ -450,6 +512,20 @@ def file_path(entry: dict[str, Any], file_id: str) -> Path | None:
     return None
 
 
+def _file_current(item: dict[str, Any], path: Path) -> bool:
+    """Once located, a replacement at the new path cannot inherit the reference or Trash permission."""
+    if not item.get('_located'):
+        return path.is_file()
+    identity = _stored_identity(item)
+    return identity is not None and _no_link(path) and _file_identity(path) == identity
+
+
+def file_exists(entry: dict[str, Any], file_id: str, path: Path) -> bool:
+    if file_id == ORIGINAL:
+        return path.is_file()
+    return any(f.get('id') == file_id and _file_current(f, path) for f in entry.get('files') or [])
+
+
 def known_paths() -> list[Path]:
     """Every output folder and result file the Library knows (they may be gone): places a cleanup inside
     the data folder must never touch, whatever the output folder is set to now."""
@@ -480,7 +556,13 @@ def public(entry: dict[str, Any], job_exists: bool = False) -> dict[str, Any]:
     files = []
     for f in entry.get('files') or []:
         p = file_path(entry, f['id'])
-        files.append({**f, **_file_state(p)})
+        state = _file_state(p)
+        if f.get('_located'):
+            state['exists'] = bool(p and _file_current(f, p))
+        public_file = {k: v for k, v in f.items() if not k.startswith('_')}
+        if f.get('_keep_in_place'):
+            public_file['can_trash'] = False
+        files.append({**public_file, **state, 'locatable': _stored_identity(f) is not None})
     orig = entry.get('original') or {}
     p = file_path(entry, ORIGINAL)
     size = _size(p)  # one look: it may be deleted at any moment
@@ -685,13 +767,19 @@ def _trash_files(entries: list[dict[str, Any]], remaining: list[dict[str, Any]])
         own = folder(e) if not imported and root is not None else None
         for f in e.get('files') or []:
             p = file_path(e, f.get('id') or '')
-            if p is None or not os.path.lexists(p) or _real(p) in in_use or _inside(_real(p), data, strict=False):
+            if (
+                f.get('_keep_in_place')
+                or p is None
+                or not os.path.lexists(p)
+                or _real(p) in in_use
+                or _inside(_real(p), data, strict=False)
+            ):
                 continue
             # Never through or of a link: no link anywhere on an imported file's path (it was stored
             # resolved), and an AudioLab output lies in its root with no link on the way (a folder or the
             # output folder replaced by a link to another music folder).
             safe = _no_link(p) if imported else root is not None and _plain_inside(p, root)
-            if not safe or not p.is_file() or not move(p):
+            if not safe or not _file_current(f, p) or not move(p):
                 failed.append(p.name)
                 continue
             trashed.append(p.name)

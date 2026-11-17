@@ -46,7 +46,7 @@ in name order. Each starts its own job. Keep the selected file unchanged and at 
 the job finishes. Choose it again if you move or edit it. For a single file, AudioLab shows Tracks
 for long recordings when it can read the duration. Enhance can save a separate original copy for comparisons.
 File drops and the browser's file chooser upload the files and use the server's upload limit.
-Settings → Files and Library → Add a file use the system picker in the app window. Local browser
+Settings → Output defaults and Library → Add a file use the system picker in the app window. Local browser
 sessions use a path field.
 
 - **Save / Convert:** convert formats, save an original stream, or cut chapters/a pasted tracklist into tracks.

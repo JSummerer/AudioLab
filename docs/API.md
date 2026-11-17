@@ -252,8 +252,8 @@ an empty title is ignored. Ignored when one request creates several jobs (playli
 lookup said, as the UI sends it; at most
 `limits.max_playlist_items`), each a link string or `{"url": "…", "title": "…", "duration_s": 201}` (`title` and
 `duration_s` optional), plus the optional form field `playlist_title`. A link looked up with `POST /api/probe` in the
-last 15 minutes takes its title, length and playlist from that lookup; after that the server only knows what the
-request says — so send each item's `title` and `duration_s` and the playlist's `title` as `playlist_title` (the
+last 15 minutes can reuse its cached title and length. Playlist membership comes from the submission.
+Send each item's `title` and `duration_s` and the playlist's `title` as `playlist_title` (the
 playlist folder and album tag). A title is one line of at most 200 characters; unusable values are ignored. A link
 job without any known title is named after the link until it has looked the link up (see Job `title`). Anything
 else than such a list → `400` "urls must be a JSON list of links.".

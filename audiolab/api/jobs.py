@@ -100,7 +100,6 @@ def _source_from_url(state: AppState, url: str, given: dict[str, Any] | None = N
     if entry:
         src.setdefault('title', entry.get('title'))
         src.setdefault('duration_s', entry.get('duration_s'))
-        src['playlist_title'] = entry.get('playlist_title')
     for key, value in (given or {}).items():
         if value and not src.get(key):
             src[key] = value

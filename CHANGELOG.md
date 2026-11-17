@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Saving a track uses the playlist you submitted, even if you looked up the same track in another playlist.
+
 - Use **Locate…** in the app window to reconnect a missing Library file recorded by this version,
   after moving or renaming it on the same drive. Files located outside the recorded output folder
   stay where they are when the Library entry is removed.

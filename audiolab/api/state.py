@@ -222,7 +222,7 @@ class AppState:
             self._probes[url] = (now, result)
             if result.get('kind') == 'playlist':
                 for e in result.get('entries', []):
-                    self._probes[f'entry:{e["url"]}'] = (now, {'playlist_title': result.get('title'), **e})
+                    self._probes[f'entry:{e["url"]}'] = (now, e)
 
     def cached_probe(self, key: str) -> dict[str, Any] | None:
         with self._probe_lock:

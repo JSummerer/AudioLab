@@ -1004,13 +1004,21 @@ def test_playlist_items_keep_their_titles(tmp_path):
     import json
 
     mgr = new_manager(tmp_path / 'jobs')
-    with TestClient(create_app(local=False, token='t', manager=mgr)) as c:
+    app = create_app(local=False, token='t', manager=mgr)
+    with TestClient(app) as c:
         h = {'X-AudioLab-Token': 't'}
         urls = [
             {'url': 'https://youtu.be/a', 'title': '  First   Song ', 'duration_s': 201},
             'https://youtu.be/b',
             {'url': 'https://youtu.be/c', 'title': 7, 'duration_s': 'long'},  # unusable values are ignored
         ]
+        # The same track was also looked up in another playlist. Only the submission owns its album.
+        shared = urls[0]['url']
+        app.state.audiolab.remember_probe(
+            'https://example.invalid/other', {'kind': 'playlist', 'title': 'Other Mix', 'entries': [{'url': shared}]}
+        )
+        direct = c.post('/api/jobs', headers=h, data={'task': 'analyze', 'url': shared})
+        assert direct.status_code == 200 and 'playlist_title' not in direct.json()['jobs'][0]['source']
         r = c.post(
             '/api/jobs',
             headers=h,

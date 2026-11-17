@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Adjust saves unfinished edits with their Library version, including incomplete EQ and section inputs.
+  Reopening the version restores its draft. Discard draft returns to the saved settings.
 - Enhance offers **Balance parts separately** for music and DJ sets, **Isolate voice** for speech, and
   **AI when supported** for Auto. Concerts have no AI option. Adjust works with saved versions that
   used the non-AI chain, including those that fell back from a requested AI option.

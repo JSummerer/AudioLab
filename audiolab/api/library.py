@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from .. import library, processing, tasks
+from .. import adjust_drafts, library, processing, tasks
 from ..errors import AudioLabError
 from ..jobs import new_job_id
 from ..media import export, ffmpeg
@@ -34,7 +34,28 @@ def list_library(state: State):
 @router.get('/api/library/{entry_id}')
 def get_entry(state: State, entry_id: str):
     entry = _entry(entry_id)
-    return library.public(entry, state.manager.get(entry.get('job_id') or '') is not None)
+    result = library.public(entry, state.manager.get(entry.get('job_id') or '') is not None)
+    if entry.get('task') == 'enhance' and result['original']['kept']:
+        result['adjust_draft'] = adjust_drafts.read(entry)
+    return result
+
+
+@router.put('/api/library/{entry_id}/adjust-draft')
+def save_adjust_draft(entry_id: str, body: dict = Body(...)):
+    if (
+        body.keys() != {'basis', 'revision', 'data'}
+        or not isinstance(body['basis'], str)
+        or type(body['revision']) is not int
+        or (body['data'] is not None and not adjust_drafts.valid(body['data']))
+    ):
+        raise HTTPException(400, 'This draft is too large or contains unsupported editor values.')
+    try:
+        result = library.save_adjust_draft(entry_id, body['basis'], body['revision'], body['data'])
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+    if result is None:
+        raise HTTPException(404, 'This result is no longer in the Library.')
+    return result
 
 
 @router.get('/api/library/{entry_id}/tone-timeline')

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { snapshotDraft, restoreDraft } from '../../audiolab/web/js/adjust-draft.js';
 import { graphicalEqField } from '../../audiolab/web/js/eq-editor.js';
 
 class Element {
@@ -106,4 +107,25 @@ test('a cut-only curve summarizes its flat skirt as 0.0 dB, not −0.0', (t) => 
   const editor = graphicalEqField({ bands: [{ hz: 160, db: -3.31, q: 2.865 }] });
   const note = find(editor.el, (node) => node.textContent.startsWith('Your EQ'));
   assert.equal(note.textContent, 'Your EQ · −3.3 to 0.0 dB');
+});
+
+test('reopening a durable Adjust snapshot restores invalid EQ text and settings without Undo history or job state', (t) => {
+  setup(t);
+  const editor = graphicalEqField({ bands: saved, savedBands: saved });
+  named(editor, 'Band 1, 1000 Hz, +1.00 dB, Q 1').fire('keydown', { key: 'ArrowUp' });
+  enter(named(editor, 'Custom EQ as text'), 'unfinished');
+  const base = () => ({ bands: saved, sections: [], graphs: new Map(), applying: false });
+  const draft = { ...base(), from: '0:', length: '12', values: { bass_db: '-' }, scope: 'global', applying: true };
+  const data = JSON.parse(JSON.stringify(snapshotDraft(draft, new Map([['global', editor]]))));
+  const restored = base();
+  restoreDraft(restored, data);
+  assert.equal(restored.from, '0:');
+  assert.deepEqual(restored.values, { bass_db: '-' });
+  assert.equal(restored.applying, false);
+  assert.equal(restored.graphs.get('global').invalid, true);
+  assert.deepEqual(restored.bands, [{ hz: 1000, db: 1.1, q: 1 }]);
+  const reopened = graphicalEqField({ draftState: restored.graphs.get('global').snapshot, savedBands: saved });
+  assert.equal(named(reopened, 'Custom EQ as text').value, 'unfinished');
+  assert.ok(reopened.read().errors.length);
+  assert.deepEqual(reopened.snapshot().history, []);
 });

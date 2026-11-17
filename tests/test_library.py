@@ -724,3 +724,44 @@ def test_library_keeps_only_a_clean_excerpt():
     assert library._excerpt({'start_s': 12, 'duration_s': 45.5, 'x': 1}) == {'start_s': 12.0, 'duration_s': 45.5}
     for bad in (None, {'start_s': -1, 'duration_s': 5}, {'start_s': True, 'duration_s': 5}, {'start_s': 1}):
         assert library._excerpt(bad) is None
+
+
+def test_adjust_draft_round_trip_conflicts_and_source_invalidation(manager):
+    job = run_job(manager)
+    path = f'/api/library/{job.id}'
+    data = {
+        'from': '1:',
+        'length': '15',
+        'scope': 'global',
+        'sections': [],
+        'values': {'bass_db': '-'},
+        'graphs': {
+            'global': {
+                'bands': [],
+                'bypassed': False,
+                'text': 'unfinished EQ',
+                'textOpen': True,
+                'numbers': None,
+                'invalid': True,
+            }
+        },
+    }
+    with TestClient(create_app(local=False, manager=manager)) as c:
+        record = c.get(path).json()['adjust_draft']
+        assert record['revision'] == 0 and record['data'] is None
+        edit = {**record, 'data': data}
+        assert c.put(path + '/adjust-draft', json=edit).json() == {'revision': 1}
+        assert c.get(path).json()['adjust_draft']['data'] == data
+        assert 'adjust_draft' not in c.get('/api/library').json()['groups'][0]['entries'][0]
+        assert c.put(path + '/adjust-draft', json=edit).status_code == 409
+        edit['revision'] = 1
+        assert c.put(path + '/adjust-draft', json={**edit, 'data': {**data, 'from': '1' * 129}}).status_code == 400
+        assert c.put(path + '/adjust-draft', json={**edit, 'data': None}).json() == {'revision': 2}
+        edit['revision'] = 2
+        assert c.put(path + '/adjust-draft', json=edit).status_code == 200
+        entry = library.get(job.id)
+        entry['processing'] = {'requested': {'quality': 'light'}}
+        library._write(entry)
+        new = c.get(path).json()['adjust_draft']
+        assert new['data'] is None and new['revision'] == 0 and new['basis'] != record['basis']
+        assert c.put(path + '/adjust-draft', json=edit).status_code == 409

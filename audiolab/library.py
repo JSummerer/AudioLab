@@ -37,7 +37,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
-from . import processing, trash
+from . import adjust_drafts, processing, trash
 from .errors import AudioLabError
 from .media.export import FORMATS
 from .native_inputs import source_path
@@ -582,7 +582,11 @@ def public(entry: dict[str, Any], job_exists: bool = False) -> dict[str, Any]:
                 'exists': True,
             }
         )
-    out = {k: v for k, v in entry.items() if k not in ('files', 'original', 'root', 'tone_timeline', 'overview')}
+    out = {
+        k: v
+        for k, v in entry.items()
+        if k not in ('files', 'original', 'root', 'tone_timeline', 'overview', 'adjust_draft')
+    }
     if entry.get('task') == 'enhance':
         out['adjust_quality'] = processing.adjust_quality(entry.get('processing'))
     if entry.get('tone_timeline'):
@@ -603,6 +607,23 @@ def public(entry: dict[str, Any], job_exists: bool = False) -> dict[str, Any]:
     out['compare_file_id'] = _compare_file(files) if kept else None
     out['job_exists'] = job_exists
     return out
+
+
+def save_adjust_draft(entry_id: str, basis: str, revision: int, data: dict | None) -> dict | None:
+    """Replace only the editor document, under the same lock as entry removal and other edits."""
+    with _lock:
+        entry = get(entry_id)
+        if entry is None or entry.get('id') != entry_id:
+            return None
+        original = file_path(entry, ORIGINAL)
+        current = adjust_drafts.read(entry)
+        if entry.get('task') != 'enhance' or original is None or not original.is_file():
+            raise ValueError('The kept original is no longer available for Adjust.')
+        if current['basis'] != basis or current['revision'] != revision:
+            raise ValueError('This version or its draft changed elsewhere. Reload before editing again.')
+        entry['adjust_draft'] = {'basis': basis, 'revision': revision + 1, 'data': data}
+        _write(entry)
+        return {'revision': revision + 1}
 
 
 def _compare_file(files: list[dict[str, Any]]) -> str | None:

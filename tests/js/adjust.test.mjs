@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { draftWriter } from '../../audiolab/web/js/adjust-draft.js';
 import { auditionRequests } from '../../audiolab/web/js/adjust-audition.js';
 import { auditionPower, loadAuditionSpectrum } from '../../audiolab/web/js/audition-spectrum.js';
 import { adjustUnavailable, basisMessage } from '../../audiolab/web/js/views/adjust.js';
@@ -173,4 +174,25 @@ test('an omitted whole-master correction is part of the stated audition basis', 
   }
   assert.match(basisMessage(result({ gain: 'retained_target_delta', omitted_post_limiter_gain_db: -2 }), true),
     /peak cap\..*turned down 2\.0 dB/);
+});
+
+test('draft saves serialize in-flight edits, retain failed changes for retry and clear on discard', async () => {
+  const writes = [];
+  const first = deferred();
+  const store = draftWriter({ revision: 4, basis: 'version' }, (body) => {
+    writes.push(body);
+    if (writes.length === 1) return first.promise;
+    if (writes.length === 2) throw new Error('Disk full');
+    return Promise.resolve({ revision: body.revision + 1 });
+  });
+  store.queue({ from: '0' });
+  const saving = store.flush();
+  store.queue({ from: '1:' });
+  first.resolve({ revision: 5 });
+  assert.equal(await saving, false);
+  assert.match(store.message, /Disk full/);
+  assert.equal(await store.flush(), true);
+  store.queue(null);
+  await store.flush();
+  assert.deepEqual(writes.map(({ revision, data }) => [revision, data]), [[4, { from: '0' }], [5, { from: '1:' }], [5, { from: '1:' }], [6, null]]);
 });

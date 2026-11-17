@@ -576,6 +576,18 @@ the file is named `"NN - <the line's title>.ext"`. A job only starts when `error
 characters → `400`.
 
 ### Library
+
+For a saved Enhance version with a kept original, the individual `GET /api/library/{entry_id}` response
+includes `adjust_draft: {basis, revision, data}`. A fresh draft has revision 0 and null data. Grouped
+Library results omit it. The opaque basis identifies the version, original, processing and editor schema.
+`PUT /api/library/{entry_id}/adjust-draft` takes the same three fields. Send null data to discard.
+Success returns the new revision. A changed basis or revision returns `409` and preserves the stored
+draft. A missing entry returns `404`, an unsupported or oversized editor value returns `400`.
+
+Draft data contains passage `from` and `length`, a selected `scope`, raw setting `values`, up to eight
+`sections` (id, from, to, fade), and `graphs` by scope. Each graph holds up to eight editable EQ bands,
+bypass and validation flags, its EQ text (up to 4,096 characters), disclosure state and any incomplete
+numeric rows. Timing and numeric input strings allow up to 128 characters. A draft never queues work.
 Every job that finishes with files (Save, Enhance, Split — not Check) is recorded in the Library, which outlives
 the job (jobs expire after `AUDIOLAB_RETENTION_DAYS`, "Clear finished" removes them; the Library keeps its
 entries until they are removed with `DELETE /api/library/{id}`). Runs from the command line are not recorded.

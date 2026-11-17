@@ -48,14 +48,16 @@ function detailMessage(data) {
   return '';
 }
 
-export async function api(path, { method = 'GET', json, form, signal, text: asText = false, desktop = false } = {}) {
-  const opts = { method, signal, headers: {} };
+export async function api(path, { method = 'GET', json, form, signal, keepalive = false, text: asText = false, desktop = false } = {}) {
+  const opts = { method, signal, keepalive, headers: {} };
   const t = token();
   if (t) opts.headers['X-AudioLab-Token'] = t;
   if (desktop) opts.headers['X-AudioLab-Desktop'] = nativeSecret();
   if (json !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(json);
+    // Browsers cap the total outstanding keepalive payload at 64 KiB.
+    if (keepalive && new Blob([opts.body]).size > 60 * 1024) opts.keepalive = false;
   } else if (form) {
     opts.body = form;
   }

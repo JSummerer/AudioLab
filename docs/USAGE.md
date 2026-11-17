@@ -220,6 +220,12 @@ Library to hear the actual exported version. Dragging changes the graph; render 
 Changed settings mark the audio stale. Undo, bypass and reset help compare alternatives, and keeping
 the existing version is a valid result. Opening or leaving Adjust does not create an export.
 
+Adjust saves edits automatically in the app’s Library data. Wait for **Draft saved** before quitting.
+The next time you open that version, Adjust restores the passage, section timing, settings and EQ
+(including incomplete input). **Discard draft** starts again from the version’s saved settings. Undo
+history and rendered auditions last only in the current session. A changed original or processing
+record starts a fresh draft. If another window already saved a newer draft, reload to read it.
+
 A section preview is an estimate: it uses nearby audio for context, while the full render checks the
 whole recording again. Even retained full-recording gain cannot predict how EQ changes the next full
 render's normalization. Auditions exclude saved-format compression artifacts. Short previews are currently

@@ -293,10 +293,10 @@ export function graphicalEqField({ bands = [], savedBands = [], context = {}, la
       numbers, errorNote, textPanel),
     read,
     setContext(next) { context = next || {}; draw(); },
-    snapshot() {
+    snapshot({ history: includeHistory = true } = {}) {
       const numbers = errors.length && errorSource !== text.textarea
         ? rows.map(({ inputs }) => Object.fromEntries(fields.map((key) => [key, inputs[key].value]))) : null;
-      return { ...copyDraft(draft), history: history.map(copyDraft), text: text.textarea.value, textOpen: textPanel.open, numbers };
+      return { ...copyDraft(draft), history: includeHistory ? history.map(copyDraft) : undefined, text: text.textarea.value, textOpen: textPanel.open, numbers };
     },
   };
 }

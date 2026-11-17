@@ -193,7 +193,8 @@ js/views/new/         the "New" view: source (link/files/playlist), names, cover
 js/views/activity.js  the job list (in progress, then finished by day; filters)
 js/views/job/         one job: live progress, failures with fixes, results per task
 js/views/library.js   finished results by recording: versions, files, play/compare, kept originals, remove
-js/views/adjust.js    optional saved-version workspace, in-app drafts, passage/section editing, comparison and full Apply
+js/adjust-draft.js    editable draft snapshots and serialized saves with revision checks
+js/views/adjust.js    optional saved-version workspace, passage/section editing, comparison and full Apply
 js/views/settings.js  preferences, Updates & add-ons (app, downloader, AI add-on, audio engine), storage, about
 ```
 
@@ -349,7 +350,9 @@ edit leaves a saved correction out of both sides, the pair's basis says so.
 Calibration is optional and versioned; old entries remain readable and missing values are not inferred
 from rounded presentation metrics. See [the API contract](API.md#library) for units and compatibility.
 
-Adjust keeps small draft settings across in-app navigation and releases its audition player, spectrum
+Adjust saves small, schema-checked editor snapshots in the version’s Library record under the Library lock.
+`adjust_drafts.py` validates their bounds and ties them to the original and processing record. The list
+omits drafts. Adjust keeps graph undo history across in-app navigation and releases its audition player, spectrum
 buffers and preview job when superseded or left; the job manager discards finished paired auditions at
 startup, since a closed window skips that release. `adjust-audition.js` owns request/cancellation identity
 and paired playback; `audition-spectrum.js` computes an on-demand Hann-windowed spectrum of the exact

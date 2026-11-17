@@ -1,10 +1,10 @@
-// An optional workspace for a saved Enhance version. Drafts live in this tab.
+// An optional workspace for a saved Enhance version. Drafts save in app data.
 // Auditions are short-lived jobs. Only Apply queues a new full-length export.
 // Back leads where the user came from (the Library); Render audition and Apply stay in a bar
 // along the bottom of the window while the settings scroll.
 import { h, icon, clear, clockText, fmtNum, parseClock } from '../dom.js';
 import { api } from '../api.js';
-import { segmented, switchControl, toast } from '../ui.js';
+import { segmented, switchControl, toast, confirmDialog } from '../ui.js';
 import { adjustPath, back, go, jobPath } from '../router.js';
 import { upsertJob } from '../store.js';
 import { formatEq, sameEq } from '../eq.js';
@@ -14,6 +14,7 @@ import {
   DEFAULT_FADE_S, MAX_SECTIONS,
 } from '../section-eq.js';
 import { toneChart, toneObservation } from '../tone-chart.js';
+import { snapshotDraft, restoreDraft, draftWriter } from '../adjust-draft.js';
 import { adjustmentOverview } from '../adjust-overview.js';
 import { auditionRequests, pairedAudition } from '../adjust-audition.js';
 import { PROCESSING_LABELS } from './new/state.js';
@@ -142,7 +143,8 @@ function draftFor(entry) {
   const saved = requested.advanced || {};
   const savedBands = resolved.params.eq_bands || saved.eq || [];
   const savedSections = resolved.params.section_eq || saved.section_eq || [];
-  const identity = JSON.stringify([entry.original.key, requested, resolved]);
+  const record = entry.adjust_draft;
+  const identity = record?.basis || JSON.stringify([entry.original.key, requested, resolved]);
   let draft = drafts.get(entry.id);
   if (draft?.identity === identity) return draft;
   const repeat = seed?.repeat?.enabled ? seed.repeat : null;
@@ -157,8 +159,18 @@ function draftFor(entry) {
       id: String(i), ...row, bands: savedSections[i].bands, savedBands: savedSections[i].bands,
     })),
   };
+  if (record) {
+    restoreDraft(draft, record.data);
+    draft.writer = draftWriter(record, (json) => api(`${entryPath(entry.id)}/adjust-draft`, { method: 'PUT', json, keepalive: true }));
+  }
   drafts.set(entry.id, draft);
   return draft;
+}
+
+// Keep partial numbers as typed, including a decimal comma, until the edit is valid.
+function settingNumber(raw) {
+  const text = String(raw ?? '').trim().replace(',', '.');
+  return /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?$/i.test(text) ? Number(text) : NaN;
 }
 
 function readBounds(section) {
@@ -189,6 +201,21 @@ function createWorkspace(entry, signal) {
   const listen = h('div', { class: 'adjust-listen', hidden: true });
   const status = h('p', { class: 'small muted adjust-status', role: 'status' });
   const auditionIssue = h('p', { class: 'small adjust-errors adjust-error-text', hidden: true });
+  const writer = draft.writer;
+  const draftStatus = h('span', { class: 'small muted', role: 'status' });
+  const retryDraft = button('Retry draft save', () => writer.flush(), 'ghost');
+  const discardDraft = button('Discard draft', discard, 'ghost');
+  let edited = !!entry.adjust_draft?.data || !!draft.edited;
+  const pageLeaving = () => writer?.flush();
+  if (writer) {
+    writer.notify = () => {
+      draftStatus.textContent = writer.message;
+      retryDraft.hidden = !writer.failed;
+      discardDraft.hidden = !edited;
+    };
+    writer.notify();
+    window.addEventListener('pagehide', pageLeaving);
+  }
   const applyStatus = h('p', { class: 'small muted', role: 'status' });
   const auditionNote = h('p', { class: 'small muted' });
   const scopeNote = h('p', { class: 'small muted', role: 'status' });
@@ -198,7 +225,7 @@ function createWorkspace(entry, signal) {
   const toneResult = h('p', { class: 'small muted', role: 'status' });
   const tonePlot = h('div', { hidden: true });
   const graphPanel = h('div', { class: 'adjust-graph-panel' });
-  const selector = h('select', { class: 'field field-sm', onchange: (e) => pickScope(e.target.value) });
+  const selector = h('select', { class: 'field field-sm', onchange: (e) => selectScope(e.target.value) });
   const startInput = timeInput(draft.from, () => { draft.from = startInput.value; changed(true); });
   const lengthInput = timeInput(draft.length, () => { draft.length = lengthInput.value; changed(true); });
   const renderBtn = button('Render audition', renderAudition, 'primary');
@@ -214,7 +241,7 @@ function createWorkspace(entry, signal) {
     icon('compare', 14), 'Compare actual export') : null;
 
   const overview = duration > 0 ? adjustmentOverview(duration, {
-    onPassage: dragPassage, onSection: dragSection, onPick: pickScope, sectionControls: !light,
+    onPassage: dragPassage, onSection: dragSection, onPick: selectScope, sectionControls: !light,
   }) : null;
   if (overview && entry.has_overview) {
     api(`${path}/overview`, { signal }).then((data) => { if (!disposed) overview.overview(data); }).catch(() => {});
@@ -257,6 +284,7 @@ function createWorkspace(entry, signal) {
       auditionIssue, status, listen),
     h('section', { class: 'adjust-block', 'aria-labelledby': 'adjustSaveTitle' },
       h('h2', { id: 'adjustSaveTitle' }, 'Save a version'),
+      writer ? h('div', { class: 'adjust-row' }, draftStatus, retryDraft, discardDraft) : null,
       h('p', { class: 'small muted' }, 'Apply to full recording analyzes the full original again and verifies a new export. Automatic decisions may change. Earlier versions stay in the Library.')),
     actions);
 
@@ -284,6 +312,11 @@ function createWorkspace(entry, signal) {
     el, update,
     dispose() {
       disposed = true;
+      if (writer) {
+        window.removeEventListener('pagehide', pageLeaving);
+        writer.notify = null;
+        writer.flush();
+      }
       for (const [id, graph] of graphs) {
         draft.graphs.set(id, { snapshot: graph.snapshot(), invalid: !!graph.read().errors.length });
       }
@@ -292,20 +325,37 @@ function createWorkspace(entry, signal) {
     },
   };
 
+  async function discard() {
+    if (!writer || disposed || !await confirmDialog({ title: 'Discard this draft?', message: 'This restores the saved version’s settings and passage.', confirm: 'Discard draft' }) || disposed) return;
+    workspace.dispose();
+    drafts.delete(entry.id);
+    entry.adjust_draft = { basis: draft.identity, revision: writer.revision, data: null };
+    // Keep writes in order with any save that was already in flight.
+    draftFor(entry).writer = writer;
+    writer.queue(null);
+    workspace = createWorkspace(entry, signal);
+    clear(body).append(workspace.el);
+    adjustView.heading.focus({ preventScroll: true });
+  }
+
   function makeSettings() {
     const wrap = h('div', { class: 'adjust-settings' });
     for (const [key, label, min, max] of numbers) {
       if (light && key === 'bass_db') continue;
       const input = h('input', {
-        class: 'field field-sm adjust-level', type: 'number', step: 'any', min, max,
+        class: 'field field-sm adjust-level', type: 'text', inputmode: 'decimal', autocomplete: 'off',
         placeholder: Number.isFinite(params[key]) ? String(params[key]) : 'Saved value',
       });
       const value = draft.values[key];
       input.value = value === undefined ? (Number.isFinite(saved[key]) ? String(saved[key]) : '') : value ?? '';
-      input.setAttribute('aria-invalid', String(draft.values[key] === null || !input.validity.valid));
+      const markInvalid = () => {
+        const value = settingNumber(input.value);
+        input.setAttribute('aria-invalid', String(!!input.value.trim() && !(value >= min && value <= max)));
+      };
+      markInvalid();
       input.addEventListener('input', () => {
-        draft.values[key] = input.validity.badInput ? null : input.value;
-        input.setAttribute('aria-invalid', String(!input.validity.valid));
+        draft.values[key] = input.value;
+        markInvalid();
         changed();
       });
       wrap.append(control(label, input));
@@ -387,6 +437,11 @@ function createWorkspace(entry, signal) {
     return { params, bands: part ? draft.bands : [] };
   }
 
+  function selectScope(id) {
+    pickScope(id);
+    if (draft.edited || entry.adjust_draft?.data) writer?.queue(snapshotDraft(draft, graphs));
+  }
+
   function pickScope(id) {
     const part = draft.sections.find((item) => item.id === id);
     if (id !== 'global' && !part) id = 'global';
@@ -451,6 +506,7 @@ function createWorkspace(entry, signal) {
     pickScope(part.id);
     scopeNote.textContent = message;
     selector.focus();
+    changed();
   }
 
   function settingsSnapshot() {
@@ -461,7 +517,7 @@ function createWorkspace(entry, signal) {
       if (light && key === 'bass_db') continue;
       const raw = draft.values[key];
       if (raw === undefined || (typeof raw === 'string' && raw.trim() === '')) continue;
-      const value = raw == null ? NaN : Number(raw);
+      const value = settingNumber(raw);
       if (!(value >= min && value <= max)) invalidSettings.push(`${label} must be between ${min} and ${max}.`);
       else if (value !== saved[key]) advanced[key] = value;
     }
@@ -518,6 +574,7 @@ function createWorkspace(entry, signal) {
     renderBtn.disabled = !range || !!errors.length || missingBandwidth || fullOnly || busy || draft.applying;
     renderBtn.textContent = audition ? 'Render again' : 'Render audition';
     cancelBtn.hidden = !busy;
+    discardDraft.disabled = !!draft.applying;
     applyBtn.disabled = !!errors.length || !Object.keys(advanced).length || draft.applying;
   }
 
@@ -530,6 +587,8 @@ function createWorkspace(entry, signal) {
   }
 
   function changed(rangeChanged = false) {
+    edited = draft.edited = true;
+    writer?.queue(snapshotDraft(draft, graphs));
     if (rangeChanged || draft.scope !== 'global') toneResult.textContent = '';
     if (audition || busy) clearAudition('Passage or settings changed. Render a new audition to hear them.');
     else update();

@@ -17,8 +17,7 @@ no build step; reload the page after editing.
 ## Checks
 
 CI uses Python 3.12 and never runs on pushes. Every pull request is checked on macOS, the supported
-platform. Windows and Linux are complementary: start the workflow by hand to check all three systems,
-for example before a release when they need checking. These are generated-signal and unit/integration
+platform. Manual runs may check the frozen Windows and Linux source paths. These are generated-signal and unit/integration
 tests; they do not establish that the native UI, fresh-machine setup or optional AI work on every computer.
 CI also repeats comparison-playback regressions with the bundled FFmpeg, so an installed system
 version cannot hide differences in the fallback used by a fresh installation.
@@ -93,7 +92,7 @@ place, from GitHub, with the built-in copy as the fallback.
 - **Stay cancellable.** Long loops report through `Progress` (which raises `Cancelled`); subprocesses go
   through `media.proc.run`.
 - **Bounded memory.** Keep audio float32 and stream long signals (see `dsp/filters.filtfilt_stream`).
-- **OS differences live in `system.py`.** Other modules call its functions instead of checking the platform.
+- **OS behavior belongs in `system.py`.** Existing exceptions cover Trash, the FFmpeg executable shim and diagnostic platform reporting (see AGENTS.md).
 - **Small and dependency-light.** No UI framework or build step; a new dependency needs a good reason.
 
 ## Credits

@@ -4,7 +4,7 @@
 first opening, optional AI, updates and removal without Terminal commands.
 
 Choose the self-contained **Mac app** for everyday testing on Apple silicon, or install from
-source for development, Windows or Linux. They use the same processing code and normally
+source for development. Windows, Linux and Docker are frozen and unsupported. The instructions below remain available for existing installations. They use the same processing code and normally
 share app data for the same computer user; quit one before opening the other.
 
 **On this page:** [Mac app](#mac-app) · [Source setup](#install-from-source) ·
@@ -63,7 +63,7 @@ For a browser window, open a terminal in the project folder and run:
 bash start.sh --browser
 ```
 
-### Windows source launcher — experimental
+### Windows source launcher — unsupported
 
 Use the browser version first. The complete Windows installation/runtime path still needs native
 qualification; successful Mac checks do not establish Windows compatibility.
@@ -85,7 +85,7 @@ If `start.bat` cannot find uv, run `.\start.bat` in a new PowerShell window in t
 Python 3.14 or newer alone does not meet this release's source requirements; use uv to obtain a
 supported version without removing your other Python.
 
-### Linux source launcher — experimental
+### Linux source launcher — unsupported
 
 Open a terminal in the extracted folder and run:
 

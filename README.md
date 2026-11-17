@@ -23,7 +23,7 @@ and confirm the version in **Settings → About**. Your Library, settings and au
 separately and carry over. AudioLab tells you when a new version exists; you replace the app yourself.
 [Update guide](docs/MACOS.md#updates)
 
-Intel Macs, Windows and Linux have an [experimental source installation](docs/INSTALLATION.md#install-from-source), with no packaged app yet.
+Intel Macs have an [experimental source installation](docs/INSTALLATION.md#install-from-source). Windows, Linux and Docker are frozen and unsupported. The existing source and server paths may still work.
 
 ## What's new in 2.5.0
 

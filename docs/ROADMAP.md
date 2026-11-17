@@ -10,7 +10,7 @@ promises. Completed changes belong in [CHANGELOG.md](../CHANGELOG.md).
 - **Installation feedback:** make first setup and repair easier using reproducible tester reports.
   Automated regression checks run on macOS for every pull request, and on Windows and Linux when started
   by hand; fresh-machine setup, OS security prompts and native audio/device behavior need broader
-  qualification. Windows/Linux remain experimental.
+  qualification. Windows, Linux and Docker are frozen and unsupported.
 - **Final name:** AudioLab is a working name shared with other audio projects. Review naming and
   distribution availability before a wider release or package-index publication.
 - **Better classifier evidence:** evaluate varied, permission-cleared recordings before changing
@@ -34,14 +34,18 @@ promises. Completed changes belong in [CHANGELOG.md](../CHANGELOG.md).
   HTTP contract.
 
 ## Bigger features
-- **App shortcuts on Windows/Linux**: a Start-menu entry / `.desktop` file, filled in where macOS already has
-  one (`system.install_shortcut`, used by `audiolab shortcut`), plus the native window there (`[desktop]` extra).
-- **Packaged apps**: a self-contained, signed and notarized Mac app, followed by a Windows installer,
-  to reduce setup steps. The current source ZIP uses setup scripts and an internet connection.
+
+- **Shared graphical EQ editor:** use the same graph and keyboard-accessible controls before the first
+  render and in Adjust. The pre-render view needs a design for section timing, text entry and which
+  measurements are available before decoding.
+- **AI helper compatibility:** specify and check the interface to the existing helper before changing
+  the source-byte reuse gate.
+- **Distribution on hold:** Windows/Linux shortcuts and installers, Docker development, and
+  Developer ID signing and notarization for wider Mac distribution.
 - **Long sets on small machines**: qualify whole-app memory and disk use on longer recordings and
   lower-memory machines. Enhance uses disk-backed working buffers, but does not promise constant RAM
   or a maximum supported recording length. A fully streamed mastering chain remains a larger step.
-- **Better separation models**: RoFormer / MDX models (e.g. via `audio-separator`) for cleaner vocals,
+- **Better separation models (on hold)**: RoFormer / MDX models (e.g. via `audio-separator`) for cleaner vocals,
   plus de-reverb / de-noise models for the voice recipe.
 - **Track-aware DJ processing**: snap AI windows and per-track loudness to track boundaries
   (2.1 already *cuts* sets into tracks from chapters/tracklists; detecting boundaries without a tracklist
@@ -49,14 +53,12 @@ promises. Completed changes belong in [CHANGELOG.md](../CHANGELOG.md).
 - **Partly finished jobs**: when a job fails late, keep the files that were already complete and mark the job
   "partly finished" (a new job state). Today a failed or cancelled attempt removes everything it saved, so a
   finished MP3 goes with a failed WAV; that stays the rule until then.
-- **Folder batch**: pick a whole folder (several files at once already work).
-- **Library, later steps** (left out of 2.3 on purpose): "Locate…" for a moved file (needs a native file
-  picker in the app window); finding moved files automatically (a relocation scan); retention or a size cap for kept originals
+- **Library, later steps:** finding moved files automatically (a relocation scan); retention or a size cap for kept originals
   (today they stay until cleared in Storage); "Fetch the original again" for a link whose original is not kept
   (the entry has `original.url`; download it again, check it is the same recording, attach it to the entry);
   comparing stems of a Split result with each other.
-- **Translations** of the UI (at least German).
-- **Alternative looks (themes).** The 2.4 design pass mocked two more directions next to the chosen one
+- **Translations (on hold)**, including German.
+- **Alternative looks (on hold).** The 2.4 design pass mocked two more directions next to the chosen one
   ("Sleeve"): "Inset" (Mac-native grouped panels like System Settings, segmented controls, teal accent) and
   "Console" (one flat aluminium surface; the player as a dark hardware deck with backlit A/B keys and an LCD
   readout). Colours, type, spacing and radii all live in `css/tokens.css`, so a theme is mostly another token set

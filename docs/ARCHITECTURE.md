@@ -99,10 +99,9 @@ outside their recorded output root are omitted from Trash actions, and Library r
 located path still points to the same file. Job records and output ownership roots stay as recorded.
 
 ### Platform code
-Everything that differs between macOS, Windows and Linux lives in `system.py`; other modules call its
-functions and never branch on the platform themselves. The only exceptions are the Windows ffmpeg shim
-in `media/ffmpeg.py` (the `.exe` suffix and copying instead of symlinking), and `cli.py`, which prints
-the platform in `doctor`. Porting a feature to another OS means filling in its branch in `system.py`.
+OS behavior belongs in `system.py`. Existing exceptions are system Trash in `trash.py`, the executable
+suffix and link/copy shim in `media/ffmpeg.py`, and reporting the platform in `cli.py` and
+`diagnostics.py`. The desktop window calls pywebview for its native dialogs.
 
 ### Self-contained macOS Core build
 
@@ -388,6 +387,20 @@ Separate basis fields prevent mistaking these estimates for complete spectral co
 audio array to the chain rather than retaining a second obsolete buffer through the remaining DSP.
 
 ## Decisions and why
+
+- The Mac window and browser share one local HTTP service and the same plain JavaScript views. This
+  keeps one processing path and lets contributors run the UI without a frontend build.
+- A FIFO queue with one worker by default limits concurrent memory and disk use. Job and Library
+  records are individual JSON files. New fields are optional so existing recordings remain readable.
+  A breaking record change needs a migration.
+- The optional AI process keeps models and their runtime out of the core app. The current build
+  verifies a published helper against its archive and source hashes. A future protocol compatibility
+  check could let a core-only edit reuse the same archive while retaining those hashes as provenance.
+- The ad-hoc signed DMG serves a small tester audience through the documented first-open procedure.
+  Windows, Linux and Docker are frozen and unsupported.
+- Generated audio and local HTTP fixtures exercise file preservation, meter behavior and the API.
+  Listening preference, recipe accuracy on real music, fresh Mac installation and small-machine limits
+  each require separate observations.
 
 - **No automatic tone stabiliser.** A validated detector (30 s windows of seven band shares against the
   recording's median, ≥ 2 dB for ≥ 3 minutes) flagged the tilted first part of one DJ set, but also five

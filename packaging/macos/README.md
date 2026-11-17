@@ -4,10 +4,21 @@ This folder builds the application and its separate optional AI add-on. The main
 and native tools for Save/Convert, Check and Enhance with "Volume only" or "Tone and volume". Settings
 can download the compatible add-on for Split and AI stems Enhance; testers install neither Python nor uv.
 
-The **Build macOS tester app** workflow in GitHub Actions is the maintained release path. Start it
-manually from the Actions tab; it creates build artifacts without publishing a release.
-Temporary app/source artifacts expire after one day; validation logs expire after seven days.
-Download and verify them before publishing the release's durable assets in GitHub Releases.
+Start **Build macOS tester app** manually in GitHub Actions. The default run produces downloadable
+artifacts. The app and source artifacts expire after one day, and validation logs after seven days.
+
+For a release, first merge the version bump and push the matching `vX.Y.Z` tag on that commit. Opt in
+to draft creation by dispatching the workflow at that tag. The tagged commit must have this workflow.
+
+```sh
+gh workflow run macos-app.yml --ref vX.Y.Z -f create_draft=true
+```
+
+After the build and native checks pass, the workflow verifies the image and commit, checks the
+downloaded assets against the build's checksums, and creates an unpublished draft. Review the
+generated notes and attachments in GitHub Releases, then publish it there. A draft or published
+release for the tag stops the draft job. If an upload leaves an incomplete draft, inspect it in
+GitHub Releases before continuing. The download-only build remains available for manual publication.
 
 For a local build, use an Apple silicon Mac with Xcode Command Line Tools,
 [uv](https://docs.astral.sh/uv/getting-started/installation/) and the exact Python Build Standalone
@@ -79,9 +90,9 @@ its parent dies. Check installation from the actual public HTTPS release URL aft
 The optional native WebKit smoke command is restricted to disposable GitHub Actions runners so
 local verification does not steal focus or write to a user's WebKit profile.
 
-Before uploading a binary, require the ordinary repository checks, build checks and actual artifact
-smoke results. Upload the DMG, new core source companion, AI catalog and checksums to the GitHub
-release (a normal release for X.Y.Z; the in-app check reads the version, not GitHub's prerelease flag:
+Before publishing a binary, require the ordinary repository checks, build checks and actual artifact
+smoke results. The draft workflow attaches the DMG, new core source companion, AI catalog and checksums.
+For a manual release, attach those same files to the GitHub release (a normal release for X.Y.Z; the in-app check reads the version, not GitHub's prerelease flag:
 a final build is offered only final versions, a beta-numbered build also betas). A helper rebuild additionally includes its new runtime and matching source companion;
 a reuse release keeps linking to the original published helper assets. Do not attach build folders, logs containing personal paths, local audit reports or any
 real recordings. Native CI is regression evidence; it does not qualify every macOS version or

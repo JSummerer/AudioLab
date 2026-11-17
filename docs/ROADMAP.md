@@ -89,5 +89,3 @@ promises. Completed changes belong in [CHANGELOG.md](../CHANGELOG.md).
 - Save / Convert output space: MP3, M4A and Opus count only their file on another drive. WAV, FLAC and
   cutting into tracks still need the full working space there; counting them needs the source's sample rate
   and channels, the number of tracks and a size bound for the embedded cover at preflight.
-- Release draft: let the Mac build workflow create a draft GitHub release with the DMG, AI catalog and
-  checksums attached, so publishing a version is one review and one click.

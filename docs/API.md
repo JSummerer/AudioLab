@@ -394,7 +394,7 @@ chunks join exactly as one decode of the whole file would (bit for bit for WAV, 
 noise-filling bands are random by design; a Matroska file with a non-48 kHz codec may keep a sub-millisecond
 offset after a seek). The player plays them back to back, both versions started at the same time on one clock. Fewer frames come back only at the end of the file (none past it). Mono is spread to
 both channels and more channels are mixed down, as for the analysis. A file that can't be decoded → `400` with
-detail.
+detail. For WebM/Matroska, Compare looks for a timing reference in the first 25 seconds. If it cannot align a later chunk, it returns an error with an earlier-passage or WAV/FLAC hint.
 
 ### Health
 ```jsonc

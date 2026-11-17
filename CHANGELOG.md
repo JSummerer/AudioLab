@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Compare reports when it cannot align a late WebM passage. Seeking no longer decodes an entire long introduction to find that point.
+
 - Saving a track uses the playlist you submitted, even if you looked up the same track in another playlist.
 
 - Use **Locate…** in the app window to reconnect a missing Library file recorded by this version,

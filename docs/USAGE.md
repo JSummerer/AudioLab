@@ -150,9 +150,14 @@ more, turned down by the excess plus 0.5 dB, and only when that is at most 2 dB;
 encoded, with a warning. Lossless files are held to the selected ceiling and never re-encoded. A warning
 means a file is still over its limit or could not be measured; try a lower ceiling or a lossless format
 when more headroom is needed. Check judges a lossy file's peaks by the same limit.
-The file stays saved. Master readings describe the audio before encoding, and split tracks are not
-individually checked. Job pages and the Library say this in plain words; **Show details** adds the
-LUFS/dBTP readings and the technical figures behind each line of **What we did**. Library's
+Enhance also checks each MP3, AAC or Opus track. Each track starts with the turn-down applied to the
+full file. A track over the limit can be encoded once more if the total turn-down would stay within
+2 dB of the master. A warning identifies any track that still needs attention. Individual tracks can
+end up at different gains. Checking adds a decode of each lossy track, and any retry adds another
+encode and decode of that track. Lossless track cuts and Save / Convert cuts have no individual check.
+
+Master readings describe the audio before encoding. **Show details** adds the LUFS/dBTP readings and
+the technical figures behind each line of **What we did**. Library's
 **Processing details** keeps settings, reasons, actual changes and
 file checks even after the job expires. Older entries have only the details they originally recorded.
 

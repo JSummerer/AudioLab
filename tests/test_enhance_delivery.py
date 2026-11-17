@@ -111,13 +111,37 @@ def test_master_reuses_the_analysis_measurement_of_the_reference(delivery, monke
 def test_meter_error_and_ceiling_miss_keep_the_exports(delivery, monkeypatch):
     source, ctx, notes = delivery(('mp3_320', 'wav16', 'wav24', 'aac_256'))
     ctx.options['split_tracks'] = True  # tracks are cut in the first format, the MP3
-    cuts = []
-    monkeypatch.setattr(common, 'split_into_tracks', lambda *a, **kw: (cuts.append(kw), ([], None))[1])
+    ctx.options['tracklist'] = '0:00 Retry\n0:02 Over\n0:04 Missing\n0:06 Still over'
+    actual_encode = export.run_ffmpeg
+    track_encodes = {i: [] for i in range(1, 5)}
+
+    def encode(args, **kwargs):
+        path = Path(args[-1])
+        if path.parent.name != 'Tracks':
+            return actual_encode(args, **kwargs)
+        track = int(path.name[1:3])
+        track_encodes[track].append(args[args.index('-af') + 1])
+        assert kwargs['duration_s'] == 2.0
+        path.write_bytes(b'encoded track fixture')
+
+    monkeypatch.setattr(export, 'run_ffmpeg', encode)
     private_detail = '/private/work/meter.log'
     lossy_checks = []
 
     def measure(path, *, ceiling_dbtp, progress, duration_s):
         reading = {'integrated_lufs': -14.0, 'ceiling_dbtp': ceiling_dbtp, 'tolerance_db': PEAK_TOLERANCE_DB}
+        if path.parent.name == 'Tracks':
+            assert duration_s == 2.0 and ceiling_dbtp == export.LOSSY_LIMIT_DBTP
+            track = int(path.name[1:3])
+            if track == 3:
+                raise AudioLabError('Meter failed', detail=private_detail)
+            excess = {1: 0.3 if len(track_encodes[1]) == 1 else -0.1, 2: 0.6, 4: 0.3}[track]
+            return {
+                **reading,
+                'true_peak_dbtp': ceiling_dbtp + excess,
+                'status': 'warning' if excess > 0 else 'verified',
+                'ceiling_met': excess <= 0,
+            }
         if path.suffix in ('.mp3', '.m4a'):  # over their limit by 0.5 / 0.3 dB as encoded; the AAC stays over
             lossy_checks.append(path)
             over = path.suffix == '.m4a' or len(lossy_checks) == 1
@@ -137,7 +161,7 @@ def test_meter_error_and_ceiling_miss_keep_the_exports(delivery, monkeypatch):
 
     monkeypatch.setattr(enhance, 'measure_export', measure)
     result = enhance.run(ctx, source)
-    files = {f['format']: f for f in result['files']}
+    files = {f['format']: f for f in result['files'] if f.get('group') != 'tracks'}
     assert files.keys() == {'wav16', 'wav24', 'mp3_320', 'aac_256'}
     assert all(Path(f['path']).is_file() for f in files.values())
     unverified = files['wav16']['verification']
@@ -162,10 +186,36 @@ def test_meter_error_and_ceiling_miss_keep_the_exports(delivery, monkeypatch):
     # The MP3 was encoded once more, turned down, before it was saved: no warning, a plain "What we did" line.
     mp3 = files['mp3_320']['verification']
     assert len(lossy_checks) == 4 and mp3['status'] == 'verified' and mp3['ceiling_dbtp'] == export.LOSSY_LIMIT_DBTP
-    assert mp3['message'] is None and len(result['warnings']) == 3
+    assert mp3['message'] is None and len(result['warnings']) == 6
     line = 'Turned the MP3 down slightly so its peaks stay under the limit (-1.0 dB; encoding raises peaks).'
     assert line in result['summary'] and not any('Turned the AAC' in s for s in result['summary'])
-    assert [kw['trim_db'] for kw in cuts] == [1.0]  # its tracks are turned down just like the full MP3
+    tracks = [f for f in result['files'] if f.get('group') == 'tracks']
+    assert [(f['start_s'], f['end_s']) for f in tracks] == [(0, 2), (2, 4), (4, 6), (6, 8)]
+    assert all(Path(f['path']).is_file() for f in tracks)
+    assert len(list(Path(result['tracks_dir']).iterdir())) == 4
+    fixed, over, missing, still_over = [f['verification'] for f in tracks]
+    assert fixed['status'] == 'verified' and fixed['trim_db'] == 1.8
+    assert over['status'] == 'warning' and over['trim_db'] == 1.0
+    assert '02 - Over.mp3' in over['message'] and 'past 2 dB below the master' in over['message']
+    assert missing['status'] == 'unverified' and missing['trim_db'] == 1.0
+    assert '03 - Missing.mp3' in missing['message'] and private_detail not in missing['message']
+    assert still_over['status'] == 'warning' and still_over['trim_db'] == 1.8
+    assert '04 - Still over.mp3' in still_over['message'] and 'even after it was turned down' in still_over['message']
+    assert '2 tracks were turned down further during export.' in result['summary']
+    for check in (over, missing, still_over):
+        assert check['message'] in result['warnings'] and ('warning', check['message']) in notes
+    assert [len(track_encodes[i]) for i in range(1, 5)] == [2, 1, 1, 2]
+    assert all('volume=-1.00dB' in commands[0] for commands in track_encodes.values())
+    for track in (1, 4):
+        first, second = track_encodes[track]
+        assert second == first.replace('volume=-1.00dB', 'volume=-1.80dB')
+
+    job = Job(ctx.job_id, 'enhance', source, ctx.options, title='Generated', result=result)
+    assert library.record(job)
+    saved_tracks = [f for f in library.public(library.get(job.id))['files'] if f['kind'] == 'track']
+    assert [f['verification'] for f in saved_tracks] == [
+        {k: v for k, v in f['verification'].items() if k != 'message'} for f in tracks
+    ]
 
 
 @pytest.mark.parametrize(('helper', 'stage'), [('make_previews', 'preview'), ('measure_export', 'export')])

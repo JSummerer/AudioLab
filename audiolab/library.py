@@ -366,8 +366,9 @@ def _file_item(f: dict[str, Any], root: Path, task: str, stem: str | None = None
         item['stem'] = stem
     if identity := _file_identity(Path(f['path'])):
         item['_identity'] = identity
-    if kind == 'enhanced' and (verification := processing.verification(f.get('verification'))) is not None:
-        item['verification'] = verification
+    if task == 'enhance' and kind in ('enhanced', 'track'):
+        if (verification := processing.verification(f.get('verification'))) is not None:
+            item['verification'] = verification
     return item
 
 

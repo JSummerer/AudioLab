@@ -171,7 +171,7 @@ inside the half-open bin, not its midpoint; the gain need not be constant across
 mean no reported reduction above that threshold. These highlights exclude static EQ, overall gain
 and other stages. Old entries without a timeline do not imply no processing.
 
-Each full-length Enhance file has `verification: {status, integrated_lufs, true_peak_dbtp,
+Each full-length Enhance file and each lossy Enhance track has `verification: {status, integrated_lufs, true_peak_dbtp,
 ceiling_dbtp, ceiling_met, tolerance_db, message}`. `ceiling_dbtp` is the limit the file was checked
 against: the master's peak ceiling for a lossless file; for a lossy file (MP3, AAC, Opus) the lossy limit,
 -0.1 dBTP, or the ceiling when that is higher. Status is `verified` (peak within that limit), `warning`
@@ -190,8 +190,12 @@ encoded, or one still over after its re-encode) and a failed measurement keep th
 lossy files, even after it was turned down. For more room, use a lower peak ceiling or a lossless format
 (+0.20 dBTP after saving, turned down 0.8 dB; limit -0.10 dBTP)." or "The WAV 24-bit file goes over the
 peak ceiling. For more room, use a lower peak ceiling (-0.60 dBTP after saving; ceiling -1.00 dBTP)."
-`message` is null for a verified file. Split tracks are not individually checked; they take the turn-down
-of their format's full file.
+`message` is null for a verified file. Each lossy Enhance track starts with the trim of its format's full
+file. It gets one separate check and, when needed, one re-encode and recheck of that track only. The 2 dB
+bound includes the inherited trim, the new reduction and its margin. A track that would exceed that
+bound keeps its initial encode with a warning naming the track. `verification.trim_db` on tracks records
+the total turn-down from the master. A track may be turned down more than its neighbour. Track check
+metadata is absent on lossless Enhance cuts, Save / Convert cuts and older unchecked tracks.
 `metrics.after` still describes the master, before export; the checks are measurements at creation,
 not proof that a file has not been edited later or that every decoder will produce identical peaks.
 
@@ -609,7 +613,7 @@ calibration: it analyzes and renders the complete original again.
 `applied` and `metrics` use the Result fields above.
 The projection omits source paths, tracklists and raw tool errors, bounds strings/lists and rejects
 non-finite numbers. Older entries omit `processing`; no historical settings are invented.
-Enhanced `files[].verification` keeps the Result export checks except `message`. Library
+Enhance `files[].verification` keeps the Result export checks, including those for lossy tracks, except `message`. Library
 `loudness.result_lufs` remains the master measurement; the compare player uses the selected export's
 measured loudness when available. An explicitly unverified/unmeasurable export disables volume matching;
 legacy entries with no check use their original master-based estimate.

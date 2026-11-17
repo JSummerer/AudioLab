@@ -494,6 +494,7 @@ def file_entries(outputs: list[dict[str, Any]], start: int = 0) -> list[dict[str
                 'size_bytes': path.stat().st_size if path.exists() else o.get('size_bytes', 0),
                 'playable': path.suffix.lower() in PLAYABLE_EXT,
                 'path': str(path),
+                **({'verification': dict(o['verification'])} if o.get('verification') is not None else {}),
             }
         )
     return files
@@ -626,12 +627,15 @@ def split_into_tracks(
     start: int,
     sample_rate: int | None = None,
     trim_db: float = 0.0,
+    check: export.Check | None = None,
+    ceiling_dbtp: float | None = None,
 ) -> tuple[list[dict[str, Any]], Path | None]:
     """`split_tracks`: cut `src` into the link's tracks (chapters or the description's
     tracklist) inside a new folder `folder_name` under `parent`. Returns Result.files
     entries (ids from f<start>, with group/track/start_s/end_s) and the folder —
     ([], None) when the source has no usable tracklist. `trim_db`: dB the tracks are turned
-    down by, the same as their format's full file (media.export)."""
+    down by initially, the same as their format's full file (media.export). A
+    supplied check can re-encode individual lossy tracks."""
     tracks = acq.metadata.get('tracks') or []
     if not tracks:
         progress(100)
@@ -647,6 +651,8 @@ def split_into_tracks(
         progress=progress,
         sample_rate=sample_rate,
         trim_db=trim_db,
+        check=check,
+        ceiling_dbtp=ceiling_dbtp,
     )
     if not outputs:
         folder.rmdir()

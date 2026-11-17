@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Enhance checks each MP3, AAC and Opus track's peaks before saving. It can retry that track once
+  within a 2 dB total turn-down from the master. Any remaining miss or failed measurement names the
+  affected track in the warning.
+
 - Settings groups controls under General, Output defaults, Downloads, AI add-on, Storage and Help.
   Help keeps maintenance and diagnostics in a disclosure. Existing Settings links still work.
 - New uses the formats in Settings on a fresh load and keeps your choices between jobs. Enhance starts

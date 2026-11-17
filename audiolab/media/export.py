@@ -554,7 +554,7 @@ def _commit(staging: Path, dst: Path) -> Path:
 # don't follow a small turn-down exactly (up to 0.3 dB less than the turn-down on a real song).
 LOSSY_LIMIT_DBTP = -0.1
 TRIM_MARGIN_DB = 0.5
-TRIM_MAX_DB = 2.0  # a bound, not a clamp: a file that needs more (margin included) is kept as encoded, with a warning
+TRIM_MAX_DB = 2.0  # bound for the total trim, including any trim inherited by a track
 
 # Audio codecs that keep every sample (FFmpeg's names, matched by prefix: pcm_s16le, …); any other is lossy.
 # WavPack counts as lossless although hybrid (lossy) WavPack exists: it is rare, and the verdict is stricter.
@@ -580,9 +580,8 @@ def source_peak_limit(codec: str | None) -> float | None:
     return round(LOSSY_LIMIT_DBTP + PEAK_TOLERANCE_DB, 2) if lossy_codec(codec) else None
 
 
-# Measures a staged export against a true-peak limit: `check(path, progress, limit_dbtp)` -> a reading with at
-# least `ceiling_dbtp` (the limit), `true_peak_dbtp` and `ceiling_met` (media.verification.measure_export's shape).
-Check = Callable[[Path, Progress, float], dict]
+# Measures a staged export against a true-peak limit. The estimated duration is for progress reporting.
+Check = Callable[[Path, Progress, float, float | None], dict]
 
 
 def transcode(
@@ -623,7 +622,7 @@ def _transcode(
     `trim_db` turns the audio down by that many dB (track cuts get their full file's trim).
     `check` measures the staged file before it gets its name, against `peak_limit(fmt, ceiling_dbtp)` (the
     master's ceiling). When a lossy file's peaks come out above that limit, it is encoded once more from
-    `src`, turned down by the excess plus TRIM_MARGIN_DB if that is at most TRIM_MAX_DB, and checked again;
+    `src`, turned down by the excess plus TRIM_MARGIN_DB if the total trim stays within TRIM_MAX_DB, and checked again;
     that version replaces the first before anything is saved. Otherwise the file is kept as encoded.
     `verification` is the reading of the file as saved, `trim_db` the gain taken off in all (0.0: none).
 
@@ -728,15 +727,17 @@ def _transcode(
             step = progress.sub(50, 75)
             step(0, f'Checking the saved {spec.label}…')
             limit = peak_limit(spec.key, ceiling_dbtp)
-            verification = check(staging, step, limit)
+            verification = check(staging, step, limit, duration_s)
             peak = verification.get('true_peak_dbtp')
             if spec.kind == 'lossy' and verification.get('ceiling_met') is False and peak is not None:
                 excess = round(peak - limit + TRIM_MARGIN_DB, 2)
-                if 0 < excess <= TRIM_MAX_DB:
-                    trim_db = round(trim_db + excess, 2)
+                total_trim = round(trim_db + excess, 2)
+                if excess > 0 and total_trim <= TRIM_MAX_DB:
+                    trim_db = total_trim
                     with_art = encode(retry, with_art, -trim_db, progress.sub(75, 90))
-                    verification = check(retry, progress.sub(90, 100), limit)
+                    verification = check(retry, progress.sub(90, 100), limit, duration_s)
                     os.replace(retry, staging)  # the turned-down version is the one that gets saved
+        progress.check_cancel()
         path = _commit(staging, dst)
         if big_wav:
             progress.note(
@@ -828,10 +829,13 @@ def export_tracks(
     progress: Progress | None = None,
     sample_rate: int | None = None,
     trim_db: float = 0.0,
+    check: Check | None = None,
+    ceiling_dbtp: float | None = None,
 ) -> list[dict[str, object]]:
     """Cut `src` into `tracks` ([{n, title, start_s, end_s}], see youtube.make_tracks) and
     save each one as 'NN - <title>.<ext>' in format `fmt`, turned down by `trim_db` like the full
-    file of that format (`_transcode`; tracks are not checked themselves).
+    file of that format. When supplied, `check` measures each lossy track and allows one
+    extra encode within the total trim bound (`_transcode`).
 
     `tags` describe the whole set: its title becomes the album, its artist the album
     artist; a track titled 'Artist - Track' gets its own artist. Tracks that start past
@@ -841,6 +845,7 @@ def export_tracks(
     progress = progress or Progress.null()
     src, folder = Path(src), Path(folder)
     spec = resolve_format(fmt)
+    check = check if spec.kind == 'lossy' else None
     dur = probe_media(src).get('duration_s')
     todo = [t for t in tracks if dur is None or float(t['start_s']) < dur - 0.05]
     total = len(todo)
@@ -864,7 +869,7 @@ def export_tracks(
         if set_tags.get('artist'):
             track_tags['album_artist'] = set_tags['artist']
         name = f'{n:0{width}d} - {sanitize_filename(title, fallback=f"Track {n}")}{spec.ext}'
-        path = transcode(
+        made = _transcode(
             src,
             folder / name,
             spec.key,
@@ -876,7 +881,11 @@ def export_tracks(
             start_s=start,
             end_s=end,
             trim_db=trim_db,
+            check=check,
+            ceiling_dbtp=ceiling_dbtp,
         )
+        path = made['path']
+        verification = made['verification']
         outputs.append(
             {
                 'format': spec.key,
@@ -890,6 +899,7 @@ def export_tracks(
                 'title': title,
                 'start_s': round(start, 3),
                 'end_s': round(end if end is not None else (dur or start), 3),
+                **({'verification': {**verification, 'trim_db': made['trim_db']}} if verification is not None else {}),
             }
         )
     progress(100)

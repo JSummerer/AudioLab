@@ -75,12 +75,13 @@ promises. Completed changes belong in [CHANGELOG.md](../CHANGELOG.md).
   and Opus (+2.1) need more than the 2 dB bound, so those files keep their warning. Measure with the FFmpeg
   the app ships: Homebrew's FFmpeg 9.0.2 gave AAC and Opus peaks about 0.1 dB apart from the app's 7.1 on
   the same master.
-- Track cuts are still not checked individually: each is encoded on its own with its full file's turn-down.
-  On the real song, MP3 and Opus tracks stayed under the lossy limit (at most −0.24 and −0.48 dBTP), but AAC
-  tracks cut inside a loud passage peaked up to +2.9 dBTP within 15 ms of their start (+2.75 with the old,
-  larger turn-down too). Save / Convert cuts tracks the same way. Open: check each track like a full file
-  (one decode per track; a retry cannot fix overs of 3 dB), or treat the cut edge.
-- The Library does not keep how much a lossy file was turned down, and its version line shows the loudness
+- AAC track starts: on the real song, MP3 and Opus tracks stayed under the lossy limit (at most −0.24 and
+  −0.48 dBTP), but AAC tracks cut inside a loud passage peaked up to +2.9 dBTP within 15 ms of their start
+  (+2.75 with the older, larger turn-down). Enhance now checks each lossy track and warns when a peak miss
+  remains. Save / Convert uses the same cut path. Further work is to give the AAC encoder audio before the
+  cut while preserving the exact played boundaries. Verify both playback length and gain across cuts.
+- The Library tracks the turn-down of checked lossy tracks. The Library still lacks the full-length file's
+  turn-down, and its version line shows the loudness
   target, not the delivered level. An expert choice for lossy peaks is a possible later addition if testers ask.
 - Peak-meter gap: on a dense, hard-limited test signal, a 24-bit WAV measured −0.88 dBTP after saving while
   the limiter reported −1.0 (its 4× true-peak meter against the 192 kHz export check). On real music the WAV

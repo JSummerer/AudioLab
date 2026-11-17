@@ -115,7 +115,7 @@ export function filePlayer(jobId, file) {
 }
 
 /** Tracks cut from a long recording: play each inline, download each (not with `download: false`). */
-export function trackRows(jobId, files, { download = true } = {}) {
+export function trackRows(jobId, files, { download = true, fileNote } = {}) {
   const rows = [];
   const playback = rowPlayback(rows, 14);
 
@@ -131,7 +131,7 @@ export function trackRows(jobId, files, { download = true } = {}) {
     row.el = h('li', { class: 'track-row' },
       btn,
       h('span', { class: 'track-n num' }, String(n).padStart(2, '0')),
-      h('div', { class: 'stem-name' }, h('strong', { title: label }, label), h('span', { class: 'muted small', title: f.name }, f.name), row.notice),
+      h('div', { class: 'stem-name' }, h('strong', { title: label }, label), h('span', { class: 'muted small', title: f.name }, f.name), fileNote?.(f), row.notice),
       h('span', { class: 'track-len num' }, fmtDuration(length)),
       download ? h('a', { class: 'btn btn-ghost btn-sm', href: fileUrl(jobId, f.id), download: f.name, 'aria-label': `Download ${label}` }, icon('download', 14), h('span', { class: 'track-dl-text' }, 'Download')) : null);
     rows.push(row);

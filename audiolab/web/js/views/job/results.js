@@ -99,7 +99,10 @@ function filesBlocks(job, r, ctx) {
   if (!all.length) out.push(block('Your files', h('p', { class: 'muted' }, 'No files were produced.'), foot));
   else if (files.length) out.push(h('section', { class: 'block job-files' }, h('h2', { class: 'block-title' }, 'Your files'), list, foot));
   if (tracks.length) {
-    const t = trackRows(job.id, tracks.filter(exists), { download: !local });
+    const t = trackRows(job.id, tracks.filter(exists), {
+      download: !local,
+      fileNote: (f) => f.verification ? h('span', { class: 'muted small' }, exportCheckText(f.verification)) : null,
+    });
     const gone = tracks.filter((f) => !exists(f));
     ctx.onCleanup(() => t.destroy());
     out.push(h('details', { class: 'block tracks-block job-files', open: true },
@@ -141,12 +144,13 @@ function fileRow(job, f) {
  * higher than the master's ceiling). */
 function exportCheckText(v, details = showDetails()) {
   if (v.status === 'unverified') return 'Saved · it couldn’t be checked afterwards';
-  const plain = v.status === 'warning' ? 'Checked after saving: its peaks go over the limit' : 'Checked after saving: peaks stay under the limit';
+  const plain = v.status === 'warning' ? 'Checked before saving: its peaks go over the limit' : 'Checked before saving: peaks stay under the limit';
   if (!details) return plain;
   const values = [
     Number.isFinite(v.integrated_lufs) ? `${v.integrated_lufs.toFixed(1)} LUFS` : 'loudness unavailable',
     Number.isFinite(v.true_peak_dbtp) ? `${v.true_peak_dbtp.toFixed(2)} dBTP` : 'silent',
     Number.isFinite(v.ceiling_dbtp) ? `limit ${v.ceiling_dbtp.toFixed(2)} dBTP` : null,
+    v.trim_db > 0 ? `turned down ${v.trim_db.toFixed(2)} dB` : null,
   ].filter(Boolean).join(' · ');
   return `${plain} · ${values}`;
 }

@@ -232,7 +232,7 @@ def verification(value: Any) -> dict[str, Any] | None:
     """File checks describe the decoded export, not the master or a later copy."""
     fields = _fields(
         value,
-        numbers='integrated_lufs true_peak_dbtp ceiling_dbtp tolerance_db',
+        numbers='integrated_lufs true_peak_dbtp ceiling_dbtp tolerance_db trim_db',
         flags='ceiling_met',
         choices={'status': ('verified', 'warning', 'unverified')},
     )

@@ -489,6 +489,7 @@ function exportCheck(file) {
     Number.isFinite(check.integrated_lufs) ? `${fmtNum(check.integrated_lufs, 2)} LUFS` : null,
     Number.isFinite(check.true_peak_dbtp) ? `${fmtNum(check.true_peak_dbtp, 2)} dBTP` : null,
     Number.isFinite(check.ceiling_dbtp) ? `limit ${fmtNum(check.ceiling_dbtp, 2)} dBTP` : null,
+    check.trim_db > 0 ? `turned down ${fmtNum(check.trim_db, 2)} dB` : null,
   ].filter(Boolean);
   return h('li', null, h('strong', null, file.label || file.name || 'Export'), ` — ${status}`,
     measurements.length ? ` (${measurements.join(' · ')})` : null);

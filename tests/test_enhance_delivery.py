@@ -53,8 +53,18 @@ def delivery(tmp_path, monkeypatch):
     return prepare
 
 
-def test_preview_uses_final_master_and_export_reading_reaches_library(delivery):
+def test_preview_uses_final_master_and_export_reading_reaches_library(delivery, monkeypatch):
+    from audiolab import ai
+    from audiolab.recipes import chain
+
     source, ctx, _notes = delivery()
+    ctx.options['quality'] = 'best'
+    monkeypatch.setattr(ai, 'ai_status', lambda: {'available': True, 'device': 'cpu'})
+
+    def fallback(_ref, params, *_args):
+        return {'x': None, 'report': {'stage': params.ai_stage, 'fallback': True}, 'warning': None}
+
+    monkeypatch.setattr(chain, '_ai_stage', fallback)
     result = enhance.run(ctx, source)
     assert result['processing']['applied']['adaptive_lowmid']['engaged']
     (file,) = result['files']
@@ -86,6 +96,12 @@ def test_preview_uses_final_master_and_export_reading_reaches_library(delivery):
     entry = library.public(library.get(job.id))
     retained = entry['processing']
     assert retained['requested']['advanced']['adaptive_lowmid'] == 'strong'
+    assert retained['requested']['quality'] == 'best'
+    assert retained['applied']['ai'] == {'stage': 'stem_eq', 'fallback': True}
+    assert retained['resolved']['params']['ai_stage'] == 'stem_eq'
+    assert retained['resolved']['calibration']['version'] == 1
+    assert retained['resolved']['auto_compressor'] == 'off'
+    assert entry['has_overview'] and entry['adjust_quality'] == 'standard'
     assert retained['resolved']['params']['adaptive_lowmid_db'] == 3.0
     assert retained['applied']['adaptive_lowmid'] == result['processing']['applied']['adaptive_lowmid']
     assert retained['metrics'] == result['metrics']

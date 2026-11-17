@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Enhance offers **Balance parts separately** for music and DJ sets, **Isolate voice** for speech, and
+  **AI when supported** for Auto. Concerts have no AI option. Adjust works with saved versions that
+  used the non-AI chain, including those that fell back from a requested AI option.
+
 - Enhance checks each MP3, AAC and Opus track's peaks before saving. It can retry that track once
   within a 2 dB total turn-down from the master. Any remaining miss or failed measurement names the
   affected track in the warning.

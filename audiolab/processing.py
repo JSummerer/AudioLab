@@ -228,6 +228,23 @@ def snapshot(options: dict, result: dict) -> dict[str, Any] | None:
     }
 
 
+def adjust_quality(details: Any) -> str | None:
+    """The Adjust mode supported by the recorded result, including a proven AI fallback."""
+    details = _mapping(details)
+    quality = _mapping(details.get('requested')).get('quality')
+    params = _mapping(_mapping(details.get('resolved')).get('params'))
+    stage = params.get('ai_stage')
+    ai = _mapping(_mapping(details.get('applied')).get('ai'))
+    if ai:
+        if ai.get('fallback') is not True:
+            return None
+    elif stage not in (None, 'none') or (quality == 'best' and stage is None):
+        return None  # no evidence that a best request used only non-AI processing
+    if quality == 'best':
+        return 'standard'
+    return quality if quality in ('light', 'standard') else None
+
+
 def verification(value: Any) -> dict[str, Any] | None:
     """File checks describe the decoded export, not the master or a later copy."""
     fields = _fields(

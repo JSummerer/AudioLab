@@ -332,8 +332,8 @@ actionable explanation instead of decoding an arbitrarily long prefix or silentl
 It measures the cropped comparison for volume matching. The result distinguishes `saved_export` from
 `section_estimate`: in a new section render, context-dependent gain and dynamics can differ from a full
 render. Reusing the old gain after a tonal/dynamics edit would not establish full-render equivalence.
-AI stems previews are excluded:
-a short reseparation would add latency and different context without establishing faithful results.
+Short previews require a saved render that used no AI processing. A recorded AI fallback retains the
+non-AI preview settings and can be adjusted. A full Apply from that version uses Tone and volume again.
 Preview jobs write no exports or Library versions. Applying settings creates an ordinary full Enhance
 job, reanalyzes the source and checks its actual exports; the preview buffer is never promoted to a master.
 

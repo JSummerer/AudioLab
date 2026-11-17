@@ -6,7 +6,7 @@ import { h, icon, clear } from '../../dom.js';
 import { RECIPE_LABELS, store, aiAvailable, isShown, setShown, formatInfo, ENHANCE_PRESETS } from '../../store.js';
 import { segmented, chips, switchControl, autoRange, toast, callout } from '../../ui.js';
 import { settingsPath } from '../../router.js';
-import { state, refs, redraw, definePart, isFileLike, isLinkSource, appliedAdvanced, TASKS, LIGHT_KEYS, PROCESSING_LABELS } from './state.js';
+import { state, refs, redraw, definePart, isFileLike, isLinkSource, appliedAdvanced, TASKS, LIGHT_KEYS, PROCESSING_LABELS, enhanceAIChoice } from './state.js';
 import { tracksBlock, tracksUpFront } from './tracks.js';
 import { hasOwnCover, takesCover, coverTools } from './cover.js';
 import { nameTools } from './names.js';
@@ -363,25 +363,25 @@ function renderEnhanceOptions(el) {
   const e = state.enhance;
   const dflt = defaults();
   const ai = aiAvailable();
-  if (!ai && e.quality === 'best') e.quality = 'standard';
+  const choiceFor = (recipe) => enhanceAIChoice(recipe, store.health?.recipes);
+  if (e.quality === 'best' && (!ai || !choiceFor(e.recipe))) e.quality = 'standard';
   const all = store.health?.formats?.enhance || [];
   const fmts = enhanceFormatGroups();
   const formatsChanged = () => [...fmts.moreKeys].filter((k) => state.enhance.formats.has(k) && !dflt.enhance_formats.includes(k));
   const tracks = placeTracks();
-  el.append(
-    optionBlock('Type of audio',
-      segmented({ label: 'Type of audio', value: e.recipe, options: recipeOptions(), onChange: (v) => { e.recipe = v; redraw('sleeve'); } })),
-    optionBlock('Processing',
+  const processingBlock = () => {
+    const choice = choiceFor(e.recipe);
+    return optionBlock('Processing',
       segmented({
         label: 'Processing', value: e.quality,
         options: [
           { value: 'light', label: PROCESSING_LABELS.light, desc: 'Sets the loudness and keeps peaks in check' },
           { value: 'standard', label: PROCESSING_LABELS.standard, desc: 'Adjusts tone and level to suit the recording' },
-          {
-            value: 'best', label: PROCESSING_LABELS.best, disabled: !ai,
-            desc: ai ? 'Treats parts separately where the recipe supports it. Slower and can change the tone.' : null,
+          ...(choice ? [{
+            value: 'best', label: choice.label, disabled: !ai,
+            desc: ai ? choice.desc : null,
             reason: store.health?.ai?.install_supported === false ? 'AI is unavailable in this build' : 'Needs the AI add-on',
-          },
+          }] : []),
         ],
         onChange: (v) => {
           const wasLight = e.quality === 'light';
@@ -391,7 +391,22 @@ function renderEnhanceOptions(el) {
           redraw('action');
           syncMore?.();
         },
-      })),
+      }));
+  };
+  let processing = processingBlock();
+  el.append(
+    optionBlock('Type of audio',
+      segmented({ label: 'Type of audio', value: e.recipe, options: recipeOptions(), onChange: (v) => {
+        const previous = choiceFor(e.recipe)?.stage;
+        e.recipe = v;
+        // Changing the audio type must not silently switch from balancing to isolating the voice.
+        if (e.quality === 'best' && choiceFor(v)?.stage !== previous) e.quality = 'standard';
+        const next = processingBlock();
+        processing.replaceWith(next);
+        processing = next;
+        redraw('sleeve');
+      } })),
+    processing,
     optionBlock('Save for', all.length ? fmts.main : loadingNote(), sourceNote()),
   );
   if (tracks.front) el.append(tracks.front);

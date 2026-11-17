@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { auditionRequests } from '../../audiolab/web/js/adjust-audition.js';
 import { auditionPower, loadAuditionSpectrum } from '../../audiolab/web/js/audition-spectrum.js';
-import { basisMessage } from '../../audiolab/web/js/views/adjust.js';
+import { adjustUnavailable, basisMessage } from '../../audiolab/web/js/views/adjust.js';
 
 const deferred = () => {
   let resolve;
@@ -10,6 +10,21 @@ const deferred = () => {
   return { promise, resolve };
 };
 const nextTurn = () => new Promise((resolve) => setImmediate(resolve));
+
+test('Adjust uses the server-confirmed mode for a saved best fallback', () => {
+  const entry = {
+    task: 'enhance', original: { kept: true }, adjust_quality: 'standard',
+    processing: {
+      requested: { recipe: 'music', quality: 'best', formats: ['wav16'] },
+      resolved: {
+        recipe: { key: 'music' },
+        params: { target_lufs: -12, tp_ceiling_db: -1, volume_only: false, ai_stage: 'stem_eq' },
+      },
+    },
+  };
+  assert.equal(adjustUnavailable(entry), '');
+  assert.match(adjustUnavailable({ ...entry, adjust_quality: null }), /no AI processing/);
+});
 
 test('leaving while submitting releases the late audition, without displaying it', async () => {
   const submission = deferred();

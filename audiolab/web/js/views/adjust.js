@@ -57,14 +57,16 @@ export function adjustUnavailable(entry) {
   const duration = durationOf(entry);
   if (Number.isFinite(duration) && duration > 0 && duration < 1) return 'This original is shorter than one second.';
   const { requested, resolved } = entry.processing || {};
-  if (requested?.quality === 'best') return 'Adjust is unavailable for versions made with AI stems.';
-  if (!resolved?.params || !requested?.formats?.length || !['light', 'standard'].includes(requested?.quality)) {
+  const quality = entry.adjust_quality;
+  if (!quality && requested?.quality === 'best') {
+    return 'Adjust needs a saved version confirmed to have used no AI processing.';
+  }
+  if (!resolved?.params || !requested?.formats?.length || !quality) {
     return 'This version predates the saved settings used by Adjust.';
   }
   const { params } = resolved;
   if (!requested.recipe || !resolved.recipe?.key || !Number.isFinite(params.target_lufs)
-    || !Number.isFinite(params.tp_ceiling_db) || params.volume_only !== (requested.quality === 'light')
-    || (params.ai_stage && params.ai_stage !== 'none')) {
+    || !Number.isFinite(params.tp_ceiling_db) || params.volume_only !== (quality === 'light')) {
     return 'This version is missing the processing details used by Adjust.';
   }
   return '';
@@ -113,7 +115,7 @@ export const adjustView = {
       if (entry?.id !== id) { showError('This version couldn’t be loaded.'); return; }
       const reason = adjustUnavailable(entry);
       if (reason) { showError(reason); return; }
-      const mode = PROCESSING_LABELS[entry.processing.requested.quality];
+      const mode = PROCESSING_LABELS[entry.adjust_quality];
       subtitle.textContent = [entry.title, entry.artist, mode].filter(Boolean).join(' · ');
       workspace = createWorkspace(entry, controller.signal);
       clear(body).append(workspace.el);
@@ -173,7 +175,7 @@ function createWorkspace(entry, signal) {
   const saved = requested.advanced || {};
   const savedBands = params.eq_bands || saved.eq || [];
   const savedSections = params.section_eq || saved.section_eq || [];
-  const light = requested.quality === 'light';
+  const light = entry.adjust_quality === 'light';
   const missingBandwidth = !light && params.hf_restore && !entry.job_exists
     && (!resolved.bandwidth || (resolved.bandwidth.is_lossy_cutoff && !resolved.bandwidth.cutoff_hz));
   const duration = durationOf(entry);

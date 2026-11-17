@@ -7,8 +7,29 @@ import { fmtBytes } from '../../dom.js';
 export const MAX_FILES = 50;
 // Volume only sets the level, so only these fine-tuning keys apply to it.
 export const LIGHT_KEYS = ['target_lufs', 'tp_ceiling_db', 'sample_rate'];
-// The labels describe what runs; the API keeps the original quality keys.
-export const PROCESSING_LABELS = { light: 'Volume only', standard: 'Tone and volume', best: 'AI stems' };
+// The API keeps the original quality keys.
+export const PROCESSING_LABELS = { light: 'Volume only', standard: 'Tone and volume', best: 'AI when supported' };
+
+const AI_CHOICES = {
+  auto: {
+    label: PROCESSING_LABELS.best,
+    desc: 'AI use depends on the detected audio type. It may isolate the voice or balance parts separately.',
+  },
+  stem_eq: {
+    label: 'Balance parts separately',
+    desc: 'Uses AI to separate drums, bass, vocals and other sounds, then adjusts their tone individually.',
+  },
+  voice_isolate: {
+    label: 'Isolate voice',
+    desc: 'Keeps the voice estimated by AI, with the backing and background sounds separated out.',
+  },
+};
+
+export function enhanceAIChoice(recipe, recipes) {
+  const stage = recipe === 'auto' ? 'auto' : recipes?.find((r) => r.key === recipe)?.ai_stage;
+  const choice = AI_CHOICES[stage];
+  return choice ? { ...choice, stage } : null;
+}
 
 export const TASKS = [
   { key: 'download' }, // Save or Convert: see options.js taskText()

@@ -44,9 +44,11 @@ def validate(options: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
     quality = str(options.get('quality') or 'standard').lower()
     if quality not in QUALITIES:
         quality = 'standard'
+    if quality == 'best' and recipe != 'auto' and recipes.RECIPES[recipe].ai_stage == 'none':
+        quality = 'standard'
     if quality == 'best' and not common.ai_device():
         raise AudioLabError(
-            'AI stems processing needs the AI add-on, which is not installed yet.',
+            'This processing option needs the AI add-on, which is not installed yet.',
             hints=['Enable AI features in Settings (one-time download), or use Tone and volume processing.'],
             fix='install_ai',
         )
@@ -220,9 +222,7 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
 
     # --- listen: measure + classify ------------------------------------------
     p = ctx.stage('analyze', 'Listening to the recording…')
-    analysis, x, sr = prof.analyze_file(
-        ref, progress=p.sub(0, 70), include_overview=quality != 'best', **common.source_format(acq)
-    )
+    analysis, x, sr = prof.analyze_file(ref, progress=p.sub(0, 70), include_overview=True, **common.source_format(acq))
     overview = analysis.pop('overview', None)
     features = classify.audio_features(x, sr, check_cancel=p.check_cancel, known_lra=analysis.get('lra'))
     kind = classify.classify(features, acq.duration_s or 0, acq.metadata)
@@ -258,6 +258,8 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
     levels = {k: analysis.get(k) for k in ('integrated_lufs', 'true_peak_dbtp', 'lra')}
     measured = None if analysis.get('is_silent') or None in levels.values() else levels
     report = render(ref, master, params, analysis, common.scratch_dir(ctx), progress=p, input_metrics=measured)
+    # A failed attempt can leave AI in the resolved parameters, even though the master used the mix.
+    ai_applied = params.ai_stage != 'none' and (report.get('ai') or {}).get('fallback') is not True
     for w in report.get('warnings') or []:
         ctx.note('warning', w)
     ctx.note(
@@ -397,8 +399,12 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
         'decisions': decisions,
         'metrics': metrics,
         'processing': {
-            **report_details(report, keep_calibration=quality != 'best'),
-            **({'auto_compressor': automatic_compressor(recipe_key, analysis)} if quality == 'standard' else {}),
+            **report_details(report, keep_calibration=not ai_applied),
+            **(
+                {'auto_compressor': automatic_compressor(recipe_key, analysis)}
+                if not ai_applied and quality != 'light'
+                else {}
+            ),
         },
         'analysis': analysis,
         'spectrogram': None,
@@ -406,6 +412,6 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
         'markers': common.chapters(acq),
         **common.link_result(acq),
         '_media': media,
-        **({'_overview': overview} if overview is not None else {}),
+        **({'_overview': overview} if overview is not None and not ai_applied else {}),
         '_library': {**common.library_hints(acq, keep_original=True), **({'version': version} if version else {})},
     }

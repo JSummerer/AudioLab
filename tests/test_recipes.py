@@ -60,6 +60,20 @@ def test_registry():
     assert all({'key', 'name', 'short', 'description'} <= set(r) for r in list_recipes())
 
 
+def test_concert_has_no_ai_option_or_addon_requirement(monkeypatch):
+    from audiolab.recipes import list_recipes
+    from audiolab.tasks import common, enhance
+
+    def unavailable():
+        pytest.fail('Concert should not check for AI')
+
+    monkeypatch.setattr(common, 'ai_device', unavailable)
+    stages = {r['key']: r['ai_stage'] for r in list_recipes()}
+    assert stages == {'club': 'stem_eq', 'live': 'none', 'music': 'stem_eq', 'voice': 'voice_isolate'}
+    result = enhance.validate({'recipe': 'live', 'quality': 'best', 'formats': ['wav16']}, {})
+    assert result['quality'] == 'standard'
+
+
 def test_resolve_overrides_and_safety():
     prof = {
         'integrated_lufs': -14.0,

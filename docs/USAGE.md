@@ -50,7 +50,7 @@ sessions use a path field.
 
 - **Save / Convert:** convert formats, save an original stream, or cut chapters/a pasted tracklist into tracks.
 - **Enhance:** choose a recipe or use Auto. "Volume only" mainly adjusts volume. "Tone and volume" uses
-  the recipe's processing. "AI stems" adds the optional AI stage.
+  the recipe's processing. The available AI option depends on the audio type.
 - **Split:** produce vocals/instrumental or four stems using the optional AI pack.
 - **Check:** inspect measurements and a spectrogram. Tempo, musical key and content type are estimates.
   Check reports measured loudness and its variation, true peaks, runs near full scale, and the estimated
@@ -104,11 +104,13 @@ and the system report is under **About**.
 |---|---|---|
 | **Volume only** | Mainly loudness; keeps the original tone | No |
 | **Tone and volume** | Tone, dynamics and loudness using the chosen recipe | No |
-| **AI stems** | Adds an AI stage to the recipe; takes longer | Yes |
+| **Balance parts separately** | Separates DJ sets and songs into parts, then adjusts each part’s tone | Yes |
+| **Isolate voice** | Keeps the AI voice estimate and removes the estimated backing and background sounds | Yes |
+| **AI when supported** | Uses the AI option for the detected recipe when audio type is Auto | Yes |
 
-Start with "Volume only" or "Tone and volume". AI stems can alter tone and is not a guarantee that you
-will prefer the sound. Versions 2.4.0b4 to 2.5.0 called "Tone and volume" Adaptive. Earlier versions called these
-choices Light, Standard and Best; existing screenshots still show those names. The **Standard / Fine-tuned AI model** choice is separate from Enhance processing;
+Concerts offer Volume only and Tone and volume. Switching to an audio type with a different AI option
+returns to Tone and volume. Versions 2.4.0b4 to 2.5.0 called "Tone and volume" Adaptive. Earlier versions
+called these choices Light, Standard and Best. The **Standard / Fine-tuned AI model** choice is separate from Enhance processing;
 see [hardware guidance](HARDWARE.md).
 
 Auto chooses from the same recipes you can select yourself:
@@ -123,7 +125,6 @@ Auto chooses from the same recipes you can select yourself:
 The app explains its choices, and you can override them. Noise reduction is off unless you explicitly
 choose it. The Song and Podcast recipes can lift presence near 3 kHz when the top end is in balance.
 The air lift is reserved for a dull top end on eligible sources. **Sharp S sounds** (Auto) softens S sounds and cymbal hits only where they jump out; choose Strong for harsh recordings or Off.
-AI stems can separate and recombine music stems or isolate speech before processing.
 These operations may change the sound in ways you dislike; compare before choosing your preferred result.
 Exporting a compressed source as WAV/FLAC does not restore missing detail.
 
@@ -222,8 +223,9 @@ the existing version is a valid result. Opening or leaving Adjust does not creat
 A section preview is an estimate: it uses nearby audio for context, while the full render checks the
 whole recording again. Even retained full-recording gain cannot predict how EQ changes the next full
 render's normalization. Auditions exclude saved-format compression artifacts. Short previews are currently
-available for results made with "Volume only" or "Tone and volume". They need saved settings and a kept
-original; AI stems needs a full render. Preview work joins the ordinary queue, so it may wait for a running job.
+available for versions confirmed to have used no AI processing, with saved settings and a kept original.
+That includes versions for which the AI option fell back to Tone and volume. Apply from such a version
+uses Tone and volume again. Preview work joins the ordinary queue, so it may wait for a running job.
 If a file's timing cannot be aligned reliably for a short preview, AudioLab explains the problem;
 try a WAV or FLAC original or run Enhance on the full recording. **Apply to full recording** reanalyzes
 the complete original and verifies new exports, preserving previous versions. It reuses available

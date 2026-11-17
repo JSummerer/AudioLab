@@ -21,7 +21,7 @@ import {
   streamLine,
 } from '../compare.js';
 import { adjustLink, adjustUnavailable } from './adjust.js';
-import { PROCESSING_LABELS, LIGHT_KEYS } from './new/state.js';
+import { PROCESSING_LABELS, LIGHT_KEYS, enhanceAIChoice } from './new/state.js';
 import { loudnessWord, peakVerdict } from './job/readings.js';
 import { eqSummary } from '../eq.js';
 import { sectionSummary } from '../section-eq.js';
@@ -417,7 +417,8 @@ function processingDetails(entry, files, open) {
   const resolved = p?.resolved || {};
   const applied = p?.applied || {};
   const recipe = requested.recipe === 'auto' ? 'Automatic' : resolved.recipe?.name;
-  const mode = PROCESSING_LABELS[requested.quality];
+  const aiChoice = requested.quality === 'best' ? enhanceAIChoice(requested.recipe, store.health?.recipes) : null;
+  const mode = aiChoice?.label || PROCESSING_LABELS[requested.quality];
   const formats = (requested.formats || []).map((key) =>
     store.health?.formats?.enhance?.find((f) => f.key === key)?.label || files.find((f) => f.format === key)?.label || key);
   const selected = [recipe, mode, ...formats].filter(Boolean).join(' · ');

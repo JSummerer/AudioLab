@@ -583,6 +583,8 @@ def public(entry: dict[str, Any], job_exists: bool = False) -> dict[str, Any]:
             }
         )
     out = {k: v for k, v in entry.items() if k not in ('files', 'original', 'root', 'tone_timeline', 'overview')}
+    if entry.get('task') == 'enhance':
+        out['adjust_quality'] = processing.adjust_quality(entry.get('processing'))
     if entry.get('tone_timeline'):
         out['has_tone_timeline'] = True  # the data: GET /api/library/{id}/tone-timeline (keeps the list small)
     if entry.get('overview') and kept:

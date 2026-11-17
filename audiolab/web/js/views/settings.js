@@ -688,7 +688,7 @@ function aiRows() {
     aiDetail = `Ready${ai.version ? ` · ${ai.version}` : ''}${ai.device ? ` · runs on ${deviceLabel(ai.device)}` : ''}${ai.device === 'cpu' ? ' (works, but slowly)' : ''}`;
     if (outdated) aiDetail += ' · update available';
   } else {
-    aiDetail = ai.reason || 'Not installed. Needed for Split and for Enhance → AI stems.';
+    aiDetail = ai.reason || 'Not installed. Needed for Split and for optional AI processing in Enhance.';
   }
   if (!ai.installing && ai.install_ok === false) aiDetail += ' · last install did not finish';
   // One action for whatever is missing; a working install gets none (repair is only for a broken one).
@@ -708,7 +708,7 @@ function aiRows() {
     actions.append(aiButton('removeAi', 'Remove AI add-on', 'btn-ghost btn-danger-text', async () => {
       const ok = await confirmDialog({
         title: 'Remove the AI add-on?',
-        message: 'Removes AudioLab’s optional AI software, models, caches and partial downloads. Split and AI stems will need it again. Your recordings, Library and settings stay.',
+        message: 'Removes AudioLab’s optional AI software, models, caches and partial downloads. Split and Enhance’s AI options will need it again. Your recordings, Library and settings stay.',
         confirm: 'Remove AI add-on',
       });
       if (!ok) return;
@@ -728,8 +728,8 @@ function aiRows() {
     }
   }
   const help = managed
-    ? 'Adds Split and AI stems. One download includes the AI software and both model choices; processing then works offline on this computer.'
-    : canInstall ? 'Adds Split and AI stems. Installs AI software in this source environment; models download on first use.'
+    ? 'Adds Split and optional AI processing in Enhance. One download includes the AI software and both model choices; processing then works offline on this computer.'
+    : canInstall ? 'Adds Split and optional AI processing in Enhance. Installs AI software in this source environment; models download on first use.'
       : 'Save, Convert and Check work without the AI add-on. So does Enhance with “Volume only” or “Tone and volume”.';
   return h('div', { id: 'aiSpot', tabindex: '-1', dataset: { spot: 'ai' } },
     // Not installed is a choice, not a fault: a dim light, not a red one.

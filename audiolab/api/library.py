@@ -136,9 +136,9 @@ def _preview_spec(state: State, entry: dict, body: dict, options: dict, override
         not recipe
         or not {'target_lufs', 'tp_ceiling_db', 'volume_only'} <= params.keys()
         or params.get('volume_only') != (options['quality'] == 'light')
-        or params.get('ai_stage', 'none') != 'none'
     ):
         raise HTTPException(400, 'This version has no saved settings for a short preview.')
+    params = {**params, 'ai_stage': 'none'}  # eligibility already checks the actual AI outcome
 
     bandwidth = processing.preview_bandwidth(details.get('bandwidth'))
     if bandwidth is None:
@@ -218,15 +218,15 @@ def _enhance_original(state: State, entry_id: str, body: Any, is_preview: bool):
     original = library.file_path(entry, 'original')
     if original is None or not original.is_file():
         raise HTTPException(410, 'The kept original is no longer available.')
-    saved = (entry.get('processing') or {}).get('requested') or {}
+    details = entry.get('processing') or {}
+    saved = details.get('requested') or {}
     if entry.get('task') != 'enhance' or not all(saved.get(k) for k in ('recipe', 'quality', 'formats')):
         raise HTTPException(400, 'This version has no saved Enhance settings.')
     overrides = _overrides(body, is_preview)
-    if is_preview and saved['quality'] == 'best':
-        raise HTTPException(400, 'Short previews are available for "Volume only" and "Tone and volume" processing.')
-    if is_preview and body.get('paired') and saved['quality'] not in ('light', 'standard'):
-        raise HTTPException(400, 'Adjust is available for "Volume only" and "Tone and volume" processing.')
-    if is_preview and body.get('paired') and saved['quality'] == 'light':
+    adjust_quality = processing.adjust_quality(details)
+    if is_preview and adjust_quality is None:
+        raise HTTPException(400, 'A short preview needs a saved version confirmed to have used no AI processing.')
+    if is_preview and body.get('paired') and adjust_quality == 'light':
         if overrides.keys() - {'target_lufs', 'tp_ceiling_db', 'sample_rate'}:
             raise HTTPException(400, 'Volume only adjusts loudness and peak ceiling.')
     source = {
@@ -240,6 +240,7 @@ def _enhance_original(state: State, entry_id: str, body: Any, is_preview: bool):
         'enhance',
         {
             **saved,
+            'quality': adjust_quality or saved['quality'],
             'advanced': {**(saved.get('advanced') or {}), **overrides},
             'meta': {'title': entry['title'], 'artist': entry.get('artist') or ''},
         },

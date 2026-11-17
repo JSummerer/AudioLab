@@ -5,8 +5,8 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import test from 'node:test';
 import { fmtDuration } from '../../audiolab/web/js/dom.js';
-import { PROCESSING_LABELS, LIGHT_KEYS } from '../../audiolab/web/js/views/new/state.js';
-import { ENHANCE_PRESETS } from '../../audiolab/web/js/store.js';
+import { PROCESSING_LABELS, LIGHT_KEYS, enhanceAIChoice } from '../../audiolab/web/js/views/new/state.js';
+import { RECIPE_LABELS, ENHANCE_PRESETS } from '../../audiolab/web/js/store.js';
 import { parseEq } from '../../audiolab/web/js/eq.js';
 import { checkSections } from '../../audiolab/web/js/section-eq.js';
 
@@ -48,7 +48,7 @@ function setup({ crlf = false } = {}) {
     download: [mp3, wav, original], enhance: [{ ...mp3, key: 'mp3_320' }, { ...wav, key: 'wav16' }],
   } } };
   const context = vm.createContext({
-    state, store, redrawn, PROCESSING_LABELS, ENHANCE_PRESETS,
+    state, store, redrawn, PROCESSING_LABELS, RECIPE_LABELS, enhanceAIChoice, ENHANCE_PRESETS,
     refs: { input: { value: '' }, options: { querySelector: () => null } }, AbortController, URL, setTimeout, fmtDuration,
     focusIn() {}, focusStart() {}, autoTask() {},
     segmented: (attrs) => new Element('div', attrs), isShown: () => false, setShown() {}, formatInfo: () => null,
@@ -347,4 +347,20 @@ test('submission errors stay at Start on redraw, clear on retry, and belong only
   await retry;
   s.run('renderAction()');
   assert.equal(findIn(row, (n) => n.id === 'submitError'), undefined);
+});
+
+test('Enhance AI wording follows server recipe stages and distinguishes Auto', () => {
+  const s = setup();
+  s.state.task = 'enhance';
+  s.state.enhance.quality = 'best';
+  s.store.health.recipes = [
+    { key: 'music', ai_stage: 'stem_eq' }, { key: 'voice', ai_stage: 'voice_isolate' },
+    { key: 'live', ai_stage: 'none' },
+  ];
+  for (const [recipe, label] of [['music', 'Balance parts separately'], ['voice', 'Isolate voice'], ['auto', 'AI when supported']]) {
+    s.state.enhance.recipe = recipe;
+    assert.match(s.run('plan()[0]'), new RegExp(label));
+  }
+  assert.equal(enhanceAIChoice('live', s.store.health.recipes), null);
+  assert.match(enhanceAIChoice('auto', s.store.health.recipes).desc, /depends on the detected audio type/);
 });

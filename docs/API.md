@@ -233,10 +233,11 @@ is valid but has no full-strength plateau. Section bounds and fades stay inside 
 sections are sorted and must not overlap, else the whole option is invalid; sections without bands are dropped;
 `[]` = none, so a Library preview or apply can clear saved sections; applied after `eq`, before compression,
 loudness and peak control; ignored by Volume only).
-`quality: "best"` uses the AI stage of the recipe (stem-aware EQ for music, voice isolation for speech)
-and requires the AI pack.
-The UI calls these modes **Volume only**, **Tone and volume**, and **AI stems**; the API values remain
-`light`, `standard`, `best` for compatibility. AI stems is a different process, not a quality guarantee.
+`quality: "best"` selects the recipe's AI stage when supported (stem-aware EQ for music and DJ sets,
+voice isolation for speech). It normally requires the AI pack. An explicit Concert (`recipe: "live"`)
+request for `best` normalizes to `standard` and needs no AI pack. Auto can resolve to a recipe without an
+AI stage. The UI presents **Volume only** and **Tone and volume**, plus the recipe's AI option when
+available. API values remain `light`, `standard`, and `best`.
 Noise reduction is explicit-only: choose `denoise: "light"` or `"strong"` when wanted.
 The programme-level percentiles cannot reliably distinguish noise from quiet desired content.
 
@@ -416,7 +417,8 @@ detail. For WebM/Matroska, Compare looks for a timing reference in the first 25 
   "output_dir": "/Users/me/Music/AudioLab", "output_dir_ok": true, "data_dir": "…", "logs_dir": "…",
   "upload_extensions": [".3gp", ".aac", ".ac3", "…", ".wv"],   // sorted, with the dot: what `file` accepts
   "limits": {"max_upload_mb": 4096, "max_duration_s": 28800, "max_playlist_items": 200},
-  "recipes": [{"key": "club", "name": "Club / DJ set", "short": "Punchy, loud, tight bass", "description": "…"}],
+  "recipes": [{"key": "club", "name": "Club / DJ set", "short": "Punchy, loud, tight bass", "description": "…",
+               "ai_stage": "stem_eq"}], // recipe AI stage: none | stem_eq | voice_isolate
   "formats": {
     "download": [{"key": "mp3", "label": "MP3", "description": "Plays everywhere (320 kbps).", "kind": "lossy",
                   "facts": ["Converted to MP3 at 320 kbps.", "About 2.4 MB per minute.", "…"], "cover": true}],
@@ -590,9 +592,12 @@ New Enhance entries retain `processing: {requested, resolved, applied, metrics}`
 `requested` holds validated recipe, quality, formats, advanced settings and cover/split switches;
 `resolved` holds `{recipe, params, decisions}` and, when available, `bandwidth`
 (`is_lossy_cutoff` and optional `cutoff_hz`) for repeating HF treatment in a short preview.
-New versions made with "Tone and volume" also retain `resolved.auto_compressor` (`off`, `glue` or `leveler`).
-This is the automatic decision before an explicit Glue override. New versions made with "Tone and volume"
-or "Volume only" may retain `resolved.calibration`, a versioned, finite, path-free object.
+For a new Enhance version that used tone processing without AI, `resolved.auto_compressor` holds the
+automatic compressor decision before a Glue override (`off`, `glue` or `leveler`). Versions rendered
+without AI can retain `resolved.calibration`, a versioned, finite, path-free object. The public
+Enhance entry's `adjust_quality` is `standard` for tone processing without AI, `light` for Volume only,
+and `null` when AI was applied or the report cannot establish the mode. The original requested quality
+is still in `processing.requested.quality`.
 Missing fields mean unavailable, not zero:
 
 | Calibration field | Meaning and dependency |
@@ -621,7 +626,8 @@ legacy entries with no check use their original master-based estimate.
 `POST /api/library/{id}/preview` accepts JSON `{start_s, duration_s, advanced: {...}}` and returns a
 single queued Enhance Job. Start must be finite and nonnegative; duration is 5–30 seconds, clipped at
 the actual end only if at least one second remains. It requires a kept original and retained resolved
-settings, and supports "Volume only" and "Tone and volume", not "AI stems". Unknown/invalid fields return
+settings and a saved record confirming that no AI processing was used. This includes a `best` request
+with a recorded fallback or a resolved stage of `none`. Unknown/invalid fields return
 `400`; missing entries return `404`, missing originals `410`. Advanced options have the Enhance meanings and numeric
 limits; preview excludes the AI model option. Retained HF restoration needs its original bandwidth
 facts (or the still-existing source job's analysis); unavailable provenance returns `400`.
@@ -674,7 +680,8 @@ tone/dynamics controls are rejected rather than changing modes. Audition process
 
 `POST /api/library/{id}/enhance` accepts `{advanced: {...}}` and returns one ordinary queued Enhance Job.
 Both routes clone the retained original into the new job input, merge overrides with saved requested
-options and preserve the earlier version. The full job reanalyzes the complete original, exports and
+options and preserve the earlier version. If the saved `best` version used no AI processing, the new
+job uses `standard`. The full job reanalyzes the complete original, exports and
 verifies new files, and retains its source grouping and track markers. Neither route accepts paths or
 raw chain parameters. They work after the original job expires if the required Library data survives.
 Apply reuses artwork embedded in an available saved export and a separately saved cover image when

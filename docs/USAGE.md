@@ -186,10 +186,15 @@ depends on the music player and its supported formats.
 
 Screenshots use generated sample audio; the displayed loudness difference is specific to that sample.
 
-In **Library**, open a recording's versions and choose **Compare with the original** on an enhanced result.
-This needs a kept original; **Settings → Storage → Keep originals** controls future jobs.
+In **Library**, open a recording's versions and choose **Compare**. The panel opens with **Original**
+when a kept copy is available for that version. Choose another saved version in **Compare with**,
+including a file you added to the same recording. **Settings → Storage → Keep originals** controls
+whether future Enhance jobs keep an original for comparing.
 
-Press **Play**, then switch between **Original** and **Enhanced** to hear the same point in the recording.
+Use **Name version…** in a version's menu to give it a label in the Library and in comparisons.
+Clear the field to use the default label again.
+
+Press **Play**, then switch between the two versions to hear the same point in the recording.
 Use the timeline or **−10 s / +10 s** to move around.
 **Match volume** reduces the louder side for a fairer comparison. Turn it off to hear the actual level
 difference. It changes playback only, not the saved files.
@@ -201,9 +206,9 @@ The range must be at least one second. Points use a 40 ms grid; both versions re
 short fades at the boundaries. Seeking outside the range turns Repeat off. A valid range also follows
 you between versions of the same recording.
 
-Choose **Compare with the original** on another enhanced version of the same recording to keep
-your position, selected side and volume-matching choice. If you were playing, playback continues
-after any brief buffering needed to load that version.
+When comparing with **Original**, choose **Compare** on another enhanced version of the same
+recording to keep your position, selected side and volume-matching choice. If you were playing,
+playback continues after any brief buffering needed to load that version.
 Switching to another recording or an ordinary file player starts a separate listening session.
 
 For newly processed versions, **Changes timeline** shows where low-mid control, de-essing, compression
@@ -237,8 +242,7 @@ try a WAV or FLAC original or run Enhance on the full recording. **Apply to full
 the complete original and verifies new exports, preserving previous versions. It reuses available
 saved artwork. Compare the actual exports afterwards; a short audition is never promoted to a master.
 
-**Compare versions** plays two versions of the same recording at matched volume, including a file you
-added. When versions differ by more than 1 dB, Library says so: louder often sounds better at first.
+When saved versions differ by more than 1 dB, Library points to the matched comparison.
 Adjust also accepts loudness, compression, custom EQ and section EQ changes.
 
 Job pages may offer a shorter preview of the final master when a full comparison is unavailable;

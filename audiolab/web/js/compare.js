@@ -116,8 +116,11 @@ export function libraryCompare(entry, extra = {}) {
     download: libraryFileUrl(entry.id, fileId, { download: true }),
   });
   const duration = entry.duration_s || entry.source?.duration_s;
-  return comparePlayer({
-    sides: [side('original', 'Original'), side(file.id, resultLabel(file))],
+  const resultCopy = (e) => e.version_name
+    ? { label: e.version_name, name: `“${e.version_name}”` } : { label: resultLabel(file) };
+  const result = resultCopy(entry);
+  const player = comparePlayer({
+    sides: [side('original', 'Original'), { ...side(file.id, result.label), ...result }],
     length: duration,
     songDuration: duration,
     markers: entry.markers,
@@ -126,6 +129,7 @@ export function libraryCompare(entry, extra = {}) {
     showMatchUnavailable: Object.hasOwn(file, 'verification'),
     ...extra,
   });
+  return { ...player, relabel: (e) => player.setLabels?.([{}, resultCopy(e)]) };
 }
 
 /**
@@ -170,15 +174,17 @@ export function loudnessSpread(levels) {
  */
 export function versionCompare(a, b, extra = {}) {
   const lower = (name) => name.charAt(0).toLowerCase() + name.slice(1); // "the AudioLab…", "your file"
-  const side = ({ entry, file, label, name }) => ({
-    label, name, downloadLabel: `Download ${lower(name)}`,
+  const sideCopy = ({ label, name }) => ({ label, name, downloadLabel: `Download ${lower(name)}` });
+  const title = (x, y) => `Compare ${lower(x.name)} with ${lower(y.name)}`;
+  const side = ({ entry, file, ...copy }) => ({
+    ...sideCopy(copy),
     url: (offset, frames) => url(`/api/library/${encodeURIComponent(entry.id)}/pcm/${encodeURIComponent(file.id)}`, { offset, frames }),
     download: libraryFileUrl(entry.id, file.id, { download: true }),
   });
   const duration = b.entry.duration_s || b.entry.source?.duration_s || a.entry.duration_s;
-  return comparePlayer({
+  const player = comparePlayer({
     sides: [side(a), side(b)],
-    title: `Compare ${lower(a.name)} with ${lower(b.name)}`,
+    title: title(a, b),
     length: duration,
     songDuration: duration,
     markers: b.entry.markers,
@@ -186,6 +192,7 @@ export function versionCompare(a, b, extra = {}) {
     showMatchUnavailable: true,
     ...extra,
   });
+  return { ...player, relabel: (x, y, note) => player.setLabels?.([sideCopy(x), sideCopy(y)], title(x, y), note) };
 }
 
 /** Compare a short render at its position in the original recording. */
@@ -284,7 +291,6 @@ export function comparePlayer(opts) {
   const markers = (opts.markers || []).filter((m) => Number.isFinite(m.start_s)
     && m.start_s >= songOffset && m.start_s < songOffset + lengthF / RATE);
   const id = `cmp-${++uid}`;
-  const label = sides[1].label;
   const nameOf = (i) => sides[i].name || (i === 0 ? 'Original' : sides[i].label.split(' · ')[0]);
   const AC = window.AudioContext || window.webkitAudioContext;
 
@@ -314,7 +320,7 @@ export function comparePlayer(opts) {
   let repeatLimit = Infinity; // the earliest decoded end of either side, once known
   const repeatCache = new Map(); // stable chunk pairs of a short repeat, cleared when it changes
 
-  const root = h('div', { class: 'ab cmp', tabindex: '-1', role: 'group', 'aria-label': opts.title || `Compare the original with ${label}` });
+  const root = h('div', { class: 'ab cmp', tabindex: '-1', role: 'group', 'aria-label': opts.title || `Compare the original with ${sides[1].label}` });
   if (!AC) {
     root.append(callout('info', null, 'This browser can’t play the comparison.', downloads()));
     return { el: root, pause() {}, destroy() {} };
@@ -906,11 +912,12 @@ export function comparePlayer(opts) {
 
   // Version tabs; play, timeline and time; the note on where it starts; −10/+10 s and Match
   // volume with its one line; the track and chapter starts.
+  const note = opts.note ? h('p', { class: 'cmp-note' }, opts.note) : null;
   append(root, [
     keys,
     problem,
     h('div', { class: 'ab-transport' }, playBtn, h('div', { class: 'cmp-timeline' }, seek, ticks), time),
-    opts.note ? h('p', { class: 'cmp-note' }, opts.note) : null,
+    note,
     h('div', { class: 'cmp-tools' },
       h('div', { class: 'cmp-skip' }, skip(-SKIP_S, `Back ${SKIP_S} seconds`), skip(SKIP_S, `Forward ${SKIP_S} seconds`)),
       matchSwitch ? h('label', { class: 'details-toggle', for: `${id}-match` }, matchSwitch, 'Match volume') : null,
@@ -974,7 +981,20 @@ export function comparePlayer(opts) {
     if (resume && state.playing && position < lengthF) play();
   }
 
-  return { el: root, pause, destroy, snapshot, restore };
+  function setLabels(labels, title, details) {
+    const changed = labels.some((s, i) => s.label && (s.label !== sides[i].label || s.name !== sides[i].name));
+    if (changed) {
+      const focused = keys.contains(document.activeElement);
+      labels.forEach((s, i) => { if (s.label) Object.assign(sides[i], { name: undefined }, s); });
+      root.setAttribute('aria-label', title || opts.title || `Compare the original with ${sides[1].label}`);
+      renderKeys();
+      renderVolume();
+      if (focused) keys.children[active]?.focus({ preventScroll: true });
+    }
+    if (note && details) append(clear(note), details);
+  }
+
+  return { el: root, pause, destroy, snapshot, restore, setLabels };
 }
 
 /** A plain player for one file of a Library entry (with the browser's own controls). */

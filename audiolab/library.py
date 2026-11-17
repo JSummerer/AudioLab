@@ -62,6 +62,7 @@ def originals_dir() -> Path:
     return p
 
 
+MAX_VERSION_NAME = 120
 STAGING_PREFIX = '.original-'  # record()'s temporary folder in originals/; a kept original never starts with '.'
 
 
@@ -432,6 +433,23 @@ def locate_file(entry_id: str, file_id: str, candidate: Path) -> dict[str, Any] 
         return entry
 
 
+def name_version(entry_id: str, name: str) -> dict[str, Any] | None:
+    """Set or clear a display name on the current Library record under the write lock."""
+    name = ' '.join(name.split())
+    if len(name) > MAX_VERSION_NAME or any(unicodedata.category(c) in ('Cc', 'Cs') for c in name):
+        raise AudioLabError(f'Use up to {MAX_VERSION_NAME} characters for the version name.')
+    with _lock:
+        entry = get(entry_id)
+        if entry is None:
+            return None
+        if name:
+            entry['version_name'] = name
+        else:
+            entry.pop('version_name', None)
+        _write(entry)
+        return entry
+
+
 def add_file(entry_id: str, f: dict[str, Any]) -> bool:
     """Add a file made after the entry was written (the cover saved later from the job page);
     one with the same id is replaced. False when there is no such entry."""
@@ -655,8 +673,19 @@ def _unlink(p: Path) -> int:
 
 
 def _file_state(p: Path | None) -> dict[str, Any]:
+    revision = None
+    try:
+        st = p.stat() if p is not None else None
+        if st is not None and stat.S_ISREG(st.st_mode):
+            # A cheap change indicator for open players. Raw filesystem identity
+            # stays server-side; the UI only needs to compare the opaque value.
+            fields = (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+            revision = hashlib.blake2s(repr(fields).encode('ascii'), digest_size=12).hexdigest()
+    except OSError:
+        pass
     return {
-        'exists': bool(p and p.is_file()),
+        'exists': revision is not None,
+        'revision': revision,
         'playable': bool(p and p.suffix.lower() in PLAYABLE_EXT),
         'mime': media_type(p) if p else None,
     }

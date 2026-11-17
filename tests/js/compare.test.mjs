@@ -511,10 +511,10 @@ async function librarySetup(t, entries, moreGroups = []) {
   await flush();
   t.after(() => libraryView.hide());
   const card = (id) => stage.querySelector(`#lib-${id}`);
-  const open = (id, trusted = true) => find(card(id), (n) => n.tagName === 'button'
-    && n.textContent.includes('Compare with the original')).click({ isTrusted: trusted });
+  const open = (id, trusted = true) => named(card(id), 'Compare').click({ isTrusted: trusted });
   const seek = (id, seconds) => { const slider = card(id).querySelector('.ab-seek'); slider.value = seconds; slider.fire('change'); };
-  return { ...env, card, open, seek, view: libraryView };
+  const refresh = async () => { libraryView.show(); await flush(); };
+  return { ...env, card, open, seek, refresh, view: libraryView };
 }
 
 const entry = (id, group = 'file:test', duration_s = 20) => ({ id, group, duration_s,
@@ -716,18 +716,20 @@ test('two versions play side by side from their own files, the louder one turned
 });
 
 const enhanced = (id, created_at, lufs) => Object.assign(entry(id), { created_at, loudness: { result_lufs: lufs } });
-const compareVersions = (card) => find(card, (n) => n.tagName === 'button' && n.textContent.includes('Compare versions'));
+const compareButton = (card) => named(card, 'Compare');
 
-test('Library offers Compare versions within a recording and says when the versions differ in loudness', async (t) => {
+test('Library offers Compare within a recording and says when the versions differ in loudness', async (t) => {
   const now = Math.floor(Date.now() / 1000);
   const saved = Object.assign(entry('saved'), { task: 'download', files: [] });
-  const env = await librarySetup(t, [enhanced('new', now - 60, -13.5), enhanced('old', now - 7200, -15.4), saved]);
+  const newVersion = { ...enhanced('new', now - 60, -13.5), original: { kept: false } };
+  const oldVersion = { ...enhanced('old', now - 7200, -15.4), original: { kept: false } };
+  const env = await librarySetup(t, [newVersion, oldVersion, saved]);
   const hint = document.body.querySelector('.lib-hint');
   assert.equal(hint.textContent, 'These versions differ in loudness. ' // the LUFS range with Show details
-    + 'Louder often sounds better at first, so use Compare versions to hear them at matched volume.');
-  assert.ok(compareVersions(env.card('new')));
-  assert.equal(compareVersions(env.card('saved')), undefined, 'only Enhance versions with a result');
-  const open = compareVersions(env.card('old'));
+    + 'Louder often sounds better at first, so use Compare to hear them at matched volume.');
+  assert.ok(compareButton(env.card('new')));
+  assert.equal(compareButton(env.card('saved')), undefined, 'only Enhance versions with a result');
+  const open = compareButton(env.card('old'));
   open.click({ isTrusted: true });
   const stage = env.card('old').querySelector('.lib-stage');
   assert.equal(open.getAttribute('aria-expanded'), 'true');
@@ -749,7 +751,7 @@ test('an unverified Library export disables matching and suppresses the loudness
   const env = await librarySetup(t, [known, unknown]);
   assert.equal(document.body.querySelector('.lib-hint'), null);
   const card = env.card('unknown');
-  compareVersions(card).click({ isTrusted: true });
+  compareButton(card).click({ isTrusted: true });
   const match = toggle(card, 'Match volume');
   assert.equal(match.disabled, true);
   assert.equal(match.checked, false);
@@ -760,18 +762,100 @@ test('with three versions a picker chooses the other one; versions within 1 dB g
   const now = Math.floor(Date.now() / 1000);
   const env = await librarySetup(t, [enhanced('c', now - 60, -14), enhanced('b', now - 120, -14.5), enhanced('a', now - 180, -13.6)]);
   assert.equal(document.body.querySelector('.lib-hint'), null);
-  compareVersions(env.card('b')).click({ isTrusted: true });
+  compareButton(env.card('b')).click({ isTrusted: true });
   const stage = env.card('b').querySelector('.lib-stage');
   const radios = stage.querySelector('.lib-version-pick').querySelectorAll('input');
-  assert.deepEqual(radios.map((r) => [r.value, r.checked]), [['c', true], ['a', false]], 'the newest other one first');
+  assert.deepEqual(radios.map((r) => [r.value, r.checked]), [['original', true], ['c', false], ['a', false]]);
   env.requests.length = 0;
-  radios[1].checked = true;
-  radios[1].fire('change');
+  radios[2].checked = true;
+  radios[2].fire('change');
   const keys = env.card('b').querySelector('.lib-stage').querySelectorAll('.ab-key-label').map((n) => n.textContent);
   assert.deepEqual(keys, ['Older', 'Newer']);
   button(env.card('b').querySelector('.lib-stage'), 'Play').click();
   await flush();
   assert.deepEqual([...new Set(env.requests.map((r) => r.path))].sort(), ['/api/library/a/pcm/f0', '/api/library/b/pcm/f0']);
+});
+
+test('one comparison keeps playing through a peer rename and closes for a changed file', async (t) => {
+  const base = { ...enhanced('base', 1, -15), version_name: 'Studio' };
+  const peer = { ...enhanced('peer', 2, -14), version_name: 'Live' };
+  const missing = enhanced('missing', 3, -13);
+  missing.files[0].exists = false;
+  const different = { ...enhanced('different', 4, -12), group: 'file:another' };
+  const env = await librarySetup(t, [different, missing, peer, base]);
+  const card = env.card('base');
+  const stage = () => card.querySelector('.lib-stage');
+  const picks = () => stage().querySelector('.lib-version-pick').querySelectorAll('input');
+  assert.equal(card.querySelectorAll('button').filter((b) => b.textContent === 'Compare').length, 1);
+  assert.equal(card.querySelector('.lib-entry-title').textContent, 'Enhanced · Studio');
+  env.open('base');
+  assert.deepEqual(picks().map((r) => [r.value, r.checked]), [['original', true], ['peer', false]]);
+  assert.deepEqual(stage().querySelectorAll('.ab-key-label').map((n) => n.textContent), ['Original', 'Studio']);
+
+  env.seek('base', 5);
+  button(stage(), 'Play').click();
+  await flush();
+  picks()[1].checked = true;
+  picks()[1].fire('change');
+  await flush();
+  assert.equal(stage().querySelector('.ab-seek').value, 5);
+  assert.ok(button(stage(), 'Pause'));
+  assert.equal(document.activeElement, picks()[1]);
+  const engine = stage().querySelector('.cmp');
+  const context = env.contexts.at(-1);
+
+  peer.version_name = 'Concert';
+  await env.refresh();
+  assert.equal(stage().querySelector('.cmp'), engine);
+  assert.equal(context.state, 'running');
+  assert.equal(document.activeElement, picks()[1]);
+  assert.deepEqual(stage().querySelectorAll('.ab-key-label').map((n) => n.textContent), ['Studio', 'Concert']);
+  assert.ok(stage().querySelectorAll('.seg-label').some((n) => n.textContent === 'Concert'));
+
+  peer.files[0].revision = 'changed-on-disk';
+  await env.refresh();
+  assert.equal(stage().hidden, true);
+  assert.equal(context.state, 'closed');
+  assert.equal(document.activeElement, compareButton(card));
+});
+
+test('Library can submit and clear an optional version name', async (t) => {
+  const version = entry('named');
+  const env = await librarySetup(t, [version]);
+  Object.assign(document, { addEventListener() {}, removeEventListener() {} });
+  const fetchBefore = globalThis.fetch;
+  const submitted = [];
+  globalThis.fetch = (path, options) => {
+    if (path !== '/api/library/named/version-name') return fetchBefore(path, options);
+    assert.equal(options.method, 'PUT');
+    const body = JSON.parse(options.body);
+    submitted.push(body);
+    version.version_name = body.version_name;
+    return Promise.resolve(jsonResponse(version));
+  };
+  const card = env.card('named');
+  const openEditor = (name) => {
+    button(card, 'More actions').click();
+    named(card, name).click();
+    return find(document.body, (n) => n.tagName === 'dialog' && n.open);
+  };
+  let dlg = openEditor('Name version…');
+  let input = dlg.querySelector('input');
+  assert.equal(document.activeElement, input);
+  input.value = '  Warm mix  ';
+  dlg.querySelector('form').fire('submit');
+  await flush();
+  assert.deepEqual(submitted, [{ version_name: 'Warm mix' }]);
+  assert.match(card.querySelector('.lib-entry-title').textContent, /Warm mix/);
+
+  dlg = openEditor('Rename version…');
+  input = dlg.querySelector('input');
+  assert.equal(input.value, 'Warm mix');
+  input.value = ' ';
+  dlg.querySelector('form').fire('submit');
+  await flush();
+  assert.deepEqual(submitted.at(-1), { version_name: '' });
+  assert.doesNotMatch(card.querySelector('.lib-entry-title').textContent, /Warm mix/);
 });
 
 // --- Round 4: Trash, Keep only and import in the Library ---
@@ -892,7 +976,7 @@ test('a file can be added as a version; imported entries say so and can be compa
   const card = env.card('master');
   assert.match(card.querySelector('.lib-entry-title').textContent, /^Imported file$/);
   assert.equal(card.querySelector('.lib-version').textContent, 'Moderate volume · peaks within limit');
-  assert.ok(find(card, (n) => n.tagName === 'button' && n.textContent.includes('Compare versions')));
+  assert.ok(compareButton(card));
   assert.equal(find(card, (n) => n.tagName === 'button' && n.textContent.includes('Compare with the original')), undefined);
   named(card, 'Remove from Library').click();
   const removal = confirmIn('Remove from the Library?');

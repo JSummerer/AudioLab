@@ -141,6 +141,40 @@ def test_entry_written_on_finish_and_outlives_the_job(manager):
     assert 'library_id' not in manager.public(check.id)['result']
 
 
+def test_version_name_is_optional_and_preserves_the_record_and_audio_identity(manager):
+    job = run_job(manager, title='Recording')
+    app = create_app(local=False, manager=manager)
+    client = TestClient(app)
+    endpoint = f'/api/library/{job.id}/version-name'
+    try:
+        old = library.get(job.id)
+        revision = library.public(old)['files'][0]['revision']
+        assert revision
+        assert client.put(endpoint, json={'version_name': 12}).status_code == 400
+        assert client.put(endpoint, json={'version_name': 'x' * 121}).status_code == 400
+        assert library.get(job.id) == old
+
+        named = client.put(endpoint, json={'version_name': '  Live\n  mix  '})
+        assert named.status_code == 200, named.text
+        assert named.json()['version_name'] == 'Live mix'
+        assert named.json()['files'][0]['revision'] == revision
+        assert library.get(job.id) == {**old, 'version_name': 'Live mix'}
+        assert library.groups()[0]['title'] == 'Recording'
+        assert job.title == 'Recording'
+
+        assert client.put(endpoint, json={'version_name': '  '}).status_code == 200
+        assert library.get(job.id) == old
+        source = library.file_path(old, 'f0')
+        source.write_bytes(b'changed content')
+        assert library.public(old)['files'][0]['revision'] != revision
+        assert (
+            client.put('/api/library/j_20260101_010101_abcdef/version-name', json={'version_name': 'Old'}).status_code
+            == 404
+        )
+    finally:
+        client.close()
+
+
 def test_enhance_processing_and_export_check_survive_job_removal(manager, monkeypatch):
     secret = '/private/work/model/checkpoint.th'
 

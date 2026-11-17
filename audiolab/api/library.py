@@ -58,6 +58,16 @@ def save_adjust_draft(entry_id: str, body: dict = Body(...)):
     return result
 
 
+@router.put('/api/library/{entry_id}/version-name')
+def name_version(state: State, entry_id: str, body: Any = Body(None)):
+    if not isinstance(body, dict) or body.keys() != {'version_name'} or not isinstance(body['version_name'], str):
+        raise HTTPException(400, 'Send the version name as text.')
+    entry = library.name_version(entry_id, body['version_name'])
+    if entry is None:
+        raise HTTPException(404, 'This result is no longer in the Library.')
+    return library.public(entry, state.manager.get(entry.get('job_id') or '') is not None)
+
+
 @router.get('/api/library/{entry_id}/tone-timeline')
 def get_tone_timeline(entry_id: str):
     timeline = _entry(entry_id).get('tone_timeline')

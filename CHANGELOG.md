@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Give Library versions optional names. Each version has one Compare button for its kept original
+  and available saved versions of the same recording.
+
 - Adjust saves unfinished edits with their Library version, including incomplete EQ and section inputs.
   Reopening the version restores its draft. Discard draft returns to the saved settings.
 - Enhance offers **Balance parts separately** for music and DJ sets, **Isolate voice** for speech, and

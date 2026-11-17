@@ -362,6 +362,7 @@ automatically replacing the saved file.
 | `POST /api/jobs/{id}/cover` | – | "Save cover to folder": writes the finished job's cover into its output folder, exactly as `save_cover` does, adds it to `result.files` (saved, and a `job` event) and to its Library entry; returns that file (a Result.files entry). Idempotent: a cover file that is still there is returned as it is (one that was moved or deleted is written again, same id). `404` unknown job, or no output folder (not finished, or the folder is gone); `409` "This recording has no cover image to save."; fetching the thumbnail failed → `400` with detail |
 | `GET /api/library` | – | `{"groups": [LibraryGroup, …], "count": n}` — see Library below |
 | `GET /api/library/{id}` | – | one LibraryEntry (with `job_exists`). `404` unknown |
+| `PUT /api/library/{id}/version-name` | `{"version_name": "Live mix"}` | Updated LibraryEntry. Whitespace is collapsed to one line, up to 120 characters. An empty name clears the label. `400` invalid name or body, `404` unknown entry |
 | `GET /api/library/{id}/tone-timeline` | – | the entry's `tone_timeline` (as in the Result analysis). `404` unknown entry or none |
 | `GET /api/library/{id}/overview` | – | retained original sample-peak overview `{basis: "original_sample_peak", duration_s, bin_duration_s, peaks}` with at most 512 contiguous bins, maximum absolute sample across both channels; `404` without a saved overview/entry, `410` without the kept original. Library `has_overview` advertises availability; opening Adjust does not rescan old originals |
 | `GET /api/library/{id}/pcm/{file_id}` | `?offset=<frame>&frames=<n>` | PCM chunk (below) of one file of the entry (`original` or a result). `404` unknown entry/file, `410` moved or deleted, `400` off the grid |
@@ -720,6 +721,7 @@ A kept file is named by its content, so results with the same original share one
  "task": "enhance",                 // download | enhance | separate | import
  "created_at": 1759740000.0,
  "title": "Song", "artist": "Artist",                        // as used for names and tags
+ "version_name": "Live mix",                                 // optional Library and comparison display name
  "source": {"kind": "url", "url": "…", "title": "…", "thumbnail": "…", "duration_s": 213.0},  // as Job.source
  "group": "youtube:dQw4w9WgXcQ",
  "duration_s": 213.0, "headline": "Enhanced as Club / DJ set",
@@ -740,7 +742,7 @@ A kept file is named by its content, so results with the same original share one
  "files": [
    {"id": "f0", "name": "Song (Enhanced).mp3", "path": "Song (Enhanced)/Song (Enhanced).mp3",  // relative to the
     "kind": "enhanced", "format": "mp3_320", "label": "MP3 · 320 kbps", "size_bytes": 8123456,  // output folder
-    "exists": true, "playable": true, "mime": "audio/mpeg"},
+    "exists": true, "playable": true, "mime": "audio/mpeg", "revision": "ab12…"},
    {"id": "f2", "kind": "track", "track": 1, "start_s": 0.0, "end_s": 312.4, …},
    {"id": "f0", "kind": "stem", "stem": "vocals", …},                 // Split results
    {"id": "original", "name": "Song.webm", "kind": "original", "format": "webm", "codec": "opus",
@@ -756,7 +758,9 @@ moved or deleted stays listed with `exists: false` (its file route answers `410`
 can usually play (for the plain players; comparing decodes on the server, so any format compares) — WebM/Opus
 needs macOS 14 / Safari 17 in the app window, so probe with `canPlayType(mime + '; codecs=' + codec)` and handle
 playback errors. `path` is relative to the output folder of
-that time (absolute for a file outside it).
+that time (absolute for a file outside it). `revision` is an opaque file change indicator, or `null`
+when no regular file is available. It derives from filesystem metadata and is checked when refreshing
+a Library comparison.
 
 ### Events (`GET /api/events`)
 ```

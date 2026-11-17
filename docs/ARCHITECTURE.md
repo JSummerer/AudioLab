@@ -192,7 +192,7 @@ js/views/new/         the "New" view: source (link/files/playlist), names, cover
                       sleeve beside them (what is being made + the start row; a bottom bar when narrow)
 js/views/activity.js  the job list (in progress, then finished by day; filters)
 js/views/job/         one job: live progress, failures with fixes, results per task
-js/views/library.js   finished results by recording: versions, files, play/compare, kept originals, remove
+js/views/library.js   finished results by recording: version names, files, one picker for original and saved comparisons, remove
 js/adjust-draft.js    editable draft snapshots and serialized saves with revision checks
 js/views/adjust.js    optional saved-version workspace, passage/section editing, comparison and full Apply
 js/views/settings.js  preferences, Updates & add-ons (app, downloader, AI add-on, audio engine), storage, about

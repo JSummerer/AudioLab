@@ -9,11 +9,11 @@
 import { h, icon, clear, shortFolder } from '../../dom.js';
 import { api, upload } from '../../api.js';
 import { store, upsertJob } from '../../store.js';
-import { toast, toastError, meter, setMeter } from '../../ui.js';
+import { toast, toastError, callout, meter, setMeter } from '../../ui.js';
 import { go, jobPath, settingsPath, currentRoute } from '../../router.js';
-import { state, refs, redraw, definePart, isFileLike, appliedAdvanced, tooBig, rememberFormats } from './state.js';
+import { state, refs, redraw, definePart, isFileLike, appliedAdvanced, tooBig } from './state.js';
 import { metaPayload } from './names.js';
-import { updateItem, clearSource } from './source.js';
+import { updateItem } from './source.js';
 import { taskBlock, downloadChoices, enhanceFormatsInOrder, eqProblem, sectionProblem } from './options.js';
 import { tracksOptions, tracksProblem } from './tracks.js';
 import { coverUpload, coverOptions } from './cover.js';
@@ -83,7 +83,7 @@ function primaryLabel() {
       if (state.enhance.quality === 'light') return many ? `Even out ${n} ${what}` : 'Fix the volume';
       return many ? `Enhance ${n} ${what}` : 'Enhance';
     case 'separate': return many ? `Split ${n} ${what}` : 'Split into stems';
-    case 'analyze': return many ? `Check ${n} ${what}` : 'Check quality';
+    case 'analyze': return many ? `Check ${n} ${what}` : 'Measure audio';
     default: return 'Start';
   }
 }
@@ -92,6 +92,7 @@ function blockedReason() {
   const src = state.source;
   if (!src || src.kind === 'invalid') return 'Paste a link or choose a file first.';
   if (src.kind === 'offered') return 'Press Load to look up the link first.';
+  if (src.missingFile) return 'Choose the file again to start.';
   if (src.kind === 'probing') return 'Looking up the link…';
   if (src.kind === 'playlist' && !src.selected.size) return 'Select at least one item.';
   if (src.kind === 'file' && !src.reuseJobId && tooBig(src.file)) return `This file is ${tooBig(src.file)}.`;
@@ -121,7 +122,7 @@ function renderAction() {
   const reason = blockedReason();
   const btn = h('button', {
     type: 'button', class: 'btn btn-primary btn-xl', disabled: !!reason || state.busy,
-    'aria-describedby': 'actionHint',
+    'aria-describedby': state.source?.submitError ? 'actionHint submitError' : 'actionHint',
   }, state.busy ? busyLabel() : primaryLabel());
   btn.addEventListener('click', submit);
   const why = reason && !state.busy;
@@ -134,6 +135,15 @@ function renderAction() {
     }, icon('close', 15), 'Stop'));
   }
   el.append(hint);
+  const error = state.source?.submitError;
+  if (error) {
+    const signIn = error.fix === 'use_cookies' && store.health?.local
+      ? h('a', { class: 'btn btn-key btn-sm', href: settingsPath('cookies') }, 'Use my browser’s sign-in…') : null;
+    const notice = callout('danger', error.message || 'Couldn’t start the job.', error.hints?.join(' '), signIn);
+    notice.id = 'submitError';
+    notice.setAttribute('role', 'alert');
+    el.append(notice);
+  }
   if (hadFocus) (el.querySelector('button:not(:disabled)') || el).focus({ preventScroll: true });
   if (state.busy && state.uploadPct != null) {
     refs.uploadMeter = meter(state.uploadPct, { label: 'Upload' });
@@ -207,7 +217,7 @@ async function submit() {
   const src = state.source;
   const task = state.task;
   const options = buildOptions();
-  rememberFormats(task, options); // what New starts with next time
+  delete src.submitError;
   if (src.kind === 'files') await submitFiles(src, task, options);
   else await submitOne(src, task, options, coverUpload(src, task));
 }
@@ -219,7 +229,9 @@ const unchanged = (src, task, options, cover) => state.source === src && state.t
 /** Sends a submit again another way (as an upload, or the link): only as clicked, while the view still shows it. */
 function sendAgain(src, task, options, cover) {
   if (!unchanged(src, task, options, cover)) {
-    toast('The earlier job is gone, so nothing was started.', { kind: 'warning' });
+    const error = new Error('The earlier job is gone, so nothing was started.');
+    if (state.source === src) src.submitError = error;
+    if (!stillHere(src)) toastError(error);
     return null;
   }
   state.busy = false;
@@ -271,9 +283,8 @@ async function submitOne(src, task, options, cover) {
         }
         // The earlier job's result file is gone: nothing to fall back to (the link would be the original).
         if (src.kind === 'job' && src.sourceFile && REUPLOAD_STATUS.has(e.status)) {
-          toast('That file was moved or deleted. Add it from where it is now.', { kind: 'warning', timeout: 9000 });
-          if (state.source === src) clearSource();
-          return;
+          src.missingFile = true;
+          throw new Error('That file was moved or deleted. Add it from where it is now.');
         }
         // The earlier job (or its file) is gone: a link is sent as such, a file has to be added again.
         if (src.kind === 'job' && !src.jobGone && REUPLOAD_STATUS.has(e.status)) {
@@ -281,9 +292,8 @@ async function submitOne(src, task, options, cover) {
             src.jobGone = true;
             return await sendAgain(src, task, options, cover);
           }
-          toast(e.status === 404 ? 'The earlier job is gone — add the file again.' : e.message, { kind: 'warning', timeout: 9000 });
-          if (state.source === src) clearSource();
-          return;
+          src.missingFile = true;
+          throw e.status === 404 ? new Error('The earlier job is gone. Add the file again.') : e;
         }
         throw e;
       }
@@ -300,11 +310,8 @@ async function submitOne(src, task, options, cover) {
     }
     openStarted(jobs, src);
   } catch (e) {
-    if (e.status !== 401) {
-      const signIn = e.fix === 'use_cookies' && store.health?.local
-        ? { label: 'Use my browser’s sign-in…', run: () => go(settingsPath('cookies'), { focus: false }) } : null;
-      toastError(e, { action: signIn, timeout: 9000 });
-    }
+    if (state.source === src) src.submitError = e;
+    if (!stillHere(src) && e.status !== 401) toastError(e);
   } finally {
     state.busy = false;
     state.uploadPct = null;
@@ -403,11 +410,12 @@ async function submitFiles(src, task, options) {
   }
   state.busy = false;
   state.batch = null;
+  if (failed) src.submitError = new Error(`Added ${jobsWord(added)}. ${failed} file${failed === 1 ? '' : 's'} didn’t work. See the list, then retry.`);
   if (live()) redraw();
   else redraw('action'); // another source was loaded meanwhile: still drop "Stop" and re-enable the button
   const toActivity = { label: 'Open Activity', run: () => go('#/activity') };
   if (batch.stopped) toast(`Stopped. Added ${jobsWord(added)} to Activity.`, { kind: 'info', action: added ? toActivity : null });
-  else if (failed) toast(`Added ${jobsWord(added)}. ${failed} file${failed === 1 ? '' : 's'} didn’t work — see the list, then retry ${failed === 1 ? 'it' : 'them'}.`, { kind: 'danger', timeout: 9000 });
+  else if (failed) { if (!stillHere(src)) toastError(src.submitError); }
   else if (added) {
     const follow = stillHere(src);
     toast(`Added ${jobsWord(added)} to Activity.`, { kind: 'ok', action: follow ? null : toActivity });

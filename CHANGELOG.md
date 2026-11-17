@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- New uses the formats in Settings on a fresh load and keeps your choices between jobs. Enhance starts
+  with MP3 alone on new installs. Split shows the full format names.
+- Editing a link in New waits for Load. Editing a local file’s name preserves untouched embedded tags.
+  Submission errors stay beside Start until you retry or change the source.
+- Enhance and Check describe their adjustments and measurements. Brighten muffled highs is an on/off
+  switch, and the Library explains how the kept original is used for comparison and Adjust.
 - Compare reports when it cannot align a late WebM passage. Seeking no longer decodes an entire long introduction to find that point.
 
 - Saving a track uses the playlist you submitted, even if you looked up the same track in another playlist.

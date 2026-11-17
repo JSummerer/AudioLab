@@ -69,18 +69,24 @@ export function loadUrl(text) {
  * open that address, so nothing is requested from this computer until the user presses Load.
  */
 export function offerLink(text) {
-  probeCtl?.abort();
-  probeCtl = null;
   const value = String(text || '').trim();
   if (refs.input) refs.input.value = value;
-  state.source = value ? { kind: 'offered', url: value } : null;
+  editLink(value, true);
+}
+
+/** Typing changes the pending source immediately, without moving the caret or issuing a lookup. */
+export function editLink(text, external = state.source?.external === true) {
+  probeCtl?.abort();
+  probeCtl = null;
+  const value = text.trim();
+  state.source = value ? { kind: 'offered', url: value, external } : null;
   redraw();
 }
 
 /** A paste into the link field: looked up at once, except while a link from another page waits
  *  there — then Load stays the only thing that starts a lookup. */
 export function pasteLink(text) {
-  if (state.source?.kind === 'offered') offerLink(text);
+  if (state.source?.external) offerLink(text);
   else loadUrl(text);
 }
 
@@ -183,7 +189,7 @@ export function useJobSource(job, task, { again = false, file = null } = {}) {
   const o = previous.options || {};
   // The earlier job's own name overrides carry over (its source keeps the original name).
   const carried = o.meta && Object.keys(o.meta).length ? { ...o.meta } : null;
-  const src = { kind: 'job', job: previous, meta: carried, artistCleared: carried?.artist === '' };
+  const src = { kind: 'job', job: previous, meta: carried };
   if (file) src.sourceFile = { id: file.id, name: file.name };
   if (typeof o.split_tracks === 'boolean') src.splitTracks = o.split_tracks;
   state.source = src;
@@ -207,6 +213,7 @@ function applyOptions(task, o) {
     if (Array.isArray(o.formats) && o.formats.length) e.formats = new Set(o.formats);
     if (o.advanced && typeof o.advanced === 'object') {
       e.advanced = { ...o.advanced };
+      if (e.advanced.hf_restore !== 'on') delete e.advanced.hf_restore;
       delete e.eqText; // the custom EQ box and the section list show these
       delete e.sectionRows;
       for (const key of ['eq', 'section_eq']) if (Array.isArray(e.advanced[key]) && !e.advanced[key].length) delete e.advanced[key];
@@ -283,7 +290,7 @@ function renderSource() {
       break;
     case 'offered':
       el.append(callout('info', 'Press Load to look up this link',
-        'Another page sent it here. Nothing is looked up until you press Load.'));
+        src.external ? 'Another page sent it here. Nothing is looked up until you press Load.' : null));
       break;
     case 'probing':
       el.append(sourceCard({ iconName: 'link', title: 'Looking up the link…', meta: src.url, extra: meter(0, { idle: true, label: 'Looking up' }) }));
@@ -399,6 +406,7 @@ export function updateItem(it) {
 function removeItem(src, it) {
   if (state.busy) return;
   const i = src.items.indexOf(it);
+  delete src.submitError;
   src.items = src.items.filter((x) => x !== it);
   if (!src.items.length) { clearSource(); return; }
   if (src.items.length === 1) {

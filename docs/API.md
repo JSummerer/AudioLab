@@ -15,9 +15,9 @@ also carry `"hints": ["what you can try", …]` and `"fix"` (see Job `error`). A
 (the traceback goes to the log); a full disk is `500` "The disk is full." and a folder AudioLab may not write to
 (permissions, a read-only drive) `500` "AudioLab can't write there.", both with hints.
 
-**Browser safety:** without a token, requests carrying an `Origin` header from another site, or a `Host`
+**Browser safety:** in local mode without a token, requests carrying an `Origin` header from another site, or a `Host`
 header that is not a loopback name (DNS rebinding), are refused with `403` — other web pages cannot drive a
-local AudioLab. With a token these checks are off (the token already blocks both; reverse proxies work).
+local AudioLab. A network-bound server with authentication disabled makes neither check. With a token these checks are off (the token already blocks both; reverse proxies work).
 
 ---
 
@@ -346,7 +346,7 @@ automatically replacing the saved file.
 | `GET /api/jobs` | – | `{"jobs": [Job, …]}` newest first |
 | `GET /api/jobs/{id}` | – | Job |
 | `GET /api/jobs/{id}/journal` | – | `{"events": [{"ts", "kind", "stage", "message", "detail"}]}` |
-| `POST /api/jobs/{id}/cancel` | – | Job. Cancellation includes Library hashing/copying; once final publication begins or the job is done, `400` explains that the result is already being saved or has finished |
+| `POST /api/jobs/{id}/cancel` | – | Job. Cancelling during task execution discards the attempt’s unfinished outputs. Cancelling during Library hashing/copying after export keeps the completed files and finishes the job as `done` with a warning and no `library_id`. Once final publication begins or the job is done, `400` explains that the result is already being saved or has finished |
 | `POST /api/jobs/{id}/retry` | – | Job (same id, back in the queue). A link is looked up again (a live stream or premiere may have ended) |
 | `DELETE /api/jobs/{id}` | – | `{"deleted": id}` — removes the job and its work files, never the output files |
 | `DELETE /api/jobs` | `?scope=finished` | `{"deleted": [ids]}` — clears done/failed/cancelled jobs |

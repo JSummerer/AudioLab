@@ -14,6 +14,9 @@ For first-time setup, use the [Mac app guide](MACOS.md) or [source installation 
 3. Press the main action button. Follow progress in **Activity**, then play the result or open its folder
    with **Show in Finder** (**Show in folder** on Windows and Linux).
 
+Enhance starts with MP3 on a new install. New takes its format choices from Settings when the page loads.
+Choices you make in New carry over between jobs and views until you reload or change that default in Settings.
+
 Finished audio goes to **`Music/AudioLab`** in your home folder. Change that in **Settings → Files**.
 Existing output files are kept; a new result gets a numbered name if needed. A job that fails or is
 cancelled while still working removes the files it had saved in that attempt, and nothing else; a
@@ -104,8 +107,8 @@ Auto chooses from the same recipes you can select yourself:
 | Podcast / speech | Rumble filtering, clarity and more even volume |
 
 The app explains its choices, and you can override them. Noise reduction is off unless you explicitly
-choose it. The highs are lifted only when the measured top end is dull, and **Sharp S sounds** (Auto)
-softens S sounds and cymbal hits only where they jump out; choose Strong for harsh recordings or Off.
+choose it. The Song and Podcast recipes can lift presence near 3 kHz when the top end is in balance.
+The air lift is reserved for a dull top end on eligible sources. **Sharp S sounds** (Auto) softens S sounds and cymbal hits only where they jump out; choose Strong for harsh recordings or Off.
 AI stems can separate and recombine music stems or isolate speech before processing.
 These operations may change the sound in ways you dislike; compare before choosing your preferred result.
 Exporting a compressed source as WAV/FLAC does not restore missing detail.

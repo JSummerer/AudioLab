@@ -197,11 +197,11 @@ function originalsSize(list) {
   return [...seen.values()].reduce((n, b) => n + b, 0);
 }
 
-/** "14 results · 9.2 GB of files · 1.1 GB of originals kept for comparing" for the whole Library. */
+/** "14 results · 9.2 GB of files · 1.1 GB of originals kept for comparison and Adjust" for the whole Library. */
 function totalsText(all, count) {
   const [files, originals] = [filesSize(all), originalsSize(all)];
   return [`${count} result${count === 1 ? '' : 's'}`, files ? `${fmtBytes(files)} of files` : null,
-    originals ? `${fmtBytes(originals)} of originals kept for comparing` : null].filter(Boolean).join(' · ');
+    originals ? `${fmtBytes(originals)} of originals kept for comparison and Adjust` : null].filter(Boolean).join(' · ');
 }
 
 /** The recordings to show: those matching the search (title or artist), newest first or largest first. */
@@ -323,7 +323,7 @@ function originalRow(entry) {
   const file = (entry.files || []).find((f) => f.id === 'original');
   const facts = [codecName(o.codec, o.format) || (o.format || '').toUpperCase(), fmtBytes(o.size_bytes)]
     .filter(Boolean).map((t) => t.replace(/ /g, '\u00a0')); // "29.3 MB" never breaks
-  const what = ['Original kept for comparing', ...facts].join(' · ');
+  const what = ['Original kept for comparison and Adjust', ...facts].join(' · ');
   return h('div', { class: 'lib-original' },
     h('p', { class: 'lib-original-text' },
       h('strong', null, what), ' — in app data, not your output folder.'), // Settings → About calls it "App data"
@@ -1013,7 +1013,7 @@ async function deleteOriginal(g, entry) {
     title: 'Delete the original copy?',
     // No size here: a copy can share its disk space with the job's upload, so the toast says what was freed.
     message: `This affects ${n > 1 ? `all ${n} versions` : 'every version'} of “${g.title}”: `
-      + 'they can no longer be compared with the original. Your own files stay where they are.',
+      + 'they can no longer be compared with the original or reworked in Adjust. Your own files stay where they are.',
     confirm: 'Delete copy',
   });
   if (!ok) return;

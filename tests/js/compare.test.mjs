@@ -812,7 +812,7 @@ test('the Library totals its files, searches title and artist, sorts by size; ra
   Object.assign(document, { addEventListener() {}, removeEventListener() {} });
   const page = document.body;
   const titles = () => page.querySelectorAll('.lib-title').map((n) => n.textContent);
-  assert.equal(page.querySelector('.page-sub').textContent, '4 results · 4.0 GB of files · 1.0 GB of originals kept for comparing');
+  assert.equal(page.querySelector('.page-sub').textContent, '4 results · 4.0 GB of files · 1.0 GB of originals kept for comparison and Adjust');
   assert.deepEqual(titles(), ['Generated fixture', 'Big set']);
   const largest = find(page, (n) => n.tagName === 'input' && n.value === 'largest');
   largest.checked = true;

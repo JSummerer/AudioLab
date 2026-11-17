@@ -20,8 +20,8 @@ const PRESETS = ENHANCE_PRESETS;
 
 // Rarely used choices: under "More options" (unless already picked).
 const RARE_DOWNLOAD = new Set(['opus']);
-// Split file types shown up front, with short labels; the others are rare.
-const SPLIT_SHORT = { wav16: 'WAV', flac24: 'FLAC', mp3_320: 'MP3' };
+// Split file types shown up front; the others are under More options.
+const USUAL_SPLIT = new Set(['wav16', 'flac24', 'mp3_320']);
 
 definePart('tiles', renderTiles);
 definePart('options', renderOptions);
@@ -191,7 +191,7 @@ function defaults() {
   return {
     download_format: s.download_format || 'mp3',
     embed_cover: s.embed_cover !== false,
-    enhance_formats: s.enhance_formats?.length ? s.enhance_formats : ['mp3_320', 'wav16'],
+    enhance_formats: s.enhance_formats?.length ? s.enhance_formats : ['mp3_320'],
     separate_format: s.separate_format || 'wav16',
   };
 }
@@ -319,7 +319,7 @@ function recipeOptions() {
   const guess = state.source?.kind === 'url' ? state.source.probe?.guess
     : state.source?.kind === 'job' ? state.source.job?.result?.classification : null;
   const autoDesc = guess && guess.type && guess.type !== 'unknown'
-    ? `Looks like: ${guess.label}` : 'Detects what it is';
+    ? `Looks like: ${guess.label}` : 'Picks a recipe from what it measures';
   return [
     { value: 'auto', label: 'Auto', desc: autoDesc },
     ...recipes.map((r) => ({ value: r.key, label: RECIPE_LABELS[r.key] || r.name, desc: r.short })),
@@ -443,10 +443,10 @@ function fineTuning() {
       switchControl({ label: 'Bass harmonics', checked: a.harmonics === 'on', onChange: (on) => set('harmonics')(on ? 'on' : null) })],
     ['adaptive_lowmid', 'Adaptive low-mids', 'Tames brief buildup in the low-mids while keeping steady warmth. Strong allows a deeper cut. Skipped when AI shapes the stems.',
       pills('adaptive_lowmid', 'Adaptive low-mids', [['auto', 'Auto'], ['strong', 'Strong'], ['off', 'Off']])],
-    ['glue', 'Glue compression', 'Gently evens out loud and quiet moments in a mix.',
-      pills('glue', 'Glue compression', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']])],
+    ['glue', 'Compression', 'Gently evens out loud and quiet moments in a mix.',
+      pills('glue', 'Compression', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']])],
     ['hf_restore', 'Brighten muffled highs', 'Only for files whose highs are cut off, like old MP3s. Adds new high harmonics; it can’t bring back lost detail.',
-      pills('hf_restore', 'Brighten muffled highs', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']])],
+      switchControl({ label: 'Brighten muffled highs', checked: a.hf_restore === 'on', onChange: (on) => set('hf_restore')(on ? 'on' : null) })],
     ['denoise', 'Noise reduction', 'Choose Light or Strong only if you hear steady hiss or hum.',
       pills('denoise', 'Noise reduction', [['off', 'Off'], ['light', 'Light'], ['strong', 'Strong']], 'off')],
     ['mono_bass', 'Mono bass', 'Makes deep bass mono, as club systems expect.',
@@ -556,7 +556,7 @@ export function eqProblem() {
 // --- Split ---------------------------------------------------------------------
 function separateFormatOptions() {
   return (store.health?.formats?.separate || []).map((f) => ({
-    value: f.key, label: SPLIT_SHORT[f.key] || f.label, desc: f.description || f.label, info: () => formatInfo(f),
+    value: f.key, label: f.label, desc: f.description || f.label, info: () => formatInfo(f),
   }));
 }
 
@@ -567,7 +567,7 @@ function renderSeparateOptions(el) {
   if (options.length && !options.some((f) => f.value === s.format)) s.format = options[0].value;
   const fmt = splitChoice({
     label: 'File type', moreLabel: 'Other file types', value: s.format, options,
-    rare: new Set(options.filter((o) => !SPLIT_SHORT[o.value]).map((o) => o.value)),
+    rare: new Set(options.filter((o) => !USUAL_SPLIT.has(o.value)).map((o) => o.value)),
     onChange: (v) => { s.format = v; redraw('sleeve'); },
   });
   const formatChanged = () => fmt.moreKeys.has(s.format) && s.format !== dflt.separate_format;

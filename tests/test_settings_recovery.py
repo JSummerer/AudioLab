@@ -13,6 +13,14 @@ from audiolab.api import create_app
 from audiolab.settings import SETTINGS
 
 
+def test_fresh_install_defaults_to_mp3_and_saved_choices_survive_reload():
+    assert not SETTINGS.settings_file.exists()
+    assert SETTINGS.get().enhance_formats == ('mp3_320',)
+    SETTINGS.update({'enhance_formats': ['mp3_320', 'wav16']})
+    SETTINGS._settings = None
+    assert SETTINGS.get().enhance_formats == ('mp3_320', 'wav16')
+
+
 @pytest.mark.parametrize('failure_point', ['write', 'replace'])
 def test_failed_save_keeps_active_and_persisted_preferences(monkeypatch, failure_point):
     SETTINGS.update({'keep_originals': True, 'theme': 'auto'})
@@ -49,7 +57,7 @@ def test_malformed_settings_fall_back_without_overwriting_file(payload):
     path.write_bytes(raw)
     SETTINGS._settings = None
     assert SETTINGS.get().theme == 'auto'
-    assert SETTINGS.public()['enhance_formats'] == ['mp3_320', 'wav16']
+    assert SETTINGS.public()['enhance_formats'] == ['mp3_320']
     assert path.read_bytes() == raw
 
 
@@ -83,7 +91,7 @@ def test_invalid_saved_fields_do_not_discard_valid_preferences(folder, expansion
     SETTINGS._settings = None
     current = SETTINGS.get()
     assert current.theme == 'dark' and current.keep_originals is False
-    assert current.enhance_formats == ('mp3_320', 'wav16')
+    assert current.enhance_formats == ('mp3_320',)
     assert current.download_format == 'mp3' and current.output_dir == ''
     assert json.loads(SETTINGS.settings_file.read_text()) == saved
 

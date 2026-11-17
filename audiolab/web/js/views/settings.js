@@ -396,7 +396,7 @@ function renderDefaults() {
         options: (fm.download || []).filter((f) => f.key !== 'video').map((f) => pill(f, true)),
         onChange: (v) => save({ download_format: v }),
       }), { stack: true, setting: 'download_format' }),
-    row('Enhance saves', 'Ticked for every Enhance job.',
+    row('Enhance saves', 'Formats selected when New opens. You can change them for a job.',
       loading || chips({
         label: 'Enhance formats', size: 'sm', values: new Set(s.enhance_formats || []),
         options: enhanceOptions(fm.enhance || [], choice),

@@ -103,7 +103,7 @@ CHECK_UPDATES_DEFAULT = False
 class UserSettings:
     output_dir: str = ''  # '' = default_output_dir()
     download_format: str = 'mp3'  # see media.export.FORMATS
-    enhance_formats: tuple = ('mp3_320', 'wav16')
+    enhance_formats: tuple = ('mp3_320',)
     separate_format: str = 'wav16'
     ui_mode: str = 'simple'  # simple | advanced
     theme: str = 'auto'  # auto | light | dark

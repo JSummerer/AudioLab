@@ -457,7 +457,7 @@ def main(argv=None) -> int:
         )
     )
 
-    p = sub.add_parser('enhance', help='make it sound better (auto-detects the type)')
+    p = sub.add_parser('enhance', help='adjust tone and volume automatically')
     common(p)
     p.add_argument('--type', default='auto', choices=['auto', 'club', 'live', 'music', 'voice'])
     q = p.add_mutually_exclusive_group()
@@ -510,7 +510,7 @@ def main(argv=None) -> int:
     p.add_argument('--model', default='auto')
     p.set_defaults(fn=lambda a: _run_many('separate', a, {'mode': a.mode, 'format': a.format, 'model': a.model}))
 
-    p = sub.add_parser('analyze', help='check loudness, peaks and real quality')
+    p = sub.add_parser('analyze', help='measure loudness, peaks and frequency range')
     common(p)
     p.set_defaults(fn=lambda a: _run_many('analyze', a, {}))
 

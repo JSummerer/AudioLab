@@ -101,7 +101,7 @@ def apply_section_eq(
     return done
 
 
-def subharmonic_reinforce(
+def bass_harmonics(
     x: np.ndarray,
     wet: float = 0.3,
     fc: float = 90.0,
@@ -110,8 +110,7 @@ def subharmonic_reinforce(
     *,
     scratch: ScratchBuffers | None = None,
 ) -> np.ndarray:
-    """Second-order harmonic warmth from the sub band, kept in (fc, 4·fc) so it
-    stays out of the mids (prototype algorithm)."""
+    """Generate upper harmonics from the bass band, filtered between 1.1·fc and 4·fc."""
     if wet <= 0.0:
         return x
     sos_lp = butter(2, fc, btype='lowpass', fs=sr, output='sos')
@@ -453,9 +452,7 @@ def _render(
     fold_hz = params.mono_bass_hz or 90.0
     if params.sub_harmonics > 0:
         p(50, 'Reinforcing sub-bass...')
-        x = subharmonic_reinforce(
-            x, wet=params.sub_harmonics, fc=fold_hz, sr=sr, check_cancel=p.check_cancel, scratch=scratch
-        )
+        x = bass_harmonics(x, wet=params.sub_harmonics, fc=fold_hz, sr=sr, check_cancel=p.check_cancel, scratch=scratch)
         steps.append('Made the deep bass easier to hear on small speakers (added bass harmonics)')
     if params.mono_bass_hz:
         p(56, 'Centering the bass...')

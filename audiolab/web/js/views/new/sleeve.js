@@ -67,7 +67,7 @@ function plan() {
       const selected = keys.map((k) => all.find((f) => f.key === k));
       const formats = selected.map((f, i) => f?.label || keys[i]);
       const tuned = fineTuningChanges();
-      return [join(e.recipe === 'auto' ? 'Detect type' : RECIPE_LABELS[e.recipe], PROCESSING_LABELS[e.quality]),
+      return [join(e.recipe === 'auto' ? 'Auto recipe' : RECIPE_LABELS[e.recipe], PROCESSING_LABELS[e.quality]),
         formats.join(', ') || null, embeddedCoverNote(selected, e.embed_cover),
         tuned ? `Fine-tuning: ${tuned} change${tuned === 1 ? '' : 's'}` : null];
     }
@@ -76,7 +76,7 @@ function plan() {
       const f = (store.health?.formats?.separate || []).find((x) => x.key === s.format);
       return [join(SPLIT_MODE[s.mode], f?.label)];
     }
-    case 'analyze': return ['Loudness, peaks, dynamics and real quality'];
+    case 'analyze': return ['Loudness, peaks, dynamics and frequency range'];
     default: return [];
   }
 }

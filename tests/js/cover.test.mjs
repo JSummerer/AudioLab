@@ -19,6 +19,7 @@ class Element {
   append(...kids) { this.children.push(...kids.flat(Infinity).filter((c) => c != null)); }
   addEventListener(type, fn) { ((this.listeners ||= {})[type] ||= []).push(fn); }
   fire(type) { for (const fn of this.listeners?.[type] || []) fn({ preventDefault() {} }); }
+  focus() {}
   setAttribute(key, value) { this[key] = value; }
   get classList() {
     const add = (c) => { this.class = [this.class, c].flat().filter(Boolean); };
@@ -49,7 +50,7 @@ function setup({ crlf = false } = {}) {
   const context = vm.createContext({
     state, store, redrawn, PROCESSING_LABELS, ENHANCE_PRESETS,
     refs: { input: { value: '' }, options: { querySelector: () => null } }, AbortController, URL, setTimeout, fmtDuration,
-    focusStart() {}, autoTask() {},
+    focusIn() {}, focusStart() {}, autoTask() {},
     segmented: (attrs) => new Element('div', attrs), isShown: () => false, setShown() {}, formatInfo: () => null,
     clear: (el) => { el.children = []; return el; },
     append: (el, kids) => { el.children.push(...kids.flat(Infinity).filter((c) => c != null)); return el; },
@@ -65,11 +66,11 @@ function setup({ crlf = false } = {}) {
     appliedAdvanced: () => Object.entries(state.enhance.advanced)
       .filter(([k]) => state.enhance.quality !== 'light' || LIGHT_KEYS.includes(k)),
   });
-  for (const name of ['cover', 'names', 'tracks', 'options', 'source', 'sleeve']) {
+  for (const name of ['cover', 'names', 'tracks', 'options', 'source', 'sleeve', 'start', 'index']) {
     const path = new URL(`../../audiolab/web/js/views/new/${name}.js`, import.meta.url);
     const original = readFileSync(path, 'utf8');
     const checkout = crlf ? original.replace(/\r?\n/g, '\r\n') : original;
-    const source = checkout.replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '');
+    const source = checkout.replace(/^import .*;\r?\n/gm, '').replace(/^export \{.*\};\r?\n/gm, '').replace(/^export /gm, '');
     vm.runInContext(source, context, { filename: path.pathname });
   }
   return { state, store, context, redrawn, requests, run: (code) => vm.runInContext(code, context) };
@@ -251,4 +252,99 @@ test('checking an export uses its file metadata and reusing the original still l
   assert.equal(s.requests.length, 3);
   assert.equal(s.run('sourceDuration()'), 32);
   assert.match(s.run('loaded().meta'), /0:32$/);
+});
+
+test('local name edits keep untouched tags, support explicit artist clearing, Cancel and Undo', () => {
+  const s = setup();
+  const editor = () => s.run('nameEditor(state.source)');
+  const button = (el, label) => findIn(el, (n) => n.tag === 'button' && n.children.includes(label));
+  const payload = () => JSON.parse(JSON.stringify(s.run('metaPayload(state.source)')));
+  button(editor(), 'Save name').onclick();
+  assert.equal(payload(), null);
+  let form = editor();
+  findIn(form, (n) => n.id === 'metaTitle').value = 'Concert';
+  button(form, 'Save name').onclick();
+  assert.deepEqual(payload(), { title: 'Concert' });
+  form = editor();
+  button(form, 'Clear artist tag').onclick();
+  button(form, 'Cancel').onclick();
+  assert.deepEqual(payload(), { title: 'Concert' });
+  form = editor();
+  button(form, 'Clear artist tag').onclick();
+  button(form, 'Save name').onclick();
+  assert.deepEqual(payload(), { title: 'Concert', artist: '' });
+  button(s.run('nameTools(state.source)'), 'Undo').onclick();
+  assert.equal(payload(), null);
+  form = editor();
+  findIn(form, (n) => n.id === 'metaArtist').value = 'Singer';
+  button(form, 'Save name').onclick();
+  assert.deepEqual(payload(), { artist: 'Singer' });
+});
+
+test('typing replaces the pending or loaded source and requires Load; ordinary paste still probes', async () => {
+  const s = setup();
+  let finish;
+  s.context.api = () => new Promise((resolve) => { finish = resolve; });
+  s.run('loadUrl("https://example.com/first")');
+  s.run('editLink("https://example.com/second")');
+  finish({ title: 'Stale answer' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(s.state.source.kind, 'offered');
+  assert.match(s.run('blockedReason()'), /Press Load/);
+  s.run('pasteLink("https://example.com/third")');
+  finish({ title: 'Third' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(s.state.source.kind, 'url');
+  s.run('editLink("https://example.com/fourth")');
+  assert.equal(s.state.source.url, 'https://example.com/fourth');
+  assert.match(s.run('blockedReason()'), /Press Load/);
+  s.run('editLink("")');
+  assert.equal(s.state.source, null);
+});
+
+test('format defaults ignore past browser storage, keep changes in this session, and follow an explicit Settings change', () => {
+  const s = setup();
+  s.context.localStorage.getItem = () => { throw new Error('must not read last started formats'); };
+  s.store.settings = { download_format: 'mp3', enhance_formats: ['mp3_320'], separate_format: 'wav16' };
+  s.state.separate = {};
+  s.run('applyDefaults()');
+  assert.deepEqual([...s.state.enhance.formats], ['mp3_320']);
+  s.state.enhance.formats.add('wav16');
+  s.store.settings.theme = 'dark';
+  s.run('applyDefaults()');
+  assert.deepEqual([...s.state.enhance.formats], ['mp3_320', 'wav16']);
+  s.store.settings.enhance_formats = ['wav16'];
+  s.run('applyDefaults()');
+  assert.deepEqual([...s.state.enhance.formats], ['wav16']);
+});
+
+test('Split uses server labels for common and additional formats', () => {
+  const s = setup();
+  s.store.health.formats.separate = [{ key: 'wav16', label: 'Server WAV label' }, { key: 'wav24', label: 'Server 24-bit' }];
+  assert.deepEqual([...s.run('separateFormatOptions()')].map((f) => f.label), ['Server WAV label', 'Server 24-bit']);
+});
+
+test('submission errors stay at Start on redraw, clear on retry, and belong only to their source', async () => {
+  const s = setup();
+  Object.assign(s.context, {
+    FormData, document: { activeElement: null }, currentRoute: () => ({ name: 'new' }), upsertJob() {},
+    shortFolder: () => '', callout: (level, title, help) => new Element('div', {}, [title, help]),
+  });
+  const row = new Element('div');
+  row.contains = () => false;
+  s.context.refs.action = row;
+  s.state.source = { kind: 'url', url: 'https://example.com/recording', probe: { title: 'Recording' } };
+  s.context.api = async () => { throw Object.assign(new Error('Could not start'), { hints: ['Select another folder.'] }); };
+  await s.run('submit()');
+  s.run('renderAction()');
+  assert.match(text(findIn(row, (n) => n.id === 'submitError')), /Could not start Select another folder/);
+  let finish;
+  s.context.api = () => new Promise((resolve) => { finish = resolve; });
+  const retry = s.run('submit()');
+  assert.equal(s.state.source.submitError, undefined);
+  s.run('editLink("https://example.com/other")');
+  finish({ jobs: [] });
+  await retry;
+  s.run('renderAction()');
+  assert.equal(findIn(row, (n) => n.id === 'submitError'), undefined);
 });

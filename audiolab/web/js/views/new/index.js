@@ -6,8 +6,9 @@
 import { h, icon } from '../../dom.js';
 import { store, on } from '../../store.js';
 import { closeInfo } from '../../ui.js';
+import { nativeWindow } from '../../native.js';
 import { state, refs, redraw, TASKS, rememberedFormats } from './state.js';
-import { loadUrl, offerLink, pasteLink, setFiles, useJobSource, normalizeUrl } from './source.js';
+import { loadUrl, offerLink, pasteLink, chooseFiles, setFiles, useJobSource, normalizeUrl } from './source.js';
 import './options.js';
 import './start.js';
 import './sleeve.js';
@@ -66,8 +67,10 @@ export const newView = {
           h('section', { class: 'step', 'aria-label': 'Source' },
             form,
             h('div', { class: 'source-alt' },
-              h('button', { type: 'button', class: 'btn btn-ghost', onclick: () => document.getElementById('fileInput').click() },
+              h('button', { type: 'button', class: 'btn btn-ghost', onclick: () => chooseFiles() },
                 icon('upload', 16), 'Choose files'),
+              nativeWindow() ? h('button', { type: 'button', class: 'btn btn-ghost', onclick: () => chooseFiles('batch') },
+                icon('folder', 16), 'Choose folder') : null,
               h('span', { class: 'source-alt-note' }, 'or drop them anywhere on this window')),
             refs.source),
           h('section', { class: 'step' },

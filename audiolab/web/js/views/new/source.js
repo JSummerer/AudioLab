@@ -5,8 +5,9 @@
 // A link from another page (a deep link) is only put into the field (offerLink).
 import { h, icon, clear, fmtDuration, fmtBytes, confidenceWords } from '../../dom.js';
 import { api } from '../../api.js';
+import { chooseNative, nativeWindow } from '../../native.js';
 import { appName } from '../../store.js';
-import { toast, callout, meter, setMeter, led } from '../../ui.js';
+import { toast, toastError, callout, meter, setMeter, led } from '../../ui.js';
 import { signInButton } from '../../actions.js';
 import { state, refs, redraw, definePart, isFileLike, focusIn, focusStart, isMediaFile, tooBig, autoTask, MAX_FILES } from './state.js';
 import { shownName, metaPayload } from './names.js';
@@ -89,10 +90,28 @@ function setFile(file) {
   if (refs.input) refs.input.value = '';
   state.source = { kind: 'file', file };
   autoTask('file');
-  measureFile(state.source);
+  if (!file.selection) measureFile(state.source);
   if (state.download.format === 'original' || state.download.format === 'video') state.download.format = 'mp3';
   redraw();
   focusStart();
+}
+
+export async function chooseFiles(kind = 'files') {
+  if (!nativeWindow()) { document.getElementById('fileInput').click(); return; }
+  if (state.busy) return;
+  try {
+    const choice = await chooseNative(kind);
+    if (!choice) return;
+    if (choice.files.length) setFiles(choice.files);
+    if (choice.capped) {
+      toast(`You can add up to ${MAX_FILES} files at a time. Remaining files were left out.`, { kind: 'warning', timeout: 8000 });
+    } else if (!choice.files.length) {
+      toast(kind === 'batch' ? 'No supported audio or video files were found directly in this folder.'
+        : 'Choose a supported audio or video file.', { kind: 'warning' });
+    } else if (choice.skipped) {
+      toast(`Left out ${choice.skipped} unsupported or unavailable file${choice.skipped === 1 ? '' : 's'}.`, { kind: 'info' });
+    }
+  } catch (e) { toastError(e); }
 }
 
 /** Several files: one job each. Adds to an existing list, otherwise starts one. */
@@ -111,11 +130,11 @@ export function setFiles(list) {
     else toast(`“${picked[0].name}” isn’t an audio or video file ${appName()} can read.`, { kind: 'warning' });
     return;
   }
-  if (adding && state.busy) { toast('Wait until these files are uploaded, then add more.', { kind: 'warning' }); return; }
+  if (adding && state.busy) { toast('Wait until these jobs are added, then add more.', { kind: 'warning' }); return; }
   const media = picked.filter(isMediaFile);
   const skipped = picked.length - media.length;
   const items = adding ? [...state.source.items] : [];
-  const key = (f) => `${f.name}|${f.size}|${f.lastModified}`;
+  const key = (f) => f.selection || `${f.name}|${f.size}|${f.lastModified}`;
   const known = new Set(items.map((it) => key(it.file)));
   let over = 0;
   let big = 0;
@@ -335,7 +354,7 @@ function filesList(src) {
         h('div', { class: 'source-meta' }, metaJoin('On this computer', fmtBytes(total), 'one job per file'))),
       h('button', {
         type: 'button', class: 'btn btn-ghost btn-sm', disabled: busy,
-        onclick: () => document.getElementById('fileInput').click(),
+        onclick: () => chooseFiles(),
       }, icon('plus', 14), 'Add more'),
       h('button', { type: 'button', class: 'icon-btn source-remove', 'aria-label': 'Remove all files', disabled: busy, onclick: clearSource }, icon('close', 16))),
     h('ul', { class: 'mf-list', 'aria-label': 'Files' }, items.map((it) => fileItemRow(src, it))));
@@ -369,11 +388,11 @@ export function updateItem(it) {
   const next = led({ uploading: 'on', done: 'ok', error: 'bad' }[it.status] || 'off', { blink: it.status === 'uploading' });
   ui.led.replaceWith(next);
   ui.led = next;
-  ui.status.textContent = it.status === 'uploading' ? `${Math.round(it.pct)} %`
+  ui.status.textContent = it.status === 'uploading' ? (it.file.selection ? 'Adding…' : `${Math.round(it.pct)} %`)
     : it.status === 'done' ? 'Added' : it.status === 'error' ? 'Didn’t work' : fmtBytes(it.file.size);
   ui.error.textContent = it.status === 'error' ? (it.error || '') : '';
-  ui.meter.hidden = it.status !== 'uploading';
-  if (it.status === 'uploading') setMeter(ui.meter, it.pct);
+  ui.meter.hidden = it.status !== 'uploading' || !!it.file.selection;
+  if (!ui.meter.hidden) setMeter(ui.meter, it.pct);
   ui.remove.hidden = state.busy;
 }
 
@@ -386,7 +405,7 @@ function removeItem(src, it) {
     // Back to the single-file card (reusing its upload when it has one).
     const last = src.items[0];
     state.source = { kind: 'file', file: last.file, ...(last.jobId ? { reuseJobId: last.jobId } : {}) };
-    measureFile(state.source);
+    if (!file.selection) measureFile(state.source);
     redraw();
     focusIn('.source-remove');
     return;

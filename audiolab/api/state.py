@@ -18,6 +18,7 @@ from ..media import export, ffmpeg, youtube, ytdlp_update
 from ..settings import LIMITS, SETTINGS
 from ..util import JOB_ID_RE
 from .events import Hub
+from .security import is_loopback
 
 PROBE_TTL_S = 15 * 60
 SHUTDOWN_TIMEOUT_S = 5.0
@@ -234,3 +235,21 @@ def get_state(request: Request) -> AppState:
 
 
 State = Annotated[AppState, Depends(get_state)]
+
+
+def native_selection(request: Request, state: AppState, selection, purpose: str):
+    native = getattr(request.app.state, 'native_inputs', None)
+    if (
+        not state.local
+        or native is None
+        or request.client is None
+        or not is_loopback(request.client.host)
+        or request.headers.get('host') != native.address
+        or request.headers.get('origin') != native.origin
+        or not native.authorizes(request.headers.get('x-audiolab-desktop'))
+    ):
+        raise HTTPException(403, 'Choose this file or folder in the AudioLab app window.')
+    item = native.get(selection, purpose)
+    if item is None:
+        raise HTTPException(410, 'This selection is no longer available. Choose it again.')
+    return item

@@ -16,6 +16,7 @@ from .. import APP_NAME, __version__, outputs
 from ..context import Progress, TaskContext
 from ..errors import AudioLabError, storage_error
 from ..media import export, ffmpeg, youtube
+from ..native_inputs import source_path
 from ..resources import preflight
 from ..settings import SETTINGS, validate_output_location
 from ..util import PLAYABLE_EXT, human_bytes, human_duration, link_or_copy, sanitize_filename, unique_path
@@ -162,7 +163,7 @@ def _acquire(
                 ]
             raise
 
-    path = Path(source.get('path') or '')
+    path = source_path(source)
     if not path.is_file():
         raise AudioLabError(
             'The uploaded file is no longer available.', hints=['Add the file again and start a new job.']
@@ -296,11 +297,12 @@ def cover_source(source: dict[str, Any]) -> str | None:
         return 'own'
     if _thumbnail(source):
         return 'link'
-    path = Path(source.get('path') or '')
-    if source.get('kind') == 'file' and path.is_file():
-        info = ffmpeg.probe_media(path)
-        if info.get('has_cover') and not info.get('has_video'):
-            return 'file'
+    if source.get('kind') == 'file':
+        path = source_path(source)
+        if path.is_file():
+            info = ffmpeg.probe_media(path)
+            if info.get('has_cover') and not info.get('has_video'):
+                return 'file'
     return None
 
 
@@ -337,12 +339,12 @@ def save_cover(
             pic = youtube.fetch_thumbnail(_thumbnail(source), Path(tmp) / 'thumbnail.src', progress=progress)
         else:  # the picture as the file carries it; one that isn't a JPEG/PNG/WebP becomes a JPEG
             pic = Path(tmp) / 'embedded.src'
-            media = ['-i', source['path'], '-map', '0:v:0', '-frames:v', '1']
+            media = ['-i', str(source_path(source)), '-map', '0:v:0', '-frames:v', '1']
             ffmpeg.run_ffmpeg(
                 [*media, '-c:v', 'copy', '-f', 'image2', '-update', '1', str(pic)], progress=progress, what='cover copy'
             )
             if export.picture_size(pic) is None:
-                pic = export.cover_jpeg(source['path'], Path(tmp) / 'embedded.jpg', max_px=None)
+                pic = export.cover_jpeg(source_path(source), Path(tmp) / 'embedded.jpg', max_px=None)
         progress.check_cancel()
         path = export.save_picture(pic, folder, stem)
     entry = file_entries(

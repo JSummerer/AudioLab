@@ -108,7 +108,11 @@ class _Guard:
                     await too_large(scope, receive, send)
                 return
             if message['type'] == 'http.response.start' and not path.startswith('/api'):
-                MutableHeaders(scope=message)['Cache-Control'] = 'no-cache'
+                headers = MutableHeaders(scope=message)
+                headers['Cache-Control'] = 'no-cache'
+                app = scope.get('app')
+                if app is not None and getattr(app.state, 'native_inputs', None) is not None:
+                    headers['Content-Security-Policy'] = "frame-src 'none'; frame-ancestors 'none'; object-src 'none'"
             await send(message)
 
         await self.app(scope, bounded_receive, guarded_send)

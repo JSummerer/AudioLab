@@ -12,6 +12,7 @@
 // through a reload. #/library/<id> scrolls to that version and opens its comparison.
 import { IS_MAC, h, icon, clear, append, fmtBytes, fmtDuration, fmtAgo, fmtNum, fmtSigned, shortFolder } from '../dom.js';
 import { api } from '../api.js';
+import { chooseNative, nativeWindow } from '../native.js';
 import { store, on, upsertJob, showDetails } from '../store.js';
 import { toast, toastError, callout, confirmDialog, segmented, switchControl, menuButton, closeMenu } from '../ui.js';
 import { go, jobPath, currentRoute } from '../router.js';
@@ -905,22 +906,42 @@ async function keepOnly(entry) {
  */
 function importDialog(group = null) {
   const id = `lib-import-${++uid}`;
-  const path = h('input', {
+  const native = nativeWindow();
+  let file = null;
+  const pickedName = h('span', { class: 'muted small', 'aria-live': 'polite' }, 'No file chosen');
+  const pick = native ? h('button', {
+    type: 'button', class: 'btn btn-key', 'aria-describedby': `${id}-error`, onclick: async () => {
+      try {
+        const choice = await chooseNative('import');
+        if (!choice || !dialog.open) return;
+        if (!choice.files[0]) throw new Error('Choose a supported audio or video file.');
+        file = choice.files[0];
+        pickedName.textContent = file.name;
+        error.textContent = '';
+        addBtn.disabled = false;
+      } catch (err) {
+        error.textContent = err.message;
+      }
+    },
+  }, 'Choose file') : null;
+  const path = native ? null : h('input', {
     class: 'field', id: `${id}-path`, type: 'text', required: true, autocomplete: 'off', spellcheck: 'false',
     placeholder: IS_MAC ? '/Users/you/Music/Master.wav' : 'C:\\Users\\you\\Music\\Master.wav', 'aria-describedby': `${id}-help ${id}-error`,
   });
   const title = h('input', { class: 'field', id: `${id}-title`, type: 'text', autocomplete: 'off', placeholder: 'From its tags or file name' });
   const error = h('p', { class: 'lib-import-error small', id: `${id}-error` });
-  const addBtn = h('button', { type: 'submit', class: 'btn btn-primary', value: 'ok' }, 'Add to Library');
+  const addBtn = h('button', { type: 'submit', class: 'btn btn-primary', value: 'ok', disabled: native }, 'Add to Library');
   const form = h('form', { class: 'dialog-form', method: 'dialog' },
     h('h2', { id }, group ? 'Add a version from a file' : 'Add a file'),
     h('p', { class: 'muted' }, group
       ? `Adds an audio file you already have to “${group.title || 'this recording'}”, so you can play it and compare it with the other versions. The file stays where it is.`
       : 'Adds an audio file you already have, such as a master from your DAW, so you can play it and compare it. The file stays where it is.'),
-    h('label', { class: 'field-label', for: path.id }, 'File path'), path,
-    h('p', { class: 'muted small', id: `${id}-help` }, IS_MAC
-      ? 'Paste the file’s path. In Finder: right-click the file with ⌥ held → Copy as Pathname.'
-      : 'Paste the file’s full path.'),
+    native ? [pick, pickedName] : [
+      h('label', { class: 'field-label', for: path.id }, 'File path'), path,
+      h('p', { class: 'muted small', id: `${id}-help` }, IS_MAC
+        ? 'Paste the file’s path. In Finder: right-click the file with ⌥ held → Copy as Pathname.'
+        : 'Paste the file’s full path.'),
+    ],
     h('label', { class: 'field-label', for: title.id }, 'Title (optional)'), title,
     error,
     h('div', { class: 'dialog-actions' },
@@ -928,31 +949,34 @@ function importDialog(group = null) {
   const dialog = h('dialog', { class: 'dialog lib-import', 'aria-labelledby': id }, form);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const filePath = path.value.trim().replace(/^(["'])(.*)\1$/, '$2'); // "Copy as path" on Windows adds quotes
-    if (!filePath) { path.focus(); return; }
-    const body = { path: filePath };
+    if (addBtn.disabled) return;
+    const filePath = path?.value.trim().replace(/^(["'])(.*)\1$/, '$2'); // "Copy as path" on Windows adds quotes
+    if (!file && !filePath) { (pick || path).focus(); return; }
+    const body = native ? { native_file: file.selection } : { path: filePath };
     if (title.value.trim()) body.title = title.value.trim();
     if (group) body.group = group.key;
     addBtn.disabled = true;
+    if (pick) pick.disabled = true;
     error.textContent = '';
     try {
-      const job = await api('/api/library/import', { method: 'POST', json: body });
+      const job = await api('/api/library/import', { method: 'POST', json: body, desktop: native });
       if (!job?.id) throw new Error('The app didn’t return an import job.');
       upsertJob(job); // the Library reloads when it is done
       dialog.close();
-      toast(`Adding “${body.title || filePath.split(/[\\/]/).pop()}” to the Library…`, {
+      toast(`Adding “${body.title || file?.name || filePath.split(/[\\/]/).pop()}” to the Library…`, {
         action: { label: 'Show', run: () => go(jobPath(job.id)) },
       });
     } catch (err) {
       addBtn.disabled = false;
       error.textContent = [err.message, err.hints?.[0]].filter(Boolean).join(' ');
-      path.focus();
+      if (pick) pick.disabled = false;
+      (pick || path).focus();
     }
   });
   dialog.addEventListener('close', () => dialog.remove());
   document.body.append(dialog);
   dialog.showModal();
-  path.focus();
+  (pick || path).focus();
   return dialog;
 }
 

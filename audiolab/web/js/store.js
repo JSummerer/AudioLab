@@ -168,13 +168,14 @@ export function loadSettings() {
   });
 }
 
-export function saveSettings(patch) {
+export function saveSettings(patch, { desktop = false } = {}) {
   if (!pendingSettings.length) confirmedSettings = store.settings;
   patch = { ...patch };
-  pendingSettings.push(patch);
+  // A native folder selection maps to an output_dir only after the save succeeds.
+  pendingSettings.push(desktop ? {} : patch);
   const result = queueSettings(async () => {
     try {
-      confirmedSettings = await api('/api/settings', { method: 'PUT', json: patch });
+      confirmedSettings = await api('/api/settings', { method: 'PUT', json: patch, desktop });
       return confirmedSettings;
     } finally {
       pendingSettings.shift();

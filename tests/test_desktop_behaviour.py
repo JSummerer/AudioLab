@@ -3,6 +3,7 @@
 import threading
 from types import SimpleNamespace
 from unittest.mock import Mock
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -29,16 +30,19 @@ class WindowAdapter:
 
     def __init__(self, scenario):
         self.settings = {}
-        self.window = SimpleNamespace(events=SimpleNamespace(closing=ClosingEvent()))
+        self.FileDialog = SimpleNamespace(OPEN=10, FOLDER=20)
+        self.window = SimpleNamespace(events=SimpleNamespace(closing=ClosingEvent(), shown=threading.Event()))
         self.scenario = scenario
         self.start_options = None
 
     def create_window(self, title, url, **kwargs):
         self.title, self.url = title, url
+        self.js_api = kwargs['js_api']
         return self.window
 
     def start(self, **kwargs):
         self.start_options = kwargs
+        self.window.events.shown.set()
         self.scenario(self.window.events.closing.fire)
 
 
@@ -101,7 +105,12 @@ def run_window(monkeypatch, server, scenario):
         server.cleanup()
     assert result == 0
     assert webview.title == APP_NAME
-    assert webview.url == 'http://127.0.0.1:19999/?token=test'
+    parts = urlsplit(webview.url)
+    assert parts._replace(fragment='').geturl() == 'http://127.0.0.1:19999/?token=test'
+    assert parts.fragment == f'desktop={server.config.app.state.native_inputs.secret}'
+    desktop._remember_instance.assert_called_once_with(
+        'http://127.0.0.1:19999', 'http://127.0.0.1:19999/?token=test', window=True, instance='i'
+    )
     return webview
 
 
@@ -120,6 +129,8 @@ def test_idle_or_queued_window_closes_without_prompt(monkeypatch, statuses):
     # These prove adapter configuration only, not WebKit storage or download behaviour.
     assert webview.start_options == {'private_mode': False}
     assert webview.settings['ALLOW_DOWNLOADS'] is True
+    assert webview.settings['ALLOW_FILE_URLS'] is False
+    assert server.events == ['state shutdown', 'server exit']
 
 
 @pytest.mark.parametrize('running', [1, 2])
@@ -182,7 +193,7 @@ def test_finished_notification_hook_is_local_long_and_terminal_only(local, statu
 
 def test_a_stale_instance_record_is_not_another_programs_server(tmp_path, monkeypatch):
     """After a crash another program may answer on the recorded port: only the launch that wrote the record
-    (its ping echoes the id) is reused; without an id on either side it must be AudioLab's own ping answer."""
+    (its ping echoes the nonempty id) is reused."""
     import json
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -226,9 +237,33 @@ def test_a_stale_instance_record_is_not_another_programs_server(tmp_path, monkey
         record.write_text(json.dumps({'url': url, 'page': url, 'pid': 1, 'window': True}))  # an older version
         answer.clear()
         answer['ok'] = True
-        assert desktop.existing_instance() is not None
+        assert desktop.existing_instance() is None
+        record.write_text(json.dumps({**mine, 'instance': ''}))
+        answer['instance'] = ''
+        assert desktop.existing_instance() is None
+        record.write_text(json.dumps(mine))
         answer.pop('ok')
         assert desktop.existing_instance() is None
     finally:
         server.shutdown()
         server.server_close()
+
+
+@pytest.mark.parametrize('phase', ['create_window', 'start', 'never_shown'])
+def test_window_failure_stops_the_owned_server_and_reports_it(monkeypatch, phase):
+    server = ServerAdapter([])
+    webview = WindowAdapter(lambda _: None)
+    monkeypatch.setattr(desktop, '_wait_until_started', lambda server, thread: server.ready.wait(timeout=1))
+    monkeypatch.setattr(desktop, '_fatal', Mock())
+    if phase == 'never_shown':
+        monkeypatch.setattr(webview, 'start', Mock())
+    else:
+        monkeypatch.setattr(webview, phase, Mock(side_effect=RuntimeError('failed to open window')))
+    try:
+        assert desktop._run_window(webview, server, 'http://127.0.0.1:19999', 'http://127.0.0.1:19999', False) == 1
+        assert server.events == ['state shutdown', 'server exit']
+        assert not server.thread.is_alive()
+        assert 'local server was stopped' in desktop._fatal.call_args.args[0]
+        desktop._forget_instance.assert_called_once()
+    finally:
+        server.cleanup()

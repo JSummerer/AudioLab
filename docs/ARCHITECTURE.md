@@ -35,6 +35,7 @@ line and the Docker image.
 |---|---|
 | `__init__.py` | Brand (`APP_NAME`, `APP_SLUG`) and version — see "Renaming" below |
 | `desktop.py` | Starts the app: picks a free port, runs the server, opens the native window (pywebview; default on macOS) or the browser, one instance per data folder, clean quit |
+| `native_inputs.py` | Native file and folder selection, scoped selection IDs, and file identity checks for direct job inputs |
 | `runtime.py` | Source/frozen-runtime boundary: packaged downloader command, private bundled-tool lookup, certificate trust and app-owned cache/temp setup before helpers start; source mode retains its existing environment |
 | `cli.py` | `audiolab [app\|serve\|download\|enhance\|separate\|analyze\|doctor\|update\|install-ai\|shortcut]` |
 | `api/` | FastAPI app (`app.py`: `create_app`, lifespan, error format, static UI), `security.py` (local-mode Host/Origin checks, token, upload cap), `state.py` (per-app runtime state: manager, live-event hub, caches, health), `jobs.py` (probe + job routes, files, ZIP, excerpt PCM), `status.py` (health, settings, storage, diagnostics, maintenance: downloader update, update check, AI add-on), `events.py` (SSE), `library.py` (Library list and entries, files, PCM chunks for comparing, removal) |
@@ -72,6 +73,21 @@ Long Enhance adds up to 36 bytes per 48 kHz frame (about 5.8 GiB/hour) for disk-
 Beyond 10 minutes, Enhance with "Volume only" or "Tone and volume" is estimated at the 10-minute figure
 plus 0.5 GiB per hour: its mapped scratch pages count as reclaimable, and the slope is about three times the growth
 measured on one 48 GB Mac. AI stems Enhance keeps the earlier, conservative RAM estimate.
+
+### Native file selection
+
+The desktop launcher opens the UI with a short-lived window secret, passed in the launch fragment and
+removed by the UI before routing. The native picker bridge checks that secret and the exact app location
+before opening a dialog and checks the location again after selection. The bridge returns names, sizes and
+opaque IDs. Existing HTTP routes redeem the IDs on the local instance, for the matching operation and with
+the same secret. Only desktop-server pages disallow embedding and child frames. Folder selection adds
+immediate supported files by name, up to the same 50-file limit as the New list.
+
+Native New sources keep their canonical path and file identity (device and inode) only in the job's
+private source record. Retry and re-run use that original selection in place. If the path is gone or
+now resolves to a different file, choose it again. Working data and covers still live in job folders,
+and Library originals that came from direct native inputs are copied. Library import retains its existing
+ownership and Trash rules.
 
 ### Platform code
 Everything that differs between macOS, Windows and Linux lives in `system.py`; other modules call its

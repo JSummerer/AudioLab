@@ -7,6 +7,7 @@
 // Paths show short, the full one on hover. A section with nothing to show hides, tab and all.
 import { IS_MAC, h, icon, clear, append, shortFolder, fmtBytes, fmtDurationWords } from '../dom.js';
 import { api } from '../api.js';
+import { chooseNative, nativeWindow } from '../native.js';
 import { store, on, saveSettings, loadHealth, deviceLabel, appName, isFinished, forgetShown, formatInfo, ENHANCE_PRESETS } from '../store.js';
 import { segmented, chips, switchControl, led, toast, toastError, callout, copyText, confirmDialog, closeInfo } from '../ui.js';
 import { go, settingsPath } from '../router.js';
@@ -223,10 +224,10 @@ function statusRow(state, title, detail, action, ...more) {
 
 /** Save one change; on failure say why (with the server's hint) and redraw the controls. Returns whether it worked.
  *  `mark: false` leaves "Saved ✓" to the caller (when it redraws the setting first). */
-async function save(patch, { quiet = false, mark = true } = {}) {
+async function save(patch, { quiet = false, mark = true, desktop = false } = {}) {
   saving += 1;
   try {
-    await saveSettings(patch);
+    await saveSettings(patch, { desktop });
     if (mark) savedMark(Object.keys(patch)[0]);
     return true;
   } catch (e) {
@@ -282,15 +283,32 @@ function folderLine(dir, locked) {
       onclick: async () => { try { await api('/api/reveal-output', { method: 'POST' }); } catch (e) { toastError(e); } },
     }, icon('folder', 14), 'Open folder')
     : null;
+  const native = nativeWindow() && store.health?.local;
   const change = locked ? null : h('button', {
     type: 'button', class: 'btn btn-ghost btn-sm', id: 'changeOutputDir', 'aria-label': 'Change the output folder',
-    onclick: () => { openFolderField(); document.getElementById('outputDir')?.focus(); },
+    onclick: native ? chooseOutputFolder : () => { openFolderField(); document.getElementById('outputDir')?.focus(); },
   }, icon('pencil', 14), 'Change');
   return h('div', { class: 'folder-line' },
     icon('folder', 16, 'folder-ico'),
     h('span', { class: 'folder-path', title: dir || null }, shortFolder(dir) || 'Not set'),
     missing ? h('span', { class: 'lib-missing' }, icon('alert', 13), 'Not available') : null,
     open || change ? h('span', { class: 'folder-actions' }, open, change) : null);
+}
+
+async function chooseOutputFolder() {
+  try {
+    const selected = await chooseNative('output');
+    if (!selected) return;
+    const folder = selected.files[0];
+    if (!folder) throw new Error('AudioLab couldn’t open that folder. Choose it again.');
+    await save({ native_output_folder: folder.selection }, { quiet: true, mark: false, desktop: true });
+    await loadHealth().catch(() => {});
+    savedMark('output_dir');
+  } catch (e) {
+    toastError(e);
+  } finally {
+    document.getElementById('changeOutputDir')?.focus({ preventScroll: true });
+  }
 }
 
 /** Opens the folder field with the full path (unless it is open already or set by the server). */

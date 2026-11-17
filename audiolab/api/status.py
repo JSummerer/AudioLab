@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Body, Request
+from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from starlette.concurrency import run_in_threadpool
 
@@ -16,7 +16,7 @@ from ..errors import AudioLabError
 from ..media import youtube, ytdlp_update
 from ..runtime import is_packaged
 from ..settings import SETTINGS, validate_output_location
-from .state import AppState, State
+from .state import AppState, State, native_selection
 
 router = APIRouter()
 
@@ -39,9 +39,16 @@ def get_settings():
 
 
 @router.put('/api/settings')
-def put_settings(patch: dict[str, Any] = Body(...)):
+def put_settings(request: Request, state: State, patch: dict[str, Any] = Body(...)):
     patch = dict(patch or {})
-    for key in SETTINGS.locked():  # nothing here may touch the old output folder: it can be unreachable
+    locked = SETTINGS.locked()
+    if 'native_output_folder' in patch:
+        selection = patch.pop('native_output_folder')
+        if 'output_dir' not in locked:
+            if 'output_dir' in patch:
+                raise HTTPException(400, 'Choose one output folder.')
+            patch['output_dir'] = str(native_selection(request, state, selection, 'output').checked_path())
+    for key in locked:  # nothing here may touch the old output folder: it can be unreachable
         patch.pop(key, None)
     if 'output_dir' in patch and patch['output_dir']:  # '' = back to the default folder
         target = Path(str(patch['output_dir']).strip()).expanduser()

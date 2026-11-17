@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- In the app window, choose one or several files or a folder from New, choose the output folder
+  in Settings, and pick files to add to the Library. New reads files chosen in the app where they
+  are, so they need no upload and the browser upload size limit does not apply. A folder adds up
+  to 50 supported files at its top level.
+- If the app window fails to open, AudioLab stops its local server and reports the failure.
+
 - Library lookups reject a damaged record whose ID differs from its filename.
 
 - Command-line batches continue past missing inputs. A failed or cancelled command cleans up its own unfinished exports.

@@ -319,6 +319,15 @@ and framing; exceeding it returns `413`. A declared oversized `Content-Length` i
 The audio and cover limits are also checked separately after parsing; the cover allowance cannot enlarge
 the permitted audio file. Extra or repeated parts count toward the total.
 
+In the native app window, the confirmed system dialog returns selection IDs. The desktop uses
+`native_file` instead of an upload on `POST /api/jobs`, `native_file` instead of `path` on
+`POST /api/library/import`, and `native_output_folder` instead of `output_dir` on
+`PUT /api/settings`. These fields require the exact loopback app origin and a private
+`X-AudioLab-Desktop` header for the current window. IDs are scoped to the operation and held in
+memory; invalid window context returns `403`, a missing selection `410`, and an unavailable
+chosen file or folder `400`. The New job reads its chosen file in place and retains a private
+reference for Retry. Existing upload, typed import and settings fields still work in browser mode.
+
 Settings updates publish active values only after the file is saved successfully. A failed write returns
 `500` and keeps the previous active values. Each update merges with the latest saved preferences.
 The UI queues its saves in order and keeps later pending choices visible if an earlier save fails.

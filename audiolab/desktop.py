@@ -116,9 +116,15 @@ def existing_instance() -> dict | None:
         info = json.loads(_instance_file().read_text())
         with urllib.request.urlopen(info['url'] + '/api/ping', timeout=1.5) as r:
             answer = json.loads(r.read(4096)) if r.status == 200 else {}
-        if 'instance' in info and 'instance' in answer:
-            return info if answer['instance'] == info['instance'] else None
-        return info if answer.get('ok') is True else None  # a version whose ping or record has no id
+        instance = info.get('instance')
+        if (
+            isinstance(instance, str)
+            and instance.strip()
+            and answer.get('ok') is True
+            and answer.get('instance') == instance
+        ):
+            return info
+        return None
     except Exception:
         return None
 
@@ -274,43 +280,73 @@ def _run_app(port: int, window: bool, open_browser: bool, headless: bool) -> int
 
 
 def _run_window(webview, server, url: str, ui_url: str, headless: bool) -> int:
+    from .native_inputs import NativeInputs
+
     state = server.config.app.state.audiolab
     thread = threading.Thread(target=server.run, name='server', daemon=True)
     thread.start()
-    if not _wait_until_started(server, thread):
-        running = _other_instance()
-        if running:  # another start won the race for the port or the data folder
-            _show_running(running)
-            return 0
-        _fatal(
-            f'The local server did not start. If {APP_NAME} is running in a terminal, quit it there first.', headless
-        )
-        return 1
-    _remember_instance(url, ui_url, window=True, instance=server.config.app.state.instance_id)
-    log.info('App window (pid %s, %s)', os.getpid(), sys.executable)
 
-    system.prepare_app_identity(APP_ICON)
-    webview.settings['ALLOW_DOWNLOADS'] = True  # "Download" buttons ask where to save (pywebview ≥ 5)
-    win = webview.create_window(APP_NAME, ui_url, width=1280, height=860, min_size=(380, 600))
+    stopped = False
+
+    def stop() -> None:
+        nonlocal stopped
+        if not stopped:
+            stopped = True
+            _stop(server, state, thread)
 
     def closing() -> bool:
         # pywebview calls this on the main thread for the close button and for Cmd+Q, Quit in the
-        # Dock and Ctrl+C; False keeps the window. It has to do all the work: after Cmd+Q the
-        # process ends without webview.start() returning.
+        # Dock and Ctrl+C. After Cmd+Q the process can end without webview.start() returning.
         try:
             if not _may_quit(state):
                 return False
         except Exception:
             log.exception('Could not ask before quitting')
-        _stop(server, state, thread)
+        stop()
         return True
 
-    win.events.closing += closing
-    # Not private (pywebview's default wipes the website data at every launch): the UI's remembered
-    # choices (collapsed sidebar, "More options", "Show details", the cover switch) live in localStorage.
-    # The UI files are served no-cache, so a kept web cache can't show an old version.
-    webview.start(private_mode=False)
-    _stop(server, state, thread)  # already done by closing(); kept for any other way out
+    failure = False
+    try:
+        if not _wait_until_started(server, thread):
+            running = _other_instance()
+            if running:  # another start won the race for the port or the data folder
+                _show_running(running)
+                return 0
+            _fatal(
+                f'The local server did not start. If {APP_NAME} is running in a terminal, quit it there first.',
+                headless,
+            )
+            return 1
+        log.info('App window (pid %s, %s)', os.getpid(), sys.executable)
+
+        system.prepare_app_identity(APP_ICON)
+        webview.settings['ALLOW_DOWNLOADS'] = True
+        webview.settings['ALLOW_FILE_URLS'] = False
+        native = NativeInputs(url, webview)
+        server.config.app.state.native_inputs = native
+        win = webview.create_window(
+            APP_NAME,
+            f'{ui_url}#desktop={native.secret}',
+            js_api=native.bridge(),
+            width=1280,
+            height=860,
+            min_size=(380, 600),
+        )
+        native.window = win
+        win.events.closing += closing
+        _remember_instance(url, ui_url, window=True, instance=server.config.app.state.instance_id)
+        # Keep the UI's localStorage (pywebview's default wipes it at every launch).
+        webview.start(private_mode=False)
+        if not win.events.shown.is_set():
+            raise RuntimeError('The window loop ended without showing the window')
+    except Exception:
+        failure = True
+        log.exception('The app window could not start or stopped unexpectedly')
+    finally:
+        stop()
+    if failure:
+        _fatal('The app window could not open or stopped unexpectedly. The local server was stopped.', headless)
+        return 1
     return 0
 
 
@@ -329,7 +365,9 @@ def _may_quit(state) -> bool:
 def _stop(server, state, thread: threading.Thread) -> None:
     """Jobs first (cancelled, their tools killed, saved — bounded; this also ends the live-update
     streams), then the server. Nothing is left to save after that, so its thread gets a second."""
-    state.shutdown()
-    server.should_exit = True
-    thread.join(timeout=1)
-    _forget_instance()
+    try:
+        state.shutdown()
+    finally:
+        server.should_exit = True
+        thread.join(timeout=1)
+        _forget_instance()

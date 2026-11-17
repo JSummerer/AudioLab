@@ -109,7 +109,7 @@ function hintText() {
 
 function busyLabel() {
   const b = state.batch;
-  if (b) return `${b.reusing ? 'Starting' : 'Uploading'} ${b.index} of ${b.count}…`;
+  if (b) return `${b.reusing || b.current?.file.selection ? 'Starting' : 'Uploading'} ${b.index} of ${b.count}…`;
   if (state.uploadPct != null) return `Uploading… ${Math.round(state.uploadPct)} %`;
   return 'Starting…';
 }
@@ -236,7 +236,10 @@ async function submitOne(src, task, options, cover) {
     form.append('task', task);
     form.append('options', JSON.stringify(options));
     if (cover) form.append('cover', ...cover);
-    if (src.kind === 'file' && !src.reuseJobId) {
+    if (src.kind === 'file' && src.file.selection) {
+      form.append('native_file', src.file.selection);
+      res = await api('/api/jobs', { method: 'POST', form, desktop: true });
+    } else if (src.kind === 'file' && !src.reuseJobId) {
       form.append('file', src.file, src.file.name);
       state.uploadPct = 0;
       redraw('action');
@@ -287,7 +290,7 @@ async function submitOne(src, task, options, cover) {
     }
     const jobs = res?.jobs || [];
     jobs.forEach(upsertJob);
-    if (src.kind === 'file' && jobs[0]) {
+    if (src.kind === 'file' && !src.file.selection && jobs[0]) {
       // Reusing that job brings its cover along: not once the picture was removed or swapped meanwhile.
       if (cover && src.cover?.file !== cover[0]) delete src.reuseJobId;
       else {
@@ -366,13 +369,19 @@ async function submitFiles(src, task, options) {
         const form = new FormData();
         form.append('task', task);
         form.append('options', JSON.stringify(options));
-        form.append('file', it.file, it.file.name);
-        batch.upload = new AbortController();
-        res = await upload('/api/jobs', form, (f) => {
-          it.pct = f * 100;
-          if (f >= 1) it.sent = true;
-          if (live()) updateItem(it);
-        }, batch.upload.signal);
+        if (it.file.selection) {
+          form.append('native_file', it.file.selection);
+          it.sent = true;
+          res = await api('/api/jobs', { method: 'POST', form, desktop: true });
+        } else {
+          form.append('file', it.file, it.file.name);
+          batch.upload = new AbortController();
+          res = await upload('/api/jobs', form, (f) => {
+            it.pct = f * 100;
+            if (f >= 1) it.sent = true;
+            if (live()) updateItem(it);
+          }, batch.upload.signal);
+        }
       }
       const job = res?.jobs?.[0];
       (res?.jobs || []).forEach(upsertJob);

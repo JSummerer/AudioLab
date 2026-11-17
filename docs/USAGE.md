@@ -37,6 +37,14 @@ site; a local file is the simplest starting point. For a playlist, choose the it
 A link opened from another page (`/?url=…`) waits in the link field until you press **Load**.
 Use only material you have permission to process.
 
+In the app window, **Choose files** reads the selected audio and video files where they are. You can
+select several at once. **Choose folder** adds up to 50 supported files directly in the chosen folder,
+in name order. Each starts its own job. Keep the source on the same drive and path until the job is
+finished, or select it again if it moves. Enhance can save a separate original copy for comparisons.
+File drops and the browser's file chooser upload the files and use the server's upload limit.
+Settings → Files and Library → Add a file use the system picker in the app window. Local browser
+sessions use a path field.
+
 - **Save / Convert:** convert formats, save an original stream, or cut chapters/a pasted tracklist into tracks.
 - **Enhance:** choose a recipe or use Auto. "Volume only" mainly adjusts volume. "Tone and volume" uses
   the recipe's processing. "AI stems" adds the optional AI stage.

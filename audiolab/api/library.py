@@ -10,7 +10,7 @@ import stat
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from .. import library, processing, tasks
@@ -20,7 +20,7 @@ from ..media import export, ffmpeg
 from ..settings import SETTINGS
 from ..util import link_or_copy
 from .jobs import _cover_dir, serve_file, serve_pcm
-from .state import State
+from .state import State, native_selection
 
 router = APIRouter()
 
@@ -351,21 +351,29 @@ def _no_trash(e: AudioLabError) -> JSONResponse:
 
 
 @router.post('/api/library/import')
-def import_file(state: State, body: Any = Body(None)):
+def import_file(request: Request, state: State, body: Any = Body(None)):
     """Queue an `import` job for an audio file on this computer: it is measured where it is (no copy)
     and becomes a Library entry (tasks/importing.py)."""
     if not state.local:
         raise HTTPException(403, 'Files can only be imported when AudioLab runs on this computer.')
-    if not isinstance(body, dict) or body.keys() - {'path', 'group', 'title'}:
-        raise HTTPException(400, 'Send the path of an audio file to import.')
-    raw, group, title = body.get('path'), body.get('group'), body.get('title')
-    if not isinstance(raw, str) or not raw.strip() or '\0' in raw:
-        raise HTTPException(400, 'Send the path of an audio file to import.')
+    if (
+        not isinstance(body, dict)
+        or body.keys() - {'path', 'native_file', 'group', 'title'}
+        or ('path' in body) == ('native_file' in body)
+    ):
+        raise HTTPException(400, 'Choose an audio file to import.')
+    group, title = body.get('group'), body.get('title')
     if group is not None and (not isinstance(group, str) or not group.strip() or len(group) > 1000):
         raise HTTPException(400, 'The recording to add this version to is not valid.')
     if title is not None and not isinstance(title, str):
         raise HTTPException(400, 'The title must be text.')
-    path = Path(os.path.realpath(Path(raw.strip()).expanduser()))  # resolved: Trash later refuses a changed link
+    if 'native_file' in body:
+        path = native_selection(request, state, body['native_file'], 'import').checked_path()
+    else:
+        raw = body.get('path')
+        if not isinstance(raw, str) or not raw.strip() or '\0' in raw:
+            raise HTTPException(400, 'Send the path of an audio file to import.')
+        path = Path(os.path.realpath(Path(raw.strip()).expanduser()))  # Trash later refuses a changed link
     _importable(path)
     title = ' '.join((title or '').split())[:200]
     source: dict[str, Any] = {

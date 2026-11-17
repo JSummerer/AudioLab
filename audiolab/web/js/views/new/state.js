@@ -101,7 +101,7 @@ export function isMediaFile(f) {
 /** Why `file` can't be uploaded because of its size ("larger than the 4 GB limit"), or null. */
 export function tooBig(file) {
   const mb = store.health?.limits?.max_upload_mb;
-  return mb && file?.size > mb * 1024 * 1024 ? `larger than the ${fmtBytes(mb * 1024 * 1024)} limit` : null;
+  return !file?.selection && mb && file?.size > mb * 1024 * 1024 ? `larger than the ${fmtBytes(mb * 1024 * 1024)} limit` : null;
 }
 
 /** The task a new source starts on unless the user picked one: Enhance for files, Save for links. */

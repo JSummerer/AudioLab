@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
@@ -22,11 +22,12 @@ from .. import APP_NAME, library, tasks
 from ..errors import AudioLabError
 from ..jobs import Job, JobManager, new_job_id, public_file
 from ..media import export, ffmpeg, youtube
+from ..native_inputs import source_path
 from ..settings import LIMITS
 from ..tasks import common
 from ..util import link_or_copy, media_type, sanitize_filename
 from .security import COVER_MAX_MB
-from .state import AppState, State
+from .state import AppState, State, native_selection
 
 COVER_TASKS = ('download', 'enhance')
 COVER_EXT = {'jpeg': '.jpg', 'png': '.png', 'webp': '.webp'}
@@ -138,10 +139,13 @@ def _clone_source(state: AppState, job_id: str, new_id: str) -> dict[str, Any]:
     old = state.job_or_404(job_id)
     src = {k: v for k, v in old.source.items() if k != '_probe'}  # a link is looked up again when it runs
     if src.get('kind') == 'file':
-        old_path = Path(src.get('path') or '')
+        if src.get('_native_identity'):
+            state.require_local('This job uses a file chosen on this computer.')
+        old_path = source_path(src)
         if not old_path.is_file():
             raise HTTPException(410, 'The original file of that job is gone — add it again.')
-        src['path'] = str(link_or_copy(old_path, state.manager.input_dir(new_id) / old_path.name))
+        if not src.get('_native_identity'):
+            src['path'] = str(link_or_copy(old_path, state.manager.input_dir(new_id) / old_path.name))
     if src.get('_cover'):  # the own cover image comes along (a new upload replaces it)
         old_cover = Path(src['_cover'])
         if old_cover.is_file():
@@ -233,6 +237,7 @@ async def _save_cover(mgr: JobManager, cover: UploadFile, job_id: str) -> tuple[
 
 @router.post('/api/jobs')
 async def create_job(
+    request: Request,
     state: State,
     task: str = Form(...),
     options: str = Form('{}'),
@@ -241,6 +246,7 @@ async def create_job(
     playlist_title: str | None = Form(None),
     source_job: str | None = Form(None),
     source_file: str | None = Form(None),
+    native_file: str | None = Form(None),
     file: UploadFile | None = File(None),
     cover: UploadFile | None = File(None),
 ):
@@ -258,7 +264,12 @@ async def create_job(
         raise HTTPException(400, 'A cover image can only be added when saving or enhancing.')
 
     pending: list[tuple] = []  # (job_id, source)
-    if file is not None and file.filename:
+    if native_file is not None:
+        if file is not None or source_job or source_file or url or urls:
+            raise HTTPException(400, 'Choose one source for this job.')
+        chosen = native_selection(request, state, native_file, 'job')
+        pending.append((new_job_id(), await run_in_threadpool(chosen.source)))
+    elif file is not None and file.filename:
         jid = new_job_id()
         pending.append((jid, await _save_upload(mgr, file, jid)))
     elif source_job and source_file:
@@ -352,6 +363,8 @@ def retry_job(state: State, job_id: str):
     job = state.job_or_404(job_id)
     if job.status not in ('failed', 'cancelled'):
         raise HTTPException(409, 'Only failed or cancelled jobs can be retried.')
+    if job.source.get('_native_identity'):
+        state.require_local('This job uses a file chosen on this computer.')
     state.manager.retry(job_id)
     return state.manager.public(job_id)
 
@@ -496,6 +509,8 @@ def save_job_cover(state: State, job_id: str):
     folder = Path(result['output_dir'])
     if not folder.is_dir():
         raise HTTPException(404, 'The output folder of this job was moved or deleted.')
+    if job.source.get('_native_identity'):
+        state.require_local('This job uses a file chosen on this computer.')
     with _cover_lock:
         files = result.get('files') or []
         old = next((f for f in files if f.get('kind') == 'cover'), None)

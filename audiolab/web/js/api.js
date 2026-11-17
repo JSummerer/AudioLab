@@ -1,5 +1,7 @@
 // HTTP client for the AudioLab server (contract: docs/API.md).
 
+import { nativeSecret } from './native.js';
+
 const TOKEN_KEY = 'audiolab.token';
 
 export function getToken() {
@@ -46,10 +48,11 @@ function detailMessage(data) {
   return '';
 }
 
-export async function api(path, { method = 'GET', json, form, signal, text: asText = false } = {}) {
+export async function api(path, { method = 'GET', json, form, signal, text: asText = false, desktop = false } = {}) {
   const opts = { method, signal, headers: {} };
   const t = token();
   if (t) opts.headers['X-AudioLab-Token'] = t;
+  if (desktop) opts.headers['X-AudioLab-Desktop'] = nativeSecret();
   if (json !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(json);

@@ -40,6 +40,7 @@ from typing import Any
 from . import processing, trash
 from .errors import AudioLabError
 from .media.export import FORMATS
+from .native_inputs import source_path
 from .settings import SETTINGS
 from .system import replace_file
 from .util import FOLDER_JUNK, PLAYABLE_EXT, link_or_copy, media_type, sanitize_filename
@@ -155,6 +156,9 @@ def record(job, check_cancel: Callable[[], None] | None = None, begin_commit: Ca
     hints = result.get('_library') or {}
     keep = job.task in KEEPS_ORIGINAL and hints.get('original') and SETTINGS.get().keep_originals
     original = Path(hints['original']) if keep else None
+    external = bool(job.source.get('_native_identity'))
+    if original and external:
+        source_path(job.source)  # the selected file must still be the one the job opened
     check = check_cancel or (lambda: None)
     digests: dict = {}  # reuse an upload's digest only within this record; never retain its callbacks
     digest = file_sha1(original, check, digests) if original else None
@@ -229,12 +233,14 @@ def record(job, check_cancel: Callable[[], None] | None = None, begin_commit: Ca
             folder = cleanup.enter_context(tempfile.TemporaryDirectory(prefix=STAGING_PREFIX, dir=originals_dir()))
             dst = originals_dir() / item['file']
             candidate = dst if _size(dst) == item['size_bytes'] else original
+            stage = Path(folder) / item['file']
             try:
-                staged = link_or_copy(candidate, Path(folder) / item['file'], check, link=_linkable(candidate, dst))
+                can_link = (candidate == dst or not external) and _linkable(candidate, dst)
+                staged = link_or_copy(candidate, stage, check, link=can_link)
             except FileNotFoundError:
                 if candidate == original:
                     raise
-                staged = link_or_copy(original, Path(folder) / item['file'], check, link=_linkable(original, dst))
+                staged = link_or_copy(original, stage, check, link=not external and _linkable(original, dst))
         check()
         with _lock:  # Library -> manager is the only nested lock order
             if begin_commit:

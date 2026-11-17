@@ -4,9 +4,9 @@
 // otherwise with their downloads ("Save cover to folder" adds the cover as one more; a file the
 // user moved or deleted is marked, without download or player), then what was done and
 // detected, and "do more with this". Players register their cleanup on the page context `ctx`.
-import { h, icon, clear, fmtBytes, fmtDuration, confidenceWords, shortFolder } from '../../dom.js';
+import { IS_MAC, h, icon, clear, fmtBytes, fmtDuration, confidenceWords, shortFolder } from '../../dom.js';
 import { api, url, fileUrl, zipUrl, mediaUrl } from '../../api.js';
-import { store, emit, showDetails, upsertJob, aiAvailable } from '../../store.js';
+import { RECIPE_LABELS, store, emit, showDetails, upsertJob, aiAvailable } from '../../store.js';
 import { callout, toast, toastError, block } from '../../ui.js';
 import { go, jobPath, settingsPath } from '../../router.js';
 import { stemRows, filePlayer, trackRows } from '../../player.js';
@@ -16,10 +16,9 @@ import {
   summaryBlock, musicFacts, metricsBlock, sourceLine, decisionsBlock, spectrogramBlock, analyzeResult, toneBlock, streamNote,
 } from './readings.js';
 
-export const RECIPE_SHORT = { club: 'DJ set', live: 'Concert', music: 'Song', voice: 'Podcast / voice' };
 const isTrack = (f) => f.group === 'tracks';
 const exists = (f) => f.exists !== false;
-const REVEAL_LABEL = /Mac/i.test(navigator.platform || navigator.userAgent) ? 'Show in Finder' : 'Show in folder';
+const REVEAL_LABEL = IS_MAC ? 'Show in Finder' : 'Show in folder';
 
 export function doneView(job, ctx) {
   const r = job.result || {};
@@ -352,13 +351,13 @@ function classificationBlock(job, r) {
   const facts = musicFacts(r.analysis, c);
   if (facts) lines.push(facts);
   lines.push(h('p', { class: 'muted small' },
-    picked ? `You chose the ${recipe.name || RECIPE_SHORT[job.options.recipe] || job.options.recipe} settings.`
+    picked ? `You chose the ${recipe.name || RECIPE_LABELS[job.options.recipe] || job.options.recipe} settings.`
       : `Treated with the ${recipe.name || 'automatic'} settings.`));
-  const others = (store.health?.recipes?.length ? store.health.recipes : Object.keys(RECIPE_SHORT).map((key) => ({ key, name: RECIPE_SHORT[key] })))
+  const others = (store.health?.recipes?.length ? store.health.recipes : Object.keys(RECIPE_LABELS).map((key) => ({ key, name: RECIPE_LABELS[key] })))
     .filter((x) => x.key !== recipe.key);
   const redo = h('div', { class: 'redo' },
     h('span', { class: 'muted small' }, picked ? 'Try another:' : 'Wrong? Redo as'),
-    others.map((x) => h('button', { type: 'button', class: 'btn btn-key btn-sm', onclick: (e) => redoAs(job, x, e.currentTarget) }, RECIPE_SHORT[x.key] || x.name)));
+    others.map((x) => h('button', { type: 'button', class: 'btn btn-key btn-sm', onclick: (e) => redoAs(job, x, e.currentTarget) }, RECIPE_LABELS[x.key] || x.name)));
   return block('What it is', ...lines, redo);
 }
 
@@ -371,7 +370,7 @@ async function redoAs(job, recipe, btn) {
     form.append('source_job', job.id);
     const res = await api('/api/jobs', { method: 'POST', form });
     (res?.jobs || []).forEach(upsertJob);
-    toast(`Redoing as ${RECIPE_SHORT[recipe.key] || recipe.name}.`, { kind: 'ok' });
+    toast(`Redoing as ${RECIPE_LABELS[recipe.key] || recipe.name}.`, { kind: 'ok' });
     if (res?.jobs?.[0]) go(jobPath(res.jobs[0].id));
   } catch (e) {
     btn.disabled = false;

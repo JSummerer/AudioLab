@@ -1,5 +1,7 @@
 // Tiny DOM + formatting toolkit (no framework).
 
+export const IS_MAC = /Mac/i.test(globalThis.navigator?.platform || globalThis.navigator?.userAgent || '');
+
 export function h(tag, props = null, ...kids) {
   const el = document.createElement(tag);
   if (props) {

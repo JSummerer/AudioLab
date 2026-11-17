@@ -161,7 +161,7 @@ js/eq-response.js     plots server-equivalent zero-phase filter magnitude; no br
 js/adjust-overview.js original level overview with distinct draggable audition and processing-section bounds/fades
 js/adjust-audition.js identity-owned paired audition jobs, aligned comparison player and bounded spectrum lifecycle
 js/audition-spectrum.js on-demand channel-energy spectrum of exact cropped PCM with declared frequency/gain basis
-js/section-eq.js      section EQ: the same checks as the server, the section editor (Fine-tuning, previews)
+js/section-eq.js      section EQ: the same checks as the server, the section editor in Fine-tuning
 js/tone-chart.js      the tone timeline chart (Check, Enhance, Library previews; a click picks a preview start)
 js/views/new/         the "New" view: source (link/files/playlist), names, cover, task + options, tracks, start, and the
                       sleeve beside them (what is being made + the start row; a bottom bar when narrow)

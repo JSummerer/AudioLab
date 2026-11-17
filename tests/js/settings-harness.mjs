@@ -60,6 +60,7 @@ export function setup(health, { settings = {}, crlf = false } = {}) {
     callout: (level, title, message) => new Element('div', { level }, [title, message]),
     saveSettings: async (patch) => { saved.push(patch); Object.assign(context.store.settings, patch); },
     document,
+    IS_MAC: false,
     api: async (path, options) => { requests.push({ path, ...options }); },
     toast: (message) => messages.push(message), toastError: (error) => errors.push(error),
     loadHealth: async () => { if (context.nextHealth) context.store.health = context.nextHealth; },

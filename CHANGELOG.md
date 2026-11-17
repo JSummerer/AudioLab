@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Library lookups reject a damaged record whose ID differs from its filename.
+
 - Command-line batches continue past missing inputs. A failed or cancelled command cleans up its own unfinished exports.
 
 - Enhance keeps MP3, AAC (.m4a) and Opus files as loud as the master unless their peaks really go over:

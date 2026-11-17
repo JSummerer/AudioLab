@@ -21,6 +21,8 @@ export function emit(topic, payload) {
   }
 }
 
+export const RECIPE_LABELS = { club: 'DJ set', live: 'Concert', music: 'Song', voice: 'Podcast / voice' };
+
 export const store = {
   health: null,
   settings: null,

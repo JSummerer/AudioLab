@@ -2,7 +2,6 @@
 hub, the AI installer, keep-awake, short-lived caches (health parts, link probes) and the
 helpers several routes share. Routes receive it with the `State` dependency."""
 
-import re
 import threading
 import time
 from collections.abc import Callable
@@ -17,9 +16,9 @@ from ..errors import AudioLabError
 from ..jobs import Job, JobManager
 from ..media import export, ffmpeg, youtube, ytdlp_update
 from ..settings import LIMITS, SETTINGS
+from ..util import JOB_ID_RE
 from .events import Hub
 
-JOB_ID_RE = re.compile(r'^j_\d{8}_\d{6}_[0-9a-f]{6}$')
 PROBE_TTL_S = 15 * 60
 SHUTDOWN_TIMEOUT_S = 5.0
 

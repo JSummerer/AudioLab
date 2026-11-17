@@ -145,7 +145,7 @@
 .seg-opt.is-disabled { cursor: not-allowed; color: var(--ink-3); border-style: dashed; }
 .seg-opt.is-disabled:hover { border-color: var(--line-strong); }
 .seg-reason { font-weight: 450; font-size: var(--fs-tiny); color: var(--ink-3); }
-.seg-sm .seg-opt { min-height: 28px; padding: 0 11px; font-size: 13px; }
+.seg-sm .seg-opt { min-height: 28px; padding: 0 11px; font-size: var(--fs-small); }
 .seg-desc.is-reason, .is-reason { color: var(--warn); }
 @container content (max-width: 480px) {
   /* No pill alone on a row: two side by side, four as two and two, three, five and six in threes. */
@@ -251,7 +251,6 @@
 .filter-empty { padding: 28px 0; color: var(--ink-2); }
 
 /* Label + help on the left, control on the right (options, settings). */
-.adv-rows { display: grid; }
 .adv-row {
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: var(--s-4); align-items: center;
   padding: var(--s-3) 0; border-bottom: 1px solid var(--line);
@@ -434,9 +433,6 @@ table.data tbody th { font-weight: 600; }
 .result-video { width: 100%; border-radius: var(--r-md); background: #000; max-height: 420px; }
 .cmp-plain { display: grid; }
 
-.files-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); margin: 0 0 var(--s-2); }
-.files-head > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.files-head-actions { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; justify-content: flex-end; }
 .files { list-style: none; margin: 0; padding: 0; display: grid; }
 .file-row {
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: var(--s-3); align-items: center;
@@ -461,9 +457,6 @@ table.data tbody th { font-weight: 600; }
   .file-size { display: none; }
   .file-row .file-name { white-space: normal; overflow-wrap: anywhere; }
   .file-size-inline { display: inline; }
-  .files-head { flex-wrap: wrap; }
-  .files-head > span:first-child { flex-basis: 100%; }
-  .files-head-actions { justify-content: flex-start; margin-left: -8px; }
 }
 
 /* --------------------------------------------------------------------------
@@ -481,7 +474,7 @@ table.data tbody th { font-weight: 600; }
 .dialog-form h2 { font: 600 21px/1.2 var(--font-serif); }
 .dialog-icon { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: var(--s-2); margin-top: var(--s-2); }
-.text-dump { height: auto; min-height: 220px; padding: 10px var(--s-3); font-size: 12px; line-height: 1.45; resize: vertical; }
+.text-dump { height: auto; min-height: 220px; padding: 10px var(--s-3); font-size: var(--fs-tiny); line-height: 1.45; resize: vertical; }
 
 /* Toasts: small notes in the top-right corner, for actions and errors only
    (settings confirm next to the control instead). */

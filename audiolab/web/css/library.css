@@ -92,7 +92,6 @@
 .lib-stage-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); margin-bottom: var(--s-2); color: var(--ink-2); font-size: var(--fs-small); }
 .lib-stage-head strong { min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lib-stage-head .icon-btn { margin-right: -6px; }
-.lib-preview-action { margin-top: var(--s-3); }
 /* Compare versions: which other version, above the player. */
 .lib-version-pick { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--s-1) var(--s-3); margin-bottom: var(--s-3); }
 .lib-version-pick > span { padding-top: var(--s-1); color: var(--ink-2); }

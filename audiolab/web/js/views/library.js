@@ -10,7 +10,7 @@
 // One player is open at a time. The list is fetched on show and when a job finishes;
 // cards are kept and only rebuilt when their data changes, so a player keeps going
 // through a reload. #/library/<id> scrolls to that version and opens its comparison.
-import { h, icon, clear, append, fmtBytes, fmtDuration, fmtAgo, fmtNum, fmtSigned, shortFolder } from '../dom.js';
+import { IS_MAC, h, icon, clear, append, fmtBytes, fmtDuration, fmtAgo, fmtNum, fmtSigned, shortFolder } from '../dom.js';
 import { api } from '../api.js';
 import { store, on, upsertJob, showDetails } from '../store.js';
 import { toast, toastError, callout, confirmDialog, segmented, switchControl, menuButton, closeMenu } from '../ui.js';
@@ -26,7 +26,6 @@ import { eqSummary } from '../eq.js';
 import { sectionSummary } from '../section-eq.js';
 
 const TASK_ICON = { download: 'download', enhance: 'sparkle', separate: 'layers', import: 'file' };
-const IS_MAC = /Mac/i.test(navigator.platform || navigator.userAgent);
 const REVEAL_LABEL = IS_MAC ? 'Show in Finder' : 'Show in folder';
 const FLASH_MS = 1800;
 const CLOCK_MS = 30000; // "5 min ago" is refreshed this often while the Library shows

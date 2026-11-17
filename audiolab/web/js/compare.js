@@ -8,7 +8,7 @@
 // exact position; play, pause and seeks fade in and out just as briefly. Only a few seconds
 // are decoded ahead: a two-hour set costs no more memory than a song, and every format plays
 // (the server decodes it).
-import { h, icon, clear, append, fmtDuration, fmtNum } from './dom.js';
+import { IS_MAC, h, icon, clear, append, fmtDuration, fmtNum } from './dom.js';
 import { url } from './api.js';
 import { switchControl, callout, toast } from './ui.js';
 
@@ -94,7 +94,7 @@ export function canPlay(file) {
 export function cantPlayText(file) {
   const codec = mediaOf(file)[1];
   const what = file?.label || codecName(codec) || (file?.format || '').toUpperCase() || 'these';
-  return ['opus', 'vorbis'].includes(codec) && /Mac/i.test(navigator.platform || navigator.userAgent)
+  return ['opus', 'vorbis'].includes(codec) && IS_MAC
     ? `This Mac can’t play ${codecName(codec)} files here — that needs macOS 14 or newer. Download it to listen.`
     : `This browser can’t play ${what} files here. Download it to listen.`;
 }

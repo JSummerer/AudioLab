@@ -3,8 +3,8 @@
 // one line about it, what you get, then the start row (start.js renders into refs.action).
 // It follows the source and the choices: redraw() runs it after 'source' and 'action'.
 import { h, icon, clear, fmtDuration, fmtBytes } from '../../dom.js';
-import { store } from '../../store.js';
-import { state, refs, definePart, isFileLike, RECIPE_LABELS, PROCESSING_LABELS } from './state.js';
+import { RECIPE_LABELS, store } from '../../store.js';
+import { state, refs, definePart, isFileLike, PROCESSING_LABELS } from './state.js';
 import { shownName } from './names.js';
 import { downloadChoices, enhanceFormatsInOrder, fineTuningChanges } from './options.js';
 import { embeddedCoverNote, coverOptions } from './cover.js';

@@ -43,8 +43,8 @@ from .media.export import FORMATS
 from .settings import SETTINGS
 from .system import replace_file
 from .util import FOLDER_JUNK, PLAYABLE_EXT, link_or_copy, media_type, sanitize_filename
+from .util import JOB_ID_RE as ENTRY_ID_RE
 
-ENTRY_ID_RE = re.compile(r'^j_\d{8}_\d{6}_[0-9a-f]{6}$')  # an entry is named after its job
 ORIGINAL = 'original'  # file id of the kept original
 # originals/ only ever holds these: 16 hex digits of the content's SHA-1 (of the group key before 2.4)
 ORIGINAL_NAME_RE = re.compile(r'^[0-9a-f]{16}\.[a-z0-9]{1,5}$')
@@ -430,7 +430,7 @@ def get(entry_id: str) -> dict[str, Any] | None:
         entry = json.loads((SETTINGS.library_dir / f'{entry_id}.json').read_text(encoding='utf-8'))
     except (OSError, json.JSONDecodeError):
         return None
-    return entry if isinstance(entry, dict) else None
+    return entry if isinstance(entry, dict) and entry.get('id') == entry_id else None
 
 
 def file_path(entry: dict[str, Any], file_id: str) -> Path | None:

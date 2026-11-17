@@ -36,6 +36,12 @@ def wait_for(fn, timeout=10.0):
     raise AssertionError('condition not reached in time')
 
 
+def test_direct_lookup_rejects_mismatched_record():
+    entry_id = new_job_id()
+    (SETTINGS.library_dir / f'{entry_id}.json').write_text(json.dumps({'id': new_job_id()}))
+    assert library.get(entry_id) is None
+
+
 def lib_runner(job, ctx):
     """Like Enhance: files in the output folder, the downloaded original in scratch (an upload's is
     the uploaded file; `_content` in a link's source changes what was downloaded)."""

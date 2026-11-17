@@ -40,6 +40,7 @@ from .errors import AudioLabError, Cancelled, storage_error
 from .media.export import UPLOAD_EXT
 from .settings import LIMITS, SETTINGS
 from .system import InstanceLock, replace_file
+from .util import JOB_ID_RE
 
 QUEUED, RUNNING, DONE, FAILED, CANCELLED = 'queued', 'running', 'done', 'failed', 'cancelled'
 FINISHED = (DONE, FAILED, CANCELLED)
@@ -50,7 +51,6 @@ CLOSING = 'AudioLab is closing.'
 # Long enough for system.terminate_process to reach its forced kill: SIGKILL after 5 s on
 # POSIX; on Windows taskkill (up to 10 s), then kill() after another 5 s.
 KILL_WAIT_S = 16.0
-JOB_ID_RE = re.compile(r'^j_\d{8}_\d{6}_[0-9a-f]{6}$')
 ORPHAN_AGE_S = 3600  # an unfinished job folder (or Library staging) untouched this long is left over
 PRUNE_EVERY_S = 6 * 3600
 

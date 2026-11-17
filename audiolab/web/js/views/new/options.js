@@ -3,10 +3,10 @@
 // tools and fine-tuning sit under each task's "More options"; whatever is set there is sent.
 // Every option reads like a sleeve's credits: its label left, its control right.
 import { h, icon, clear } from '../../dom.js';
-import { store, aiAvailable, isShown, setShown, formatInfo, ENHANCE_PRESETS } from '../../store.js';
+import { RECIPE_LABELS, store, aiAvailable, isShown, setShown, formatInfo, ENHANCE_PRESETS } from '../../store.js';
 import { segmented, chips, switchControl, autoRange, toast, callout } from '../../ui.js';
 import { settingsPath } from '../../router.js';
-import { state, refs, redraw, definePart, isFileLike, isLinkSource, appliedAdvanced, TASKS, LIGHT_KEYS, RECIPE_LABELS, PROCESSING_LABELS } from './state.js';
+import { state, refs, redraw, definePart, isFileLike, isLinkSource, appliedAdvanced, TASKS, LIGHT_KEYS, PROCESSING_LABELS } from './state.js';
 import { tracksBlock, tracksUpFront } from './tracks.js';
 import { hasOwnCover, takesCover, coverTools } from './cover.js';
 import { nameTools } from './names.js';

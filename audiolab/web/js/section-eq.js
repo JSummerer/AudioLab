@@ -154,17 +154,14 @@ let uid = 0;
 /**
  * The editor: per section From, To, Fade, its EQ text (with the presets) and Remove; then Add section.
  * `rows` is edited in place. `onInput(rows, result)` after every edit (`result`: checkSections).
- * `range()` → { start, end } in seconds adds "Use preview range" to each section (the preview dialog).
  * `timeline()` → the recording's tone timeline or null adds observations while readings are available.
- * Returns { el, read() → checkSections result, sync() (the timeline arrived) }.
  */
-export function sectionEqField({ rows, duration = null, onInput, range = null, timeline = null }) {
+export function sectionEqField({ rows, duration = null, onInput, timeline = null }) {
   const base = `sec-${++uid}`;
   const list = h('div', { class: 'sec-list' });
   const addBtn = h('button', { type: 'button', class: 'btn btn-ghost btn-sm', onclick: add }, icon('plus', 14), 'Add section');
   const note = h('p', { class: 'small muted sec-note', 'aria-live': 'polite' });
   let errorEls = [];
-  let toneBtns = [];
 
   function add() {
     if (rows.length >= MAX_SECTIONS) return;
@@ -197,17 +194,6 @@ export function sectionEqField({ rows, duration = null, onInput, range = null, t
     const error = h('p', { class: 'sec-error small', id: `${base}-${i}-error` });
     errorEls[i] = error;
     for (const input of [from, to, fade]) input.setAttribute('aria-describedby', error.id);
-    const useRange = range ? h('button', {
-      type: 'button', class: 'btn btn-ghost btn-sm',
-      onclick: () => {
-        const r = range();
-        if (!r) return;
-        row.from = from.value = clockText(r.start);
-        row.to = to.value = clockText(r.end);
-        clearObservation();
-        update(true);
-      },
-    }, 'Use preview range') : null;
     const eq = eqField({ text: row.text, label: `EQ for section ${i + 1}`, onInput: ({ text }) => { row.text = text; update(true); } });
     const observation = timeline ? h('button', {
       type: 'button', class: 'btn btn-ghost btn-sm', hidden: !timeline(),
@@ -217,12 +203,11 @@ export function sectionEqField({ rows, duration = null, onInput, range = null, t
         toneNote.textContent = [result.basis, readings, result.message].filter(Boolean).join(' ');
       },
     }, 'Read tone chart') : null;
-    if (observation) toneBtns.push(observation);
     const labelled = (text, input, unit = null) => h('label', { class: 'sec-time small' }, h('span', null, text), input, unit);
     return h('fieldset', { class: 'sec-row' },
       h('legend', { class: 'sec-legend' }, `Section ${i + 1}`),
       h('div', { class: 'sec-times' },
-        labelled('From', from), labelled('To', to), labelled('Fade', fade, 's'), useRange, observation,
+        labelled('From', from), labelled('To', to), labelled('Fade', fade, 's'), observation,
         h('button', {
           type: 'button', class: 'btn btn-ghost btn-quiet btn-sm', 'aria-label': `Remove section ${i + 1}`, onclick: () => remove(i),
         }, icon('trash', 14), 'Remove')),
@@ -231,7 +216,6 @@ export function sectionEqField({ rows, duration = null, onInput, range = null, t
 
   function render() {
     errorEls = [];
-    toneBtns = [];
     while (list.firstChild) list.removeChild(list.firstChild);
     rows.forEach((row, i) => list.append(rowEl(row, i)));
     addBtn.disabled = rows.length >= MAX_SECTIONS;
@@ -251,7 +235,5 @@ export function sectionEqField({ rows, duration = null, onInput, range = null, t
   update(false);
   return {
     el: h('div', { class: 'sec-edit' }, list, h('div', { class: 'sec-foot' }, addBtn, note)),
-    read: () => checkSections(rows, duration),
-    sync: () => { for (const b of toneBtns) b.hidden = !timeline?.(); },
   };
 }

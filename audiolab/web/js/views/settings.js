@@ -5,7 +5,7 @@
 // /downloader; #/settings/output opens the folder field): the page scrolls there and
 // flashes it. Changes save immediately; a small "Saved ✓" next to the setting confirms it.
 // Paths show short, the full one on hover. A section with nothing to show hides, tab and all.
-import { h, icon, clear, append, shortFolder, fmtBytes, fmtDurationWords } from '../dom.js';
+import { IS_MAC, h, icon, clear, append, shortFolder, fmtBytes, fmtDurationWords } from '../dom.js';
 import { api } from '../api.js';
 import { store, on, saveSettings, loadHealth, deviceLabel, appName, isFinished, forgetShown, formatInfo, ENHANCE_PRESETS } from '../store.js';
 import { segmented, chips, switchControl, led, toast, toastError, callout, copyText, confirmDialog, closeInfo } from '../ui.js';
@@ -436,18 +436,17 @@ function signInRow() {
   if (!store.health?.local || !('cookies_browser' in s)) return null;
   const locked = (s.locked || []).includes('cookies_browser');
   // This row only shows for a local server, so the browser's platform is the server's.
-  const mac = /Mac/i.test(navigator.platform || navigator.userAgent);
   const select = h('select', {
     class: 'field field-select', id: 'cookiesBrowser', 'aria-label': 'YouTube sign-in', disabled: locked,
     dataset: { autofocus: '' },
   }, SIGN_IN_BROWSERS.map(([value, label]) => h('option', { value, selected: (s.cookies_browser || '') === value },
-    mac && value === 'safari' ? `${label} (needs Full Disk Access)` : label)));
+    IS_MAC && value === 'safari' ? `${label} (needs Full Disk Access)` : label)));
   select.addEventListener('change', () => save({ cookies_browser: select.value }));
   return h('div', { dataset: { spot: 'cookies' } },
     row('YouTube sign-in',
       'Used only when YouTube refuses a video without it (age check, bot check, members only), and only sent to YouTube. '
         + 'YouTube can block accounts that download a lot, so a spare Google account is safer. '
-        + (mac ? 'Firefox asks for nothing; Chrome and similar ask for your Mac’s password once.' : 'Firefox works most reliably.'),
+        + (IS_MAC ? 'Firefox asks for nothing; Chrome and similar ask for your Mac’s password once.' : 'Firefox works most reliably.'),
       select, { stack: true, setting: 'cookies_browser' }));
 }
 

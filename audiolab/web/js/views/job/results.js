@@ -11,6 +11,7 @@ import { callout, toast, toastError, block } from '../../ui.js';
 import { go, jobPath, settingsPath } from '../../router.js';
 import { stemRows, filePlayer, trackRows } from '../../player.js';
 import { comparePlayer, libraryCompare, sectionPreviewCompare } from '../../compare.js';
+import { PROCESSING_LABELS, qualityAfterRecipeChange } from '../new/state.js';
 import { footer, journalBlock } from './status.js';
 import {
   summaryBlock, musicFacts, metricsBlock, sourceLine, decisionsBlock, spectrogramBlock, analyzeResult, toneBlock, streamNote,
@@ -370,11 +371,15 @@ async function redoAs(job, recipe, btn) {
   try {
     const form = new FormData();
     form.append('task', 'enhance');
-    form.append('options', JSON.stringify({ ...(job.options || {}), recipe: recipe.key }));
+    const options = job.options || {};
+    const previous = job.result?.recipe?.key || options.recipe;
+    const quality = qualityAfterRecipeChange(options.quality, previous, recipe.key, store.health?.recipes);
+    form.append('options', JSON.stringify({ ...options, recipe: recipe.key, quality }));
     form.append('source_job', job.id);
     const res = await api('/api/jobs', { method: 'POST', form });
     (res?.jobs || []).forEach(upsertJob);
-    toast(`Redoing as ${RECIPE_LABELS[recipe.key] || recipe.name}.`, { kind: 'ok' });
+    const processing = quality !== options.quality ? ` with ${PROCESSING_LABELS[quality]}` : '';
+    toast(`Redoing as ${RECIPE_LABELS[recipe.key] || recipe.name}${processing}.`, { kind: 'ok' });
     if (res?.jobs?.[0]) go(jobPath(res.jobs[0].id));
   } catch (e) {
     btn.disabled = false;

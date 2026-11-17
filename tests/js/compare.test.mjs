@@ -522,6 +522,81 @@ const entry = (id, group = 'file:test', duration_s = 20) => ({ id, group, durati
   original: { kept: true }, loudness: { original_lufs: -20, result_lufs: -14 }, compare_file_id: 'f0',
   files: [{ id: 'f0', name: 'fixture.wav', label: 'WAV', kind: 'enhanced', mime: 'audio/wav', playable: true, exists: true }] });
 
+test('an expired job’s Library card shows a checked track miss alongside a passing full export', async (t) => {
+  const result = entry('tracks');
+  result.job_exists = false;
+  result.files[0].verification = { status: 'verified', ceiling_met: true };
+  const warning = { status: 'warning', ceiling_met: false, true_peak_dbtp: 0.8, ceiling_dbtp: -0.1 };
+  result.files.push(
+    { id: 'f1', name: '01 - Opening.m4a', label: '01 · Opening', track: 1, kind: 'track', exists: true },
+    { id: 'f2', name: '02 - Loud cut.m4a', label: '02 · Loud cut', track: 2, kind: 'track', exists: true, verification: warning },
+  );
+
+  const { card } = await librarySetup(t, [result]);
+  const details = card(result.id).querySelector('.lib-processing');
+  assert.equal(details.querySelector('summary').textContent, 'Processing details · Export warning');
+  const checks = details.querySelectorAll('li').map((row) => row.textContent);
+  assert.equal(checks.length, 2);
+  assert.match(checks[0], /WAV — Peak within its limit/);
+  assert.match(checks[1], /02 · Loud cut — Peak above its limit/);
+  assert.equal(card(result.id).textContent.match(/Peak above its limit/g).length, 1);
+});
+
+test('Redo as uses the resolved Auto recipe to preserve only the same AI action', async (t) => {
+  setup(t);
+  const { store } = await import('../../audiolab/web/js/store.js');
+  const { doneView } = await import('../../audiolab/web/js/views/job/results.js');
+  const previousHealth = store.health;
+  const animation = Object.getOwnPropertyDescriptor(globalThis, 'requestAnimationFrame');
+  store.health = { recipes: [
+    { key: 'music', ai_stage: 'stem_eq' }, { key: 'club', ai_stage: 'stem_eq' },
+    { key: 'voice', ai_stage: 'voice_isolate' }, { key: 'live', ai_stage: 'none' },
+  ] };
+  globalThis.requestAnimationFrame = (f) => f();
+  t.after(() => {
+    store.health = previousHealth;
+    if (animation) Object.defineProperty(globalThis, 'requestAnimationFrame', animation);
+    else delete globalThis.requestAnimationFrame;
+  });
+  const messages = new FakeNode('div');
+  messages.id = 'toasts';
+  document.body.append(messages);
+  const requests = [];
+  globalThis.fetch = async (path, options) => {
+    if (path === '/api/jobs' && options.method === 'POST') {
+      requests.push({ source: options.body.get('source_job'), opts: JSON.parse(options.body.get('options')) });
+    }
+    return { ok: true, text: async () => '{"jobs":[]}' };
+  };
+  const job = {
+    id: 'finished', task: 'enhance', status: 'done',
+    source: { kind: 'file', name: 'fixture.wav' },
+    options: { recipe: 'auto', quality: 'best', formats: ['aac_256'], advanced: { target_lufs: -16 } },
+    result: { recipe: { key: 'music', name: 'Song / music' } },
+  };
+  const redo = async (label) => {
+    const nodes = doneView(job, { onCleanup() {} });
+    const control = nodes.map((node) => node.querySelector('.redo')).find(Boolean);
+    const btn = find(control, (node) => node.tagName === 'button' && node.textContent === label);
+    btn.click({ currentTarget: btn });
+    await flush();
+  };
+
+  await redo('Podcast / voice');
+  await redo('DJ set');
+  await redo('Concert');
+  delete job.result.recipe;
+  await redo('DJ set');
+  job.options.quality = 'standard';
+  await redo('Podcast / voice');
+
+  assert.deepEqual(requests, [
+    ['voice', 'standard'], ['club', 'best'], ['live', 'standard'],
+    ['club', 'standard'], ['voice', 'standard'],
+  ].map(([recipe, quality]) => ({ source: job.id, opts: { ...job.options, recipe, quality } })));
+  assert.match(messages.textContent, /Redoing as Podcast \/ voice with Tone and volume/);
+});
+
 test('a Library reduction cue keeps the selected side and repeats around the peak, not its time-window boundary', (t) => {
   setup(t);
   const result = entry('changes', 'file:changes', 60);

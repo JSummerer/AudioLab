@@ -214,12 +214,20 @@ def test_enhance_processing_and_export_check_survive_job_removal(manager, monkey
             },
         )
         result['files'][0]['verification'] = {
-            'status': 'warning',
+            'status': 'verified',
             'integrated_lufs': -11.9,
-            'true_peak_dbtp': -0.8,
-            'ceiling_dbtp': -1.0,
+            'true_peak_dbtp': -0.4,
+            'ceiling_dbtp': -0.1,
             'tolerance_db': 0.05,
+            'ceiling_met': True,
+            'message': None,
+        }
+        result['files'][1]['verification'] = {
+            **result['files'][0]['verification'],
+            'status': 'warning',
+            'true_peak_dbtp': 0.8,
             'ceiling_met': False,
+            'trim_db': 1.0,
             'message': secret,
         }
         return result
@@ -237,7 +245,7 @@ def test_enhance_processing_and_export_check_survive_job_removal(manager, monkey
             'adaptive_lowmid': 'strong',
             'cache': secret,
         },
-        'split_tracks': False,
+        'split_tracks': True,
         'meta': {'title': secret},
     }
     job = manager.submit('enhance', dict(URL_SOURCE), options, title='Measured song')
@@ -256,7 +264,7 @@ def test_enhance_processing_and_export_check_survive_job_removal(manager, monkey
             'recipe': 'auto',
             'quality': 'best',
             'formats': ['aac_256'],
-            'split_tracks': False,
+            'split_tracks': True,
             'advanced': {'target_lufs': -14.0, 'glue': 'off', 'harmonics': 'on', 'adaptive_lowmid': 'strong'},
         }
         assert details['resolved']['recipe'] == {'key': 'music', 'name': 'Song / music'}
@@ -270,14 +278,22 @@ def test_enhance_processing_and_export_check_survive_job_removal(manager, monkey
         assert len(applied['adaptive_lowmid']['events']) == 12
         assert details['metrics']['after']['lufs'] == entry['loudness']['result_lufs'] == -12.0
         assert entry['files'][0]['verification'] == {
-            'status': 'warning',
+            'status': 'verified',
             'integrated_lufs': -11.9,
-            'true_peak_dbtp': -0.8,
-            'ceiling_dbtp': -1.0,
+            'true_peak_dbtp': -0.4,
+            'ceiling_dbtp': -0.1,
             'tolerance_db': 0.05,
-            'ceiling_met': False,
+            'ceiling_met': True,
         }
-        assert 'verification' not in entry['files'][1]
+        track = entry['files'][1]
+        assert track['kind'] == 'track' and track['name'] == '01 - Intro.m4a'
+        assert track['verification'] == {
+            **entry['files'][0]['verification'],
+            'status': 'warning',
+            'true_peak_dbtp': 0.8,
+            'ceiling_met': False,
+            'trim_db': 1.0,
+        }
 
 
 def test_remove_entry_keeps_files_and_drops_unreferenced_original(manager):

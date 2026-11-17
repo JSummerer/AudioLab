@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { snapshotDraft, restoreDraft } from '../../audiolab/web/js/adjust-draft.js';
+import { adjustView } from '../../audiolab/web/js/views/adjust.js';
 import { graphicalEqField } from '../../audiolab/web/js/eq-editor.js';
 
 class Element {
@@ -128,4 +129,95 @@ test('reopening a durable Adjust snapshot restores invalid EQ text and settings 
   assert.equal(named(reopened, 'Custom EQ as text').value, 'unfinished');
   assert.ok(reopened.read().errors.length);
   assert.deepEqual(reopened.snapshot().history, []);
+});
+
+test('re-entering Adjust follows another window’s saved or discarded revision while preserving local conflicts', async (t) => {
+  setup(t);
+  globalThis.window = new EventTarget();
+  t.after(() => { adjustView.hide(); delete globalThis.window; });
+  const id = 'draft-route-test';
+  const data = (value) => ({ from: '0:00', length: '15', scope: 'global', sections: [], values: { target_lufs: value }, graphs: {} });
+  let record = { basis: 'source', revision: 0, data: null };
+  const writes = [];
+  let readFails = false;
+  t.mock.method(globalThis, 'fetch', async (path, opts) => {
+    if (opts.method === 'GET' && readFails) return Response.json({ detail: 'Offline' }, { status: 503 });
+    if (opts.method === 'GET') return Response.json({
+      id, task: 'enhance', original: { kept: true, key: 'source' }, adjust_draft: record, adjust_quality: 'light',
+      processing: { requested: { recipe: 'music', quality: 'light', formats: ['wav16'] },
+        resolved: { recipe: { key: 'music' }, params: { volume_only: true, target_lufs: -14, tp_ceiling_db: -1 } } },
+    });
+    assert.equal(path, `/api/library/${id}/adjust-draft`);
+    const edit = JSON.parse(opts.body);
+    writes.push({ ...edit, keepalive: opts.keepalive });
+    if (edit.revision !== record.revision) return Response.json({ detail: 'Draft changed.' }, { status: 409 });
+    record = { ...edit, revision: edit.revision + 1 };
+    return Response.json({ revision: record.revision });
+  });
+  const root = new Element('main');
+  adjustView.mount(root);
+  const number = () => find(root, (n) => n.className?.includes('adjust-level'));
+  const reopen = async () => { adjustView.hide(); await adjustView.show(id); };
+  const next = () => new Promise((resolve) => setImmediate(resolve));
+  await adjustView.show(id);
+  enter(number(), '-12');
+  adjustView.hide(); // normal navigation flushes the first window's edit
+  await next();
+  assert.deepEqual(writes.map((w) => [w.revision, w.keepalive]), [[0, false]]);
+  record = { ...record, revision: 2, data: data('-18') }; // the other window saved
+  await adjustView.show(id);
+  assert.equal(number().value, '-18');
+  record = { ...record, revision: 3, data: null }; // the other window discarded its draft
+  await reopen();
+  assert.equal(number().value, '');
+  assert.equal(number().attrs.get('placeholder'), '-14');
+
+  enter(number(), '-11');
+  record = { ...record, revision: 4, data: data('-20') }; // a race with our pending write
+  window.dispatchEvent(new Event('pagehide'));
+  await next();
+  assert.deepEqual(writes.map((w) => [w.revision, w.keepalive]), [[0, false], [3, true]]);
+  await reopen();
+  assert.equal(number().value, '-11');
+  const loadSaved = find(root, (n) => n.tag === 'button' && n.children[0]?.textContent === 'Load saved draft');
+  assert.equal(loadSaved.hidden, false);
+  assert.equal(record.data.values.target_lufs, '-20');
+
+  // The real confirmation runs before the workspace replaces its cached draft.
+  document.body = new Element('body');
+  const create = document.createElement;
+  let answer = 'cancel';
+  document.createElement = (tag) => {
+    const el = create(tag);
+    if (tag === 'dialog') {
+      el.remove = () => document.body.removeChild(el);
+      el.showModal = () => { el.returnValue = answer; el.fire('close'); };
+    }
+    return el;
+  };
+  loadSaved.fire('click');
+  await next();
+  assert.equal(number().value, '-11');
+  answer = 'ok';
+  readFails = true;
+  loadSaved.fire('click');
+  await next();
+  assert.equal(number().value, '-11', 'a failed read leaves the local draft available');
+  readFails = false;
+  loadSaved.fire('click');
+  await next();
+  assert.equal(number().value, '-20');
+  enter(number(), '-10');
+  adjustView.hide();
+  await next();
+  assert.equal(record.revision, 5);
+  assert.equal(record.data.values.target_lufs, '-10');
+
+  await adjustView.show(id);
+  enter(number(), '-9');
+  record = { basis: 'different-original', revision: 0, data: null };
+  await reopen();
+  assert.equal(number().value, '-9', 'retain a conflicting local edit against its prior basis for review');
+  const apply = find(root, (n) => n.tag === 'button' && n.children[0]?.textContent === 'Apply to full recording');
+  assert.equal(apply.disabled, true);
 });

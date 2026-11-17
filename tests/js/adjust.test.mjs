@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { api } from '../../audiolab/web/js/api.js';
 import { draftWriter } from '../../audiolab/web/js/adjust-draft.js';
 import { auditionRequests } from '../../audiolab/web/js/adjust-audition.js';
 import { auditionPower, loadAuditionSpectrum } from '../../audiolab/web/js/audition-spectrum.js';
@@ -195,4 +196,21 @@ test('draft saves serialize in-flight edits, retain failed changes for retry and
   store.queue(null);
   await store.flush();
   assert.deepEqual(writes.map(({ revision, data }) => [revision, data]), [[4, { from: '0' }], [5, { from: '1:' }], [5, { from: '1:' }], [6, null]]);
+});
+
+test('large Unicode drafts can use the normal fetch path even on pagehide', async (t) => {
+  const keepalive = [];
+  t.mock.method(globalThis, 'fetch', async (_, options) => {
+    keepalive.push(options.keepalive);
+    return Response.json({ revision: 1 });
+  });
+  const graph = { bands: [], bypassed: false, invalid: true, text: '界'.repeat(4096), textOpen: true, numbers: null };
+  const sections = Array.from({ length: 8 }, (_, i) => ({ id: String(i), from: '', to: '', fade: '' }));
+  const data = { from: '', length: '15', scope: 'global', values: {}, sections,
+    graphs: Object.fromEntries(['global', ...sections.map((s) => s.id)].map((id) => [id, graph])) };
+  const json = { basis: 'version', revision: 0, data };
+  assert.ok(Buffer.byteLength(JSON.stringify(json)) > 65536);
+  await api('/api/library/test/adjust-draft', { method: 'PUT', json });
+  await api('/api/library/test/adjust-draft', { method: 'PUT', json, keepalive: true });
+  assert.deepEqual(keepalive, [false, false]);
 });

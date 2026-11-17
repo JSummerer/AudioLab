@@ -31,6 +31,13 @@ export function enhanceAIChoice(recipe, recipes) {
   return choice ? { ...choice, stage } : null;
 }
 
+/** Keep a selected AI option only when the new recipe uses the same AI action. */
+export function qualityAfterRecipeChange(quality, from, to, recipes) {
+  if (quality !== 'best') return quality;
+  const stage = enhanceAIChoice(from, recipes)?.stage;
+  return stage && stage === enhanceAIChoice(to, recipes)?.stage ? quality : 'standard';
+}
+
 export const TASKS = [
   { key: 'download' }, // Save or Convert: see options.js taskText()
   { key: 'enhance', title: 'Enhance', desc: 'Adjusts tone and volume automatically' },

@@ -111,9 +111,19 @@ export const adjustView = {
       clear(body).append(h('p', { role: 'alert' }, message), h('a', { href: libraryPath(id) }, 'Back to Library'));
     };
     try {
-      const entry = await api(entryPath(id), { signal: controller.signal });
+      // Navigation flushes edits. Read after that write settles so a late GET cannot restore the older revision.
+      const saving = drafts.get(id)?.writer?.inFlight;
+      if (saving) await saving;
+      if (viewLoad !== controller) return;
+      let entry = await api(entryPath(id), { signal: controller.signal });
       if (viewLoad !== controller) return;
       if (entry?.id !== id) { showError('This version couldn’t be loaded.'); return; }
+      const local = drafts.get(id);
+      if (local?.writer?.unsaved && local.identity !== entry.adjust_draft?.basis) {
+        // Show unsaved edits against the version they belong to until the user chooses to replace them.
+        local.writer.markConflict();
+        entry = local.entry;
+      }
       const reason = adjustUnavailable(entry);
       if (reason) { showError(reason); return; }
       const mode = PROCESSING_LABELS[entry.adjust_quality];
@@ -146,7 +156,7 @@ function draftFor(entry) {
   const record = entry.adjust_draft;
   const identity = record?.basis || JSON.stringify([entry.original.key, requested, resolved]);
   let draft = drafts.get(entry.id);
-  if (draft?.identity === identity) return draft;
+  if (draft?.identity === identity && (!record || draft.writer?.canResume(record.revision))) return draft;
   const repeat = seed?.repeat?.enabled ? seed.repeat : null;
   const length = repeat ? clamp(repeat.end - repeat.start, MIN, MAX) : DEFAULT;
   const startAt = repeat?.start ?? seed?.time ?? entry.excerpt?.start_s ?? 0;
@@ -160,8 +170,9 @@ function draftFor(entry) {
     })),
   };
   if (record) {
+    draft.entry = entry;
     restoreDraft(draft, record.data);
-    draft.writer = draftWriter(record, (json) => api(`${entryPath(entry.id)}/adjust-draft`, { method: 'PUT', json, keepalive: true }));
+    draft.writer = draftWriter(record, (json, { keepalive }) => api(`${entryPath(entry.id)}/adjust-draft`, { method: 'PUT', json, keepalive }));
   }
   drafts.set(entry.id, draft);
   return draft;
@@ -204,16 +215,18 @@ function createWorkspace(entry, signal) {
   const writer = draft.writer;
   const draftStatus = h('span', { class: 'small muted', role: 'status' });
   const retryDraft = button('Retry draft save', () => writer.flush(), 'ghost');
+  const loadDraft = button('Load saved draft', loadSavedDraft, 'key');
   const discardDraft = button('Discard draft', discard, 'ghost');
   let edited = !!entry.adjust_draft?.data || !!draft.edited;
-  const pageLeaving = () => writer?.flush();
+  const pageLeaving = () => writer?.flush({ keepalive: true });
   if (writer) {
     writer.notify = () => {
       draftStatus.textContent = writer.message;
-      retryDraft.hidden = !writer.failed;
-      discardDraft.hidden = !edited;
+      retryDraft.hidden = !writer.failed || writer.conflict;
+      loadDraft.hidden = !writer.conflict;
+      discardDraft.hidden = !edited || writer.conflict;
+      if (writer.conflict) renderBtn.disabled = applyBtn.disabled = true;
     };
-    writer.notify();
     window.addEventListener('pagehide', pageLeaving);
   }
   const applyStatus = h('p', { class: 'small muted', role: 'status' });
@@ -284,7 +297,7 @@ function createWorkspace(entry, signal) {
       auditionIssue, status, listen),
     h('section', { class: 'adjust-block', 'aria-labelledby': 'adjustSaveTitle' },
       h('h2', { id: 'adjustSaveTitle' }, 'Save a version'),
-      writer ? h('div', { class: 'adjust-row' }, draftStatus, retryDraft, discardDraft) : null,
+      writer ? h('div', { class: 'adjust-row' }, draftStatus, retryDraft, loadDraft, discardDraft) : null,
       h('p', { class: 'small muted' }, 'Apply to full recording analyzes the full original again and verifies a new export. Automatic decisions may change. Earlier versions stay in the Library.')),
     actions);
 
@@ -307,6 +320,7 @@ function createWorkspace(entry, signal) {
     pickScope(draft.scope);
   }
   update();
+  writer?.notify();
 
   return {
     el, update,
@@ -325,8 +339,30 @@ function createWorkspace(entry, signal) {
     },
   };
 
+  async function loadSavedDraft() {
+    const confirmed = await confirmDialog({ title: 'Replace this window’s draft?', message: 'Your unsaved edits in this window will be discarded.', confirm: 'Load saved draft' });
+    if (!confirmed || disposed) return;
+    el.inert = true;
+    // Keep the local edits if the fresh read fails or the user navigates away.
+    try {
+      const fresh = await api(path, { signal });
+      if (disposed) return;
+      const reason = fresh?.id === entry.id ? adjustUnavailable(fresh) : 'This version couldn’t be loaded.';
+      if (reason || !fresh.adjust_draft) throw new Error(reason || 'This version has no saved draft information.');
+      workspace.dispose();
+      drafts.delete(entry.id);
+      workspace = createWorkspace(fresh, signal);
+      clear(body).append(workspace.el);
+      adjustView.heading.focus({ preventScroll: true });
+    } catch (error) {
+      if (!disposed) draftStatus.textContent = `Couldn’t load the saved draft. Your edits are still here. ${error.message}`;
+    } finally {
+      el.inert = false;
+    }
+  }
+
   async function discard() {
-    if (!writer || disposed || !await confirmDialog({ title: 'Discard this draft?', message: 'This restores the saved version’s settings and passage.', confirm: 'Discard draft' }) || disposed) return;
+    if (!writer || disposed || !await confirmDialog({ title: 'Discard this draft?', message: 'This restores the saved version’s settings and passage.', confirm: 'Discard draft' }) || disposed || writer.conflict) return;
     workspace.dispose();
     drafts.delete(entry.id);
     entry.adjust_draft = { basis: draft.identity, revision: writer.revision, data: null };
@@ -571,11 +607,11 @@ function createWorkspace(entry, signal) {
     auditionIssue.hidden = !(missingBandwidth || fullOnly);
     overview?.update(range, draft.sections.map((part) => ({ id: part.id, bounds: readBounds(part) })), draft.scope);
     addSectionBtn.disabled = !(range && duration > 0) || draft.sections.length >= MAX_SECTIONS;
-    renderBtn.disabled = !range || !!errors.length || missingBandwidth || fullOnly || busy || draft.applying;
+    renderBtn.disabled = !range || !!errors.length || missingBandwidth || fullOnly || busy || draft.applying || !!writer?.conflict;
     renderBtn.textContent = audition ? 'Render again' : 'Render audition';
     cancelBtn.hidden = !busy;
     discardDraft.disabled = !!draft.applying;
-    applyBtn.disabled = !!errors.length || !Object.keys(advanced).length || draft.applying;
+    applyBtn.disabled = !!errors.length || !Object.keys(advanced).length || draft.applying || !!writer?.conflict;
   }
 
   function clearAudition(message = '') {
@@ -604,7 +640,7 @@ function createWorkspace(entry, signal) {
 
   async function apply() {
     const { advanced, errors } = settingsSnapshot();
-    if (draft.applying || errors.length || !Object.keys(advanced).length) return;
+    if (draft.applying || writer?.conflict || errors.length || !Object.keys(advanced).length) return;
     draft.applying = true;
     clearAudition();
     applyStatus.textContent = 'Starting the full recording…';

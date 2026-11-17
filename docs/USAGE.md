@@ -231,7 +231,8 @@ Adjust saves edits automatically in the app’s Library data. Wait for **Draft s
 The next time you open that version, Adjust restores the passage, section timing, settings and EQ
 (including incomplete input). **Discard draft** starts again from the version’s saved settings. Undo
 history and rendered auditions last only in the current session. A changed original or processing
-record starts a fresh draft. If another window already saved a newer draft, reload to read it.
+record starts a fresh draft. Reopening Adjust shows the latest saved revision. If your window still
+has conflicting unsaved edits, you can review them. **Load saved draft** asks before replacing them.
 
 A section preview is an estimate: it uses nearby audio for context, while the full render checks the
 whole recording again. Even retained full-recording gain cannot predict how EQ changes the next full

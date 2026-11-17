@@ -42,18 +42,29 @@ export function draftWriter(record, send) {
   let running;
   let timer;
   const writer = {
-    revision: record.revision, message: record.data ? 'Draft restored.' : '', notify: null, failed: false,
+    revision: record.revision, message: record.data ? 'Draft restored.' : '', notify: null, failed: false, conflict: false,
+    get inFlight() { return running; },
+    get unsaved() { return pending !== undefined || !!running; },
+    markConflict: conflict,
+    canResume(revision) {
+      if (revision === writer.revision) return true;
+      if (!writer.unsaved) return false;
+      conflict();
+      return true;
+    },
     queue(data) {
       pending = data;
       clearTimeout(timer);
+      if (writer.conflict) return;
       status('Saving draft…');
       timer = setTimeout(() => writer.flush(), 350);
     },
-    async flush() {
+    async flush({ keepalive = false } = {}) {
       clearTimeout(timer);
+      if (writer.conflict) return false;
       if (running) return running;
       if (pending === undefined) return !writer.failed;
-      running = drain();
+      running = drain(keepalive);
       try { return await running; } finally { running = null; }
     },
   };
@@ -62,16 +73,21 @@ export function draftWriter(record, send) {
     writer.failed = failed;
     writer.notify?.();
   }
-  async function drain() {
+  function conflict() {
+    writer.conflict = true;
+    status('This window has unsaved edits. The saved version or draft has changed. Load the saved draft to replace these edits.', true);
+  }
+  async function drain(keepalive) {
     while (pending !== undefined) {
       const data = pending;
       pending = undefined;
       try {
-        const { revision } = await send({ basis: record.basis, revision: writer.revision, data });
+        const { revision } = await send({ basis: record.basis, revision: writer.revision, data }, { keepalive });
         writer.revision = revision;
       } catch (error) {
         if (pending === undefined) pending = data;
-        status(`Draft not saved. ${error.message}`, true);
+        if (error.status === 409) conflict();
+        else status(`Draft not saved. ${error.message}`, true);
         return false;
       }
     }

@@ -439,7 +439,7 @@ const OVERRIDES = {
 };
 
 function processingDetails(entry, files, open) {
-  const checked = files.filter((f) => f.verification);
+  const checked = (entry.files || []).filter((f) => f.verification);
   const p = entry.processing;
   if (!p && !checked.length) return null;
   const requested = p?.requested || {};

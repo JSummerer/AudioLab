@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import test from 'node:test';
 import { fmtDuration } from '../../audiolab/web/js/dom.js';
-import { PROCESSING_LABELS, LIGHT_KEYS, enhanceAIChoice } from '../../audiolab/web/js/views/new/state.js';
+import { PROCESSING_LABELS, LIGHT_KEYS, enhanceAIChoice, qualityAfterRecipeChange } from '../../audiolab/web/js/views/new/state.js';
 import { RECIPE_LABELS, ENHANCE_PRESETS } from '../../audiolab/web/js/store.js';
 import { parseEq } from '../../audiolab/web/js/eq.js';
 import { checkSections } from '../../audiolab/web/js/section-eq.js';
@@ -48,7 +48,7 @@ function setup({ crlf = false } = {}) {
     download: [mp3, wav, original], enhance: [{ ...mp3, key: 'mp3_320' }, { ...wav, key: 'wav16' }],
   } } };
   const context = vm.createContext({
-    state, store, redrawn, PROCESSING_LABELS, RECIPE_LABELS, enhanceAIChoice, ENHANCE_PRESETS,
+    state, store, redrawn, PROCESSING_LABELS, RECIPE_LABELS, enhanceAIChoice, qualityAfterRecipeChange, ENHANCE_PRESETS,
     refs: { input: { value: '' }, options: { querySelector: () => null } }, AbortController, URL, setTimeout, fmtDuration,
     focusIn() {}, focusStart() {}, autoTask() {},
     segmented: (attrs) => new Element('div', attrs), isShown: () => false, setShown() {}, formatInfo: () => null,

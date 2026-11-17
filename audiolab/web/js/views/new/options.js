@@ -6,7 +6,7 @@ import { h, icon, clear } from '../../dom.js';
 import { RECIPE_LABELS, store, aiAvailable, isShown, setShown, formatInfo, ENHANCE_PRESETS } from '../../store.js';
 import { segmented, chips, switchControl, autoRange, toast, callout } from '../../ui.js';
 import { settingsPath } from '../../router.js';
-import { state, refs, redraw, definePart, isFileLike, isLinkSource, appliedAdvanced, TASKS, LIGHT_KEYS, PROCESSING_LABELS, enhanceAIChoice } from './state.js';
+import { state, refs, redraw, definePart, isFileLike, isLinkSource, appliedAdvanced, TASKS, LIGHT_KEYS, PROCESSING_LABELS, enhanceAIChoice, qualityAfterRecipeChange } from './state.js';
 import { tracksBlock, tracksUpFront } from './tracks.js';
 import { hasOwnCover, takesCover, coverTools } from './cover.js';
 import { nameTools } from './names.js';
@@ -397,10 +397,8 @@ function renderEnhanceOptions(el) {
   el.append(
     optionBlock('Type of audio',
       segmented({ label: 'Type of audio', value: e.recipe, options: recipeOptions(), onChange: (v) => {
-        const previous = choiceFor(e.recipe)?.stage;
+        e.quality = qualityAfterRecipeChange(e.quality, e.recipe, v, store.health?.recipes);
         e.recipe = v;
-        // Changing the audio type must not silently switch from balancing to isolating the voice.
-        if (e.quality === 'best' && choiceFor(v)?.stage !== previous) e.quality = 'standard';
         const next = processingBlock();
         processing.replaceWith(next);
         processing = next;

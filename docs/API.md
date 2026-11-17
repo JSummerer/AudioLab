@@ -125,9 +125,14 @@ and they may still list a `difference` preview ("Only the changes", gone in 2.4)
 `alerts` (`[{"level": "ok|info|warning|danger", "title", "message"}]`).
 `peak_limit_dbtp` is present only for a lossy source (its codec is not PCM, FLAC, ALAC or another lossless
 one): its peaks count as too hot only above it, -0.05 (the lossy limit of Enhance files plus the export
-check's 0.05 dB tolerance), as encoding has already used the master's headroom. Without it, the peak
-words and alerts keep the usual 1 dB margin. The UI's peak word "Clipping" means a true peak above full
-scale; flat-topped samples have their own alert ("The recording is clipped").
+check's 0.05 dB tolerance). The corresponding alert threshold for other sources is -0.5 dBTP.
+The peak card already indicates little headroom above -1 dBTP for those sources. "Above full scale"
+means a measured true peak above 0 dBTP. `is_clipping` and `clipped_samples_pct` are legacy field names
+for the near-full-scale run detector. The report describes such runs as possible clipping, using the
+signal's own sample peak as the counting reference above about +3 dBFS. Floating-point samples above
+full scale in the analysis copy have their own finding.
+`loudness_label` and `loudness_range_label` are the descriptive categories displayed for audible material,
+based on the measured LUFS and LU respectively. Older results may lack these fields.
 `tone_timeline` (recordings longer than 3 minutes, from the whole-file level scan; else absent):
 `{"step_s": 60, "bands": [{"key": "deep_bass", "label": "Deep bass", "hz": [30, 80]}, …], "values": [[0.4, -0.2, …], null, …],
 "basis": "…"}` — seven bands (deep bass 30–80 Hz, bass 80–200, low mids 200–500, mids 0.5–2k, upper mids 2–6k,
@@ -135,7 +140,7 @@ highs 6–12k, top end 12–20k). `values[i]` belongs to `i * step_s`: each band
 median share over the recording, in dB (0 = the recording's typical balance; 0.1 dB steps); `null` for stretches
 more than 20 dB below the typical level (pauses, fades). `step_s` grows past 60 s so there are at most 600 points.
 It shows how the balance moves; it does not judge it (a change is often the music).
-Loudness, LRA, true peak, clipping, DC and programme-level percentiles cover the whole reference
+Loudness, LRA, true peak, near-full-scale runs, DC and programme-level percentiles cover the whole reference
 (`level_analysis_basis`). Stereo also covers the whole reference (`stereo_basis`): `stereo.width_db`
 and `is_mono` use complete mid/side energy; `bass_correlation` is the complete-reference bass correlation.
 `lowest_bass_correlation` is the lowest eligible local correlation, or `null` without meaningful bass.
@@ -144,6 +149,8 @@ The bass measurement uses a 90 Hz low-pass matching the mono fold's magnitude, 0
 Any eligible negative window sets `antiphase_bass` and bypasses automatic mono bass; an explicit On
 override still applies it with an explanation. These gates are conservative engineering choices, not
 a diagnosis of the recording's intent. Older results may have excerpt-only stereo measurements.
+Bandwidth uses the mean power of the channels so that opposite-phase content counts toward the frequency range.
+`is_lossy_cutoff` is a legacy flag for a detected sharp cutoff or a low source sample-rate limit.
 Long recordings still use bounded excerpts for spectrum, key and classifier features (`analysis_basis`
 describes these). If those excerpts are silent, the whole-file
 level scan anchors a new spectral excerpt to detected sound. Older results may have excerpt-only levels.

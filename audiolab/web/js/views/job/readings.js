@@ -11,26 +11,26 @@ export function loudnessWord(l) {
   if (l == null) return '–';
   if (l >= -9) return 'Very loud';
   if (l >= -13) return 'Loud';
-  if (l >= -18) return 'Normal';
+  if (l >= -18) return 'Moderate';
   if (l >= -24) return 'Quiet';
   return 'Very quiet';
 }
 
 /** Peaks in a word. `limit` (`analysis.peak_limit_dbtp`, lossy files only): encoding has already used the
- * master's headroom, so only peaks above it count; otherwise the usual 1 dB margin. Clipping means over full scale. */
+ * master's headroom, so only peaks above it count; otherwise use the display thresholds below. */
 export function peakVerdict(tp, limit = null) {
   if (tp == null) return { word: '–', level: 'info', note: '' };
-  if (tp > 0) return { word: 'Clipping', level: 'danger', note: 'The loudest moments go above full scale and can distort' };
+  if (tp > 0) return { word: 'Above full scale', level: 'danger', note: 'Measured true peak exceeds 0 dBTP' };
   if (tp > (limit ?? -0.1)) return { word: 'No headroom', level: 'danger', note: 'The loudest moments are almost at full scale' };
   if (limit == null && tp > -1.0) return { word: 'Little headroom', level: 'warning', note: 'Very close to the limit' };
-  return { word: 'Safe', level: 'ok', note: 'No distortion from overs' };
+  return { word: 'Within limit', level: 'ok', note: 'Measured true peak is within the check limit' };
 }
 
 export function dynamicsWord(lra) {
   if (lra == null) return '–';
   if (lra < 3) return 'Very even';
   if (lra < 6) return 'Even';
-  if (lra < 10) return 'Balanced';
+  if (lra < 10) return 'Moderate';
   if (lra < 15) return 'Wide';
   return 'Very wide';
 }
@@ -140,11 +140,11 @@ export function toneBlock(r) {
 export function spectrogramBlock(job, r) {
   return block('Spectrogram',
     h('img', { class: 'spectrogram', src: mediaUrl(job.id, r.spectrogram), alt: 'Spectrogram of the audio', loading: 'lazy' }),
-    h('p', { class: 'muted small' }, 'Time runs left to right, pitch bottom to top, brightness is energy. A sharp flat ceiling usually means the audio was compressed (MP3/AAC) at some point.'));
+    h('p', { class: 'muted small' }, 'Time runs left to right, frequency bottom to top. Brighter areas have more energy.'));
 }
 
 // ---------------------------------------------------------------------------
-// Check: the quality report — the verdicts as a list (label · word · what it means),
+// Check: the measurement report (label · word · reading),
 // the findings as rows
 // ---------------------------------------------------------------------------
 /** `value`: the number behind the word, with "Show details" on (`always`: also without). */
@@ -164,28 +164,28 @@ export function analyzeResult(job, r) {
   if (a.is_silent) return silentResult(a);
   const cutoff = bw.cutoff_hz;
   const judged = bw.judged !== false;   // pure tones / near-silence: no meaningful cutoff
-  const full = judged && (cutoff == null || cutoff >= 19500);
+  const full = judged && (bw.full_range ?? (cutoff != null && cutoff >= 19500));
   const bpm = a.bpm ?? c?.bpm;
   const key = keyText(a.key);
   const conf = a.key?.confidence;
   const verdicts = h('dl', { class: 'verdicts' },
-    verdict('Volume', loudnessWord(a.integrated_lufs), 'How loud it sounds overall', null,
-      a.integrated_lufs != null ? `${fmtNum(a.integrated_lufs)} LUFS` : null),
+    verdict('Volume', a.loudness_label ?? loudnessWord(a.integrated_lufs), 'How loud it sounds overall', null,
+      a.integrated_lufs != null ? `${fmtNum(a.integrated_lufs)} LUFS` : null, true),
     verdict('Peaks', pk.word, pk.note, pk.level,
       a.true_peak_dbtp != null ? `${fmtSigned(a.true_peak_dbtp)} dBTP` : null),
-    verdict('Dynamics', dynamicsWord(a.lra), 'Gap between quiet and loud parts', null,
-      a.lra != null ? `${fmtNum(a.lra)} LU` : null),
-    !judged
-      ? verdict('Frequency range', 'Can’t tell', bw.verdict || 'Not enough different sounds in it to judge the range', null)
-      : verdict('Frequency range', full ? 'Full range' : `Stops at ${fmtNum(cutoff / 1000, 1)} kHz`,
-        full ? 'The highs are all there' : 'The very top end is missing — see below', bw.is_lossy_cutoff ? 'warning' : full ? 'ok' : null,
-        cutoff ? `${Math.round(cutoff)} Hz` : null),
-    verdict('What it is', c?.label || 'Unknown',
+    verdict('Loudness range', a.loudness_range_label ?? dynamicsWord(a.lra), 'Difference between quieter and louder passages', null,
+      a.lra != null ? `${fmtNum(a.lra)} LU` : null, true),
+    !judged || cutoff == null
+      ? verdict('Frequency range', 'Can’t tell', bw.verdict || 'No frequency range estimate', null)
+      : verdict('Frequency range', full ? 'Reaches about 20 kHz' : `About ${fmtNum(cutoff / 1000, 1)} kHz`,
+        bw.is_lossy_cutoff ? 'Sharp cutoff' : 'Estimated upper end', bw.is_lossy_cutoff ? 'warning' : null,
+        `${Math.round(cutoff)} Hz`),
+    verdict('Likely content type', c?.label || 'Unknown',
       c ? `${confidenceWords(c.confidence, c.confidence_label)}${(c.reasons || []).length ? ` — ${c.reasons.slice(0, 2).join(', ')}` : ''}` : null,
       null, bpm ? `≈ ${Math.round(bpm)} BPM` : null, true),
     key ? verdict('Key', key, conf != null && conf < 0.4 ? 'rough estimate' : 'estimate', null,
       conf != null ? `${Math.round(conf * 100)} % confidence` : null) : null);
-  const out = [detailsBlock('Quality check', verdicts, streamNote(r))];
+  const out = [detailsBlock('Measurements', verdicts, streamNote(r))];
   const alerts = (a.alerts || []).filter((x) => x.level !== 'ok');
   if (alerts.length) out.push(block('Findings', h('ul', { class: 'findings' }, alerts.map(findingRow))));
   const s = summaryBlock(r, 'Summary');
@@ -215,7 +215,7 @@ function factsBlock(a) {
 
 /** Nothing to measure: one clear state instead of a list of "–". */
 function silentResult(a) {
-  const out = [detailsBlock('Quality check',
+  const out = [detailsBlock('Measurements',
     h('div', { class: 'silent-state' },
       h('div', { class: 'empty-meter', 'aria-hidden': 'true' }, ...Array.from({ length: 9 }, () => h('i', { style: { '--i': 0 } }))),
       h('strong', null, 'Silent file'),

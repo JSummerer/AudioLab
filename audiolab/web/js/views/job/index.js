@@ -226,7 +226,7 @@ function eyebrowText(job) {
       what = [n ? `Split into ${n} stems` : 'Split'];
       break;
     }
-    case 'analyze': what = ['Quality check']; break;
+    case 'analyze': what = ['Measurements']; break;
     case 'import': what = ['Added to the Library']; break;
     default: what = [taskLabel(job)];
   }

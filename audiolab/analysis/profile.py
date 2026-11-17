@@ -44,7 +44,23 @@ DC_ALERT = 0.01  # |mean| above -40 dBFS = a real DC offset
 # lifts the highs only when they are clearly dull).
 TOP_END_BRIGHT_DB = -4.0
 TOP_END_DULL_DB = -10.0
-HOT_PEAK_DBTP = -0.5  # a lossless file's peaks are called too hot above this (near the usual 1 dB safety margin)
+HOT_PEAK_DBTP = -0.5  # Check's warning threshold for a lossless or unknown source
+
+
+def loudness_label(lufs: float) -> str:
+    """Plain-language bins for the measured overall loudness."""
+    for minimum, label in ((-9, 'Very loud'), (-13, 'Loud'), (-18, 'Moderate'), (-24, 'Quiet')):
+        if lufs >= minimum:
+            return label
+    return 'Very quiet'
+
+
+def loudness_range_label(lra: float) -> str:
+    """Plain-language bins for the measured loudness range."""
+    for maximum, label in ((3, 'Very even'), (6, 'Even'), (10, 'Moderate'), (15, 'Wide')):
+        if lra < maximum:
+            return label
+    return 'Very wide'
 
 
 def peaks_too_hot(tp: float, peak_limit_dbtp: float | None = None) -> bool:
@@ -135,15 +151,11 @@ def octave_bands_db(freqs: np.ndarray, psd: np.ndarray) -> dict[str, float]:
 def detect_bandwidth(x: np.ndarray, sr: int = 48000, source_rate: int | None = None) -> dict[str, Any]:
     """Where does the audio content actually stop?
 
-    Looks for a brick-wall "cliff" above 4 kHz in the averaged spectrum (what
-    lossy encoders leave behind) and otherwise reports the natural roll-off.
-    Wording never claims provenance: a brick wall comes from lossy compression
-    or a low sample rate somewhere along the chain — we cannot tell which.
-    Exceptions: when the source file's own rate (`source_rate`) caps the range,
-    that is stated plainly; and a spectrum that is just a few tones (a test
-    tone, a hum) has no range to judge (`judged: False`).
+    Looks for a sharp drop above 4 kHz, otherwise estimates the upper end
+    of the range. Each channel's power counts even if it cancels in the mid
+    signal. A spectrum with only a few tones has no range to judge.
     """
-    freqs, psd = average_psd(x, sr)
+    freqs, _, psd = average_psd(x, sr, channels=True)
     return _bandwidth_from_psd(freqs, psd, sr, source_rate)
 
 
@@ -196,19 +208,15 @@ def _bandwidth_from_psd(freqs: np.ndarray, psd: np.ndarray, sr: int, source_rate
         # The cliff is the file's own sample rate (the analysis copy's resampler puts it a bit higher).
         cutoff, is_lossy, full = source_rate / 2.0, True, False
         verdict = (
-            f'The file is recorded at {source_rate / 1000:g} kHz, so it cannot hold anything above '
-            f'{cutoff / 1000:.1f} kHz — the very top end is missing.'
+            f'The file’s sample rate is {source_rate / 1000:g} kHz, which limits its frequency range to '
+            f'{cutoff / 1000:.1f} kHz.'
         )
     elif is_lossy:
-        verdict = (
-            f'Content stops sharply at {khz:.1f} kHz — typical of audio that was compressed '
-            f'(MP3/AAC/streaming) or recorded at a low sample rate somewhere along the way; '
-            f'the very top end is missing.'
-        )
+        verdict = f'Content drops sharply around {khz:.1f} kHz.'
     elif full:
-        verdict = 'Full frequency range (content reaches about 20 kHz).'
+        verdict = 'Content reaches about 20 kHz.'
     else:
-        verdict = f'High frequencies fade out naturally around {khz:.1f} kHz.'
+        verdict = f'High-frequency content falls off around {khz:.1f} kHz.'
     return {
         'cutoff_hz': int(round(cutoff)),
         'is_lossy_cutoff': is_lossy,
@@ -232,14 +240,12 @@ def noise_floor(x: np.ndarray, sr: int) -> dict[str, float]:
     return programme_percentiles(frame_rms_db(x, sr))
 
 
-def flat_top_clipping(x: np.ndarray, threshold: float = 0.999) -> float:
+def flat_top_clipping(x: np.ndarray, threshold: float = 0.999, *, sample_peak: float | None = None) -> float:
     """Share of samples (%) sitting in runs of ≥3 consecutive near-full-scale samples.
 
-    Float files peaking far above full scale (> +3 dBFS) are not clipped — they
-    still hold the whole waveform — so there the runs are counted at their own
-    peak. Decoded lossy files of clipped masters overshoot 0 dBFS only a little,
-    so up to +3 dBFS full scale stays the reference."""
-    peak = float(np.abs(x).max(initial=0.0))
+    Above about +3 dBFS the signal's sample peak replaces full scale as the
+    counting reference. This count does not test for flatness."""
+    peak = sample_peak if sample_peak is not None else float(np.abs(x).max(initial=0.0))
     ref = peak if peak > 1.41 else 1.0
     return round(100.0 * flat_top_count(x, threshold * ref) / max(1, x.size), 4)
 
@@ -384,11 +390,8 @@ def profile(
     peak its peaks are judged against (see `peaks_too_hot`; reported when given)."""
     channels = channels if channels is not None else (x.shape[1] if x.ndim > 1 else 1)
     level_basis = 'whole file' if levels is not None else basis
-    silent = (
-        levels.audible_span is None
-        if levels is not None
-        else max(float(x.max(initial=0)), -float(x.min(initial=0))) < 10.0 ** (SILENCE_DBFS / 20.0)
-    )
+    sample_peak = levels.sample_peak if levels is not None else max(float(x.max(initial=0)), -float(x.min(initial=0)))
+    silent = levels.audible_span is None if levels is not None else sample_peak < 10.0 ** (SILENCE_DBFS / 20.0)
     if silent:
         return _silent_profile(source_rate or sr, duration_s, basis, level_basis, channels)
     check = check_cancel or (lambda: None)
@@ -396,7 +399,7 @@ def profile(
         lufs = programme_loudness(x, sr=sr, check_cancel=check_cancel)
         lra_val = lra(x, sr=sr, check_cancel=check_cancel)
         tp = true_peak_db(x, check_cancel=check_cancel)
-        clip_pct = flat_top_clipping(x)
+        clip_pct = flat_top_clipping(x, sample_peak=sample_peak)
         dc = float(np.abs(x.mean(axis=0)).max())
         nf = noise_floor(x, sr)
     else:
@@ -406,7 +409,7 @@ def profile(
     check()
     freqs, psd, psd_ch = average_psd(x, sr, channels=True)
     bands = octave_bands_db(freqs, psd)
-    bandwidth = _bandwidth_from_psd(freqs, psd, sr, source_rate)
+    bandwidth = _bandwidth_from_psd(freqs, psd_ch, sr, source_rate)
     mud_est = (bands['250'] + bands['500']) / 2.0
     broadband = sum(bands.values()) / len(bands)
     mud_excess = round(mud_est - broadband, 2)
@@ -422,57 +425,55 @@ def profile(
 
     alerts: list[dict[str, str]] = []
     if clip_pct > 0.01:
+        reference = 'the measured sample peak' if sample_peak > 1.41 else 'full scale'
         alerts.append(
             {
                 'level': 'danger',
-                'title': 'The recording is clipped',
-                'message': f'{clip_pct:.2f} % of samples are flat-topped at full scale. '
-                'That distortion is baked in and can only be softened, not undone.',
+                'title': (
+                    'Runs near the sample peak' if sample_peak > 1.41 else 'Runs at full scale (possible clipping)'
+                ),
+                'message': f'{clip_pct:.2f} % of samples fall within runs at or near {reference}.',
             }
         )
-    if peaks_too_hot(tp, peak_limit_dbtp):
-        if peak_limit_dbtp is None:
-            why = 'above the −1 dB safety margin, so they may distort on some speakers or after conversion to MP3/AAC'
-        elif tp > 0:
-            why = 'above full scale, so they may distort on some players'
-        else:  # a lossy file over its limit, still under full scale
-            why = 'almost at full scale, with no headroom left'
+    if sample_peak > 1.0:
         alerts.append(
-            {'level': 'warning', 'title': 'Peaks are too hot', 'message': f'Peaks reach {tp:+.1f} dBTP — {why}.'}
+            {
+                'level': 'info',
+                'title': 'Floating-point samples above full scale',
+                'message': f'The loudest sample in the measurement reaches {20 * math.log10(sample_peak):+.2f} dBFS.',
+            }
         )
-    else:
-        alerts.append(
-            {'level': 'ok', 'title': 'Peaks are safe', 'message': f'Highest peak {tp:+.1f} dBTP — no digital overs.'}
-        )
+    limit = HOT_PEAK_DBTP if peak_limit_dbtp is None else peak_limit_dbtp
+    over_limit = peaks_too_hot(tp, peak_limit_dbtp)
+    alerts.append(
+        {
+            'level': 'warning' if over_limit else 'ok',
+            'title': 'Peaks above the check limit' if over_limit else 'Peaks within the check limit',
+            'message': f'Highest true peak {tp:+.2f} dBTP (check limit {limit:+.2f} dBTP).',
+        }
+    )
     if dc > DC_ALERT:
         alerts.append(
             {
                 'level': 'info',
                 'title': 'Off-centre waveform (DC offset)',
-                'message': f'The waveform is shifted {100 * dc:.1f} % off centre. You cannot hear it, '
-                'but it wastes headroom; Enhance removes it.',
+                'message': f'The waveform’s mean is {100 * dc:.1f} % of full scale away from zero.',
             }
         )
-    if lufs < -20.0:
+    volume = loudness_label(lufs)
+    spread = loudness_range_label(lra_val)
+    if lufs < -20.0 or lufs > -7.5:
         alerts.append(
             {
                 'level': 'info',
-                'title': 'Quite quiet',
-                'message': f'Average loudness is {lufs:.1f} LUFS — noticeably quieter than most music (−14 … −8 LUFS).',
-            }
-        )
-    elif lufs > -7.5:
-        alerts.append(
-            {
-                'level': 'info',
-                'title': 'Very loud master',
-                'message': f'Average loudness is {lufs:.1f} LUFS — heavily compressed; there is little room for punch.',
+                'title': f'{volume} overall',
+                'message': f'Integrated loudness is {lufs:.1f} LUFS.',
             }
         )
     alerts.append(
         {
             'level': 'warning' if bandwidth['is_lossy_cutoff'] else 'ok',
-            'title': 'Missing top end' if bandwidth['is_lossy_cutoff'] else 'Frequency range',
+            'title': 'Frequency range',
             'message': bandwidth['verdict'],
         }
     )
@@ -481,8 +482,7 @@ def profile(
             {
                 'level': 'info',
                 'title': 'Prominent low-mids',
-                'message': f'Low-mids (250–500 Hz) sit {mud_excess:+.1f} dB above the average octave level. '
-                'This can be intentional warmth; the spectrum alone does not call for a correction.',
+                'message': f'Low-mids (250–500 Hz) sit {mud_excess:+.1f} dB above the average octave level.',
             }
         )
     if top_end == 'bright':
@@ -490,8 +490,7 @@ def profile(
             {
                 'level': 'info',
                 'title': 'Bright top end',
-                'message': 'S sounds and cymbals (6–11 kHz) are brighter than in most music, '
-                'so it can sound sharp when played loud.',
+                'message': f'The 8 kHz octave is {top_end_db:+.1f} dB relative to the mean of the 1 and 2 kHz octaves.',
             }
         )
     if stereo['antiphase_bass']:
@@ -507,8 +506,7 @@ def profile(
             {
                 'level': 'info',
                 'title': 'Effectively mono',
-                'message': 'The file has two channels, but left and right carry the same sound. '
-                'Enhance keeps it that way; it cannot recover a stereo image.',
+                'message': 'The left and right channels of the measurement are nearly identical.',
             }
         )
 
@@ -521,9 +519,11 @@ def profile(
         'stereo_basis': level_basis,
         'is_silent': False,
         'integrated_lufs': round(lufs, 2),
+        'loudness_label': volume,
         'true_peak_dbtp': tp,
         **({'peak_limit_dbtp': peak_limit_dbtp} if peak_limit_dbtp is not None else {}),
         'lra': round(lra_val, 2),
+        'loudness_range_label': spread,
         **({'dynamics_density': density} if density is not None else {}),
         **({'tone_timeline': levels.tone_timeline} if levels is not None and levels.tone_timeline else {}),
         'is_clipping': bool(clip_pct > 0.01),

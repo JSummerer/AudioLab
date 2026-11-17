@@ -657,8 +657,8 @@ test('each Enhance version says what it is: loudness, compression, EQ, rate and 
   ]);
   const line = (id) => env.card(id).querySelector('.lib-version')?.textContent;
   // Plain words by default; the LUFS numbers come with "Show details".
-  assert.equal(line('tuned'), 'Normal volume · compression on · custom EQ · 44.1 kHz · your settings: loudness, EQ');
-  assert.equal(line('auto'), 'Normal volume · compression off · Auto settings');
+  assert.equal(line('tuned'), 'Moderate volume · compression on · custom EQ · 44.1 kHz · your settings: loudness, EQ');
+  assert.equal(line('auto'), 'Moderate volume · compression off · Auto settings');
   assert.equal(line('volume'), 'Loud volume · your settings: loudness', 'Volume only lists only what it uses');
   assert.equal(line('cleared'), 'Auto settings', 'a version without resolved settings still says whose they were');
   assert.equal(line('older'), undefined, 'an entry from before saved settings has no line');
@@ -891,7 +891,7 @@ test('a file can be added as a version; imported entries say so and can be compa
   const calls = libraryWrites(() => ({ id: 'j_import', task: 'import', status: 'queued' }));
   const card = env.card('master');
   assert.match(card.querySelector('.lib-entry-title').textContent, /^Imported file$/);
-  assert.equal(card.querySelector('.lib-version').textContent, 'Normal volume · peaks safe');
+  assert.equal(card.querySelector('.lib-version').textContent, 'Moderate volume · peaks within limit');
   assert.ok(find(card, (n) => n.tagName === 'button' && n.textContent.includes('Compare versions')));
   assert.equal(find(card, (n) => n.tagName === 'button' && n.textContent.includes('Compare with the original')), undefined);
   named(card, 'Remove from Library').click();

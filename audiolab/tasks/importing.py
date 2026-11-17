@@ -11,7 +11,6 @@ from ..context import TaskContext
 from ..errors import AudioLabError
 from ..util import human_duration
 from . import common
-from .analyze import loudness_word
 
 STAGES = [('acquire', 'Reading file', 5), ('decode', 'Preparing', 35), ('analyze', 'Measuring', 60)]
 
@@ -50,7 +49,7 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
     summary = [f'Added to the Library: {path.name} — it stays where it is: {path.parent}.']
     if lufs is not None and peak is not None:
         summary.append(
-            f'Measured the whole file: its overall volume is {loudness_word(lufs)} '
+            f'Measured the whole file: its overall volume is {prof.loudness_label(lufs).lower()} '
             f'({human_duration(duration or 0)}; {lufs:.1f} LUFS, peaks {peak:+.1f} dBTP).'
         )
     else:

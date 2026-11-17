@@ -518,7 +518,7 @@ const OWN_SETTINGS = {
 const shortNum = (v) => String(Number(Number(v).toFixed(1))).replace('-', '−');
 // Loudness in words ("Normal volume"); the number in LUFS with "Show details" (Settings).
 const volumeText = (lufs) => (showDetails() ? `${shortNum(lufs)} LUFS` : `${loudnessWord(lufs)} volume`);
-const PEAK_WORDS = { Safe: 'peaks safe', 'Little headroom': 'little headroom', 'No headroom': 'no headroom', Clipping: 'clipping' };
+const PEAK_WORDS = { 'Within limit': 'peaks within limit', 'Little headroom': 'little headroom', 'No headroom': 'no headroom', 'Above full scale': 'above full scale' };
 
 function versionFacts(entry) {
   if (entry.task === 'import') {

@@ -10,8 +10,10 @@
   encoding may use the master's headroom up to just under full scale (−0.1 dBTP), and only a file over that
   is encoded once more, turned down by the excess plus 0.5 dB. On a test song, MP3 was 0.9 dB, AAC 1.2 dB
   and Opus 1.6 dB quieter than the WAV (measured loudness); now MP3 is as loud, AAC 0.7 dB and Opus 1.1 dB
-  quieter. Check judges a lossy file's peaks by the same limit, and calls only a peak above full scale
-  "Clipping".
+  quieter. Check judges a lossy file's peaks by the same limit.
+- Check reports measurements with consistent words for loudness and loudness range. It flags runs near
+  full scale as possible clipping and identifies above-full-scale samples in the floating-point analysis copy.
+  Its frequency-range estimate counts highs in both channels, including opposite-phase highs.
 - WMA Lossless sources count as lossless: in Enhance, a dull top end can get the gentle high-end lift, as
   with FLAC or WAV.
 

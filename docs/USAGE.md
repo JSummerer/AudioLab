@@ -42,7 +42,9 @@ Use only material you have permission to process.
   the recipe's processing. "AI stems" adds the optional AI stage.
 - **Split:** produce vocals/instrumental or four stems using the optional AI pack.
 - **Check:** inspect measurements and a spectrogram. Tempo, musical key and content type are estimates.
-  Frequency range can suggest limitations; it cannot prove a file's encoding history.
+  Check reports measured loudness and its variation, true peaks, runs near full scale, and the estimated
+  frequency range. Near-full-scale runs indicate possible clipping. The report also identifies samples
+  above full scale in the floating-point analysis copy.
 
 **More options** holds the name, [cover art](#cover-art), formats and processing controls. **Tracks**
 shows up front for a recording with chapters, a pasted tracklist or more than 10 minutes, else under

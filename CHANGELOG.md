@@ -29,12 +29,13 @@
 
 - Use **Locate…** in the app window to reconnect a missing Library file recorded by this version,
   after moving or renaming it on the same drive. Files located outside the recorded output folder
-  stay where they are when the Library entry is removed.
+  stay where they are when the Library entry is removed. Open the file's current folder from its row.
 
 - In the app window, choose one or several files or a folder from New, choose the output folder
   in Settings, and pick files to add to the Library. New reads files chosen in the app where they
   are, so they need no upload and the browser upload size limit does not apply. A folder adds up
-  to 50 supported files at its top level.
+  to 50 supported files at its top level. Choosing a single file shows Tracks for long recordings
+  when its duration can be read. Choose the file again if it changes before a job finishes.
 - If the app window fails to open, AudioLab stops its local server and reports the failure.
 
 - Library lookups reject a damaged record whose ID differs from its filename.

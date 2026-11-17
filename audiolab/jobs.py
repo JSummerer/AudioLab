@@ -877,6 +877,7 @@ class JobManager:
         task's files are in the output folder (_run): they are complete, and the job still finishes as done.
         Cancelled escapes otherwise, and whenever the job can't be published at all (removed, or settled by a
         shutdown that stopped waiting)."""
+        warning = NOT_IN_LIBRARY
         try:
             if library.record(job, check_cancel, begin_commit):
                 job.result['library_id'] = job.id
@@ -887,6 +888,10 @@ class JobManager:
                     raise
             reason = 'it was stopped while being added'
         except Exception as e:
+            if '_native_identity' in job.source and isinstance(e, AudioLabError):
+                if job.task == 'import':
+                    raise  # an import has no finished export worth keeping when its source changed
+                warning = f'{NOT_IN_LIBRARY} {e}'
             log.exception('job %s: could not add the result to the library', job.id)
             reason = str(e)
         with self._lock:
@@ -894,4 +899,4 @@ class JobManager:
                 raise Cancelled()
             self._journal(job.id, 'warning', f'Could not add this result to the Library: {reason}')
             if isinstance(job.result, dict):
-                job.result.setdefault('warnings', []).append(NOT_IN_LIBRARY)
+                job.result.setdefault('warnings', []).append(warning)

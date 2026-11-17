@@ -253,7 +253,7 @@ _CHANNEL_WORDS = {
 }
 
 
-def probe_media(path: Path, progress: Progress | None = None) -> dict[str, object]:
+def probe_media(path: Path, progress: Progress | None = None, *, header_only: bool = False) -> dict[str, object]:
     """Describe a media file by parsing `ffmpeg -i` (works without ffprobe)."""
     info: dict[str, object] = {
         'duration_s': None,
@@ -274,10 +274,26 @@ def probe_media(path: Path, progress: Progress | None = None) -> dict[str, objec
     if not path.is_file():
         return info
     lines: list[str] = []  # collect everything: long chapter/tag lists overflow the stderr tail
+    # The picker needs only the duration of ordinary self-contained media. Exclude
+    # playlist/manifest demuxers and all network protocols from this optional probe.
+    header = (
+        [
+            '-protocol_whitelist',
+            'file',
+            '-format_whitelist',
+            'wav,flac,aiff,mp3,ogg,mov,matroska,webm,aac,asf',
+            '-probesize',
+            '1048576',
+            '-analyzeduration',
+            '1000000',
+        ]
+        if header_only
+        else []
+    )
     proc.run(
-        [ffmpeg_path(), '-hide_banner', '-nostdin', '-i', str(path)],
+        [ffmpeg_path(), '-hide_banner', '-nostdin', *header, '-i', str(path)],
         progress=progress,
-        timeout_s=120,
+        timeout_s=3 if header_only else 120,
         what='media probe',
         capture_stdout=False,
         on_line=lines.append,

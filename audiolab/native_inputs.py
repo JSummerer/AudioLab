@@ -1,6 +1,7 @@
 """Window-only file selection and the identity of an external job source."""
 
 import heapq
+import math
 import secrets
 import stat
 import threading
@@ -10,7 +11,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .errors import AudioLabError
-from .media import export
+from .media import export, ffmpeg
 from .settings import SETTINGS
 
 MAX_FILES = 50
@@ -18,11 +19,12 @@ MAX_SELECTIONS = 4 * MAX_FILES
 PURPOSES = {'files': 'job', 'batch': 'job', 'import': 'import', 'locate': 'locate', 'output': 'output'}
 
 
-def _identity(path: Path, folder: bool) -> tuple[tuple[int, int], int]:
+def _identity(path: Path, folder: bool) -> tuple[tuple[int, ...], int]:
     try:
         st = path.stat()
-        if path.resolve(strict=True) == path and (stat.S_ISDIR if folder else stat.S_ISREG)(st.st_mode):
-            return (st.st_dev, st.st_ino), st.st_size
+        if st.st_ino and path.resolve(strict=True) == path and (stat.S_ISDIR if folder else stat.S_ISREG)(st.st_mode):
+            inode = (st.st_dev, st.st_ino)
+            return (inode if folder else (*inode, st.st_size, st.st_mtime_ns)), st.st_size
     except (OSError, RuntimeError):
         pass
     raise AudioLabError('The selection is no longer available.', hints=['Choose it again.'])
@@ -31,13 +33,16 @@ def _identity(path: Path, folder: bool) -> tuple[tuple[int, int], int]:
 def checked_path(path: Path, identity: tuple | list, *, folder: bool = False) -> Path:
     current, _ = _identity(path, folder)
     if current != tuple(identity):
-        raise AudioLabError('The selected file or folder was replaced.', hints=['Choose it again.'])
+        raise AudioLabError('The selected file or folder changed or was replaced.', hints=['Choose it again.'])
     return path
 
 
 def source_path(source: dict) -> Path:
     path = Path(source.get('path') or '')
-    if identity := source.get('_native_identity'):
+    if '_native_identity' in source:
+        identity = source['_native_identity']
+        if not isinstance(identity, (tuple, list)) or len(identity) != 4:
+            raise AudioLabError('This older selection needs to be verified again.', hints=['Choose the file again.'])
         checked_path(path, identity)
     return path
 
@@ -46,7 +51,7 @@ def source_path(source: dict) -> Path:
 class Selection:
     path: Path
     purpose: str
-    identity: tuple[int, int]
+    identity: tuple[int, ...]
     size: int
 
     def checked_path(self) -> Path:
@@ -90,6 +95,7 @@ class NativeInputs:
         self._dialog_lock = threading.Lock()
         self._lock = threading.Lock()
         self._selections: OrderedDict[str, Selection] = OrderedDict()
+        self._duration_selection: str | None = None
 
     def authorizes(self, secret) -> bool:
         return isinstance(secret, str) and secret.isascii() and secrets.compare_digest(secret, self.secret)
@@ -101,10 +107,13 @@ class NativeInputs:
         return f'{url.scheme}://{url.netloc}' == self.origin and url.path in ('', '/', '/index.html')
 
     def bridge(self):
-        # Expose just one method, never this registry, the window, or any path-accepting callable.
+        # Expose the picker and its single-file duration, with no path-accepting callable.
         class Picker:
             def choose(_, secret, kind):
                 return self._choose(secret, kind)
+
+            def duration(_, secret, selection):
+                return self._duration(secret, selection)
 
         return Picker()
 
@@ -138,11 +147,39 @@ class NativeInputs:
             else:
                 paths = map(Path, picked if kind == 'files' else picked[:1])
             result = self._register(paths, PURPOSES[kind], sort=kind == 'batch')
-            return result if self._on_app_page() else None
+            if not self._on_app_page():
+                return None
+            if kind in ('files', 'batch'):
+                single = kind == 'files' and len(picked) == 1 and len(result['files']) == 1
+                with self._lock:
+                    self._duration_selection = result['files'][0]['selection'] if single else None
+                if single:
+                    result['files'][0]['can_measure_duration'] = True
+            return result
         except (OSError, RuntimeError, ValueError):
             return {'error': 'AudioLab couldn’t open that selection. Choose it again.'}
         finally:
             self._dialog_lock.release()
+
+    def _duration(self, secret, selection) -> float | None:
+        if not self.authorizes(secret) or not self._on_app_page():
+            return None
+        with self._lock:
+            if not isinstance(selection, str) or selection != self._duration_selection:
+                return None
+            self._duration_selection = None  # one bounded attempt per confirmed single-file pick
+            item = self._selections.get(selection)
+        if item is None:
+            return None
+        try:
+            audio = ffmpeg.probe_media(item.checked_path(), header_only=True)
+            item.checked_path()
+        except (AudioLabError, OSError):
+            return None
+        duration = audio.get('duration_s')
+        if isinstance(duration, (int, float)) and 0 < duration < math.inf and self._on_app_page():
+            return duration
+        return None
 
     def _register(self, paths, purpose, *, sort: bool) -> dict:
         seen, skipped = set(), 0

@@ -26,3 +26,8 @@ export async function chooseNative(kind) {
   if (chosen?.error) throw new Error(chosen.error);
   return chosen;
 }
+
+/** Optional metadata of the last explicit single-file selection, with no path access in JS. */
+export async function nativeDuration(selection) {
+  return picker()?.duration?.(secret, selection);
+}

@@ -52,4 +52,12 @@ def stages_for(job) -> list:
 
 
 def run_job(job, ctx) -> dict[str, Any]:
-    return get(job.task).run(ctx, job.source)
+    from ..native_inputs import source_path
+
+    native = '_native_identity' in job.source
+    if native:
+        source_path(job.source)
+    result = get(job.task).run(ctx, job.source)
+    if native:
+        source_path(job.source)
+    return result

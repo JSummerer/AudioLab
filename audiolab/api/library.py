@@ -17,6 +17,7 @@ from .. import adjust_drafts, library, processing, tasks
 from ..errors import AudioLabError
 from ..jobs import new_job_id
 from ..media import export, ffmpeg
+from ..native_inputs import source_path
 from ..settings import SETTINGS
 from ..util import link_or_copy
 from .jobs import _cover_dir, serve_file, serve_pcm
@@ -341,12 +342,19 @@ def locate_file(request: Request, state: State, entry_id: str, file_id: str, bod
     return library.public(entry, state.manager.get(entry.get('job_id') or '') is not None)
 
 
+@router.post('/api/library/{entry_id}/files/{file_id}/reveal')
+def reveal_file(state: State, entry_id: str, file_id: str):
+    state.require_local()
+    path = _file(_entry(entry_id), file_id)
+    return state.reveal(path.parent)
+
+
 @router.post('/api/library/{entry_id}/reveal')
 def reveal_entry(state: State, entry_id: str):
     entry = library.get(entry_id)
     if entry is None:
         raise HTTPException(404, 'This result is no longer in the Library.')
-    return state.reveal(library.folder(entry))
+    return state.reveal(library.reveal_folder(entry))
 
 
 @router.delete('/api/library/originals')
@@ -412,22 +420,26 @@ def import_file(request: Request, state: State, body: Any = Body(None)):
         raise HTTPException(400, 'The recording to add this version to is not valid.')
     if title is not None and not isinstance(title, str):
         raise HTTPException(400, 'The title must be text.')
+    title = ' '.join((title or '').split())[:200]
     if 'native_file' in body:
-        path = native_selection(request, state, body['native_file'], 'import').checked_path()
+        source = native_selection(request, state, body['native_file'], 'import').source()
+        path = source_path(source)
+        _importable(path)
+        source_path(source)  # the synchronous media check ran before the job was queued
     else:
         raw = body.get('path')
         if not isinstance(raw, str) or not raw.strip() or '\0' in raw:
             raise HTTPException(400, 'Send the path of an audio file to import.')
         path = Path(os.path.realpath(Path(raw.strip()).expanduser()))  # Trash later refuses a changed link
-    _importable(path)
-    title = ' '.join((title or '').split())[:200]
-    source: dict[str, Any] = {
-        'kind': 'file',
-        'name': path.name,
-        'path': str(path),
-        'size_bytes': path.stat().st_size,
-        'title': title or path.stem,
-    }
+        _importable(path)
+        source = {
+            'kind': 'file',
+            'name': path.name,
+            'path': str(path),
+            'size_bytes': path.stat().st_size,
+            'title': path.stem,
+        }
+    source['title'] = title or source['title']
     if group:
         source['_library_group'] = group.strip()
     opts = tasks.validate('import', {'meta': {'title': title}} if title else {}, source)

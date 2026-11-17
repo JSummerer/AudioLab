@@ -96,7 +96,7 @@ function setFile(file) {
   if (refs.input) refs.input.value = '';
   state.source = { kind: 'file', file };
   autoTask('file');
-  if (!file.selection) measureFile(state.source);
+  measureFile(state.source);
   if (state.download.format === 'original' || state.download.format === 'video') state.download.format = 'mp3';
   redraw();
   focusStart();
@@ -413,7 +413,7 @@ function removeItem(src, it) {
     // Back to the single-file card (reusing its upload when it has one).
     const last = src.items[0];
     state.source = { kind: 'file', file: last.file, ...(last.jobId ? { reuseJobId: last.jobId } : {}) };
-    if (!file.selection) measureFile(state.source);
+    measureFile(state.source);
     redraw();
     focusIn('.source-remove');
     return;

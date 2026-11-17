@@ -3,12 +3,12 @@ made elsewhere, to compare with AudioLab's versions. The file stays where it is 
 changed); it is decoded once to measure its loudness and true peak over the whole recording (and, for
 long ones, how its tonal balance moves). Started only by POST /api/library/import."""
 
-from pathlib import Path
 from typing import Any
 
 from ..analysis import profile as prof
 from ..context import TaskContext
 from ..errors import AudioLabError
+from ..native_inputs import source_path
 from ..util import human_duration
 from . import common
 
@@ -26,7 +26,7 @@ def stages(options: dict[str, Any], source: dict[str, Any]):
 
 
 def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
-    path = Path(source['path'])
+    path = source_path(source)
     if not path.is_file():
         raise AudioLabError(
             f"This file isn't there any more: {path}.",

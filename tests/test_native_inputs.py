@@ -1,14 +1,17 @@
 """The desktop picker, HTTP capability scope, and private job references without opening a window."""
 
 import json
+import os
 import shutil
+import struct
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
 
-from audiolab import library
+from audiolab import library, system, tasks
 from audiolab.api import create_app
 from audiolab.errors import AudioLabError
 from audiolab.jobs import JobManager
@@ -224,6 +227,8 @@ def test_locate_updates_library_only_and_protects_result_outside_output_root(nat
     link.symlink_to(new)
     trashed = []
     monkeypatch.setattr(library.trash, 'move_to_trash', trashed.append)
+    revealed = Mock()
+    monkeypatch.setattr(system, 'reveal', revealed)
     headers = desktop_headers(native)
     client = window_client(native, manager=mgr)
     entry_url = f'/api/library/{job.id}'
@@ -251,6 +256,18 @@ def test_locate_updates_library_only_and_protects_result_outside_output_root(nat
         file = fixed.json()['files'][0]
         assert file['name'] == new.name and file['path'] == str(new) and file['exists'] and not file['can_trash']
         assert client.get(media_url).content == b'original audio'
+        assert client.post(f'{entry_url}/reveal').json() == {'ok': True}
+        revealed.assert_called_once_with(new.parent)
+        assert file['located'] and library.folder(library.get(job.id)) == old.parent
+
+        second = old.with_name('second.wav')
+        second.write_bytes(b'other audio')
+        assert library.add_file(job.id, {'id': 'f1', 'path': str(second)})
+        assert client.post(f'{entry_url}/reveal').json() == {'ok': True}
+        assert revealed.call_args.args == (old.parent,)
+        assert client.post(f'{media_url}/reveal').json() == {'ok': True}
+        assert revealed.call_args.args == (new.parent,)
+        second.unlink()
         assert job.result['files'][0]['path'] == str(old)
         assert client.post(endpoint, json=body, headers=headers).status_code == 400
 
@@ -298,3 +315,183 @@ def test_locate_refuses_legacy_entry_without_independent_file_identity(tmp_path)
     with pytest.raises(AudioLabError, match='no saved identity') as exc:
         library.locate_file(job.id, 'f0', candidate)
     assert exc.value.hints == ['Add the file to the Library again.']
+
+
+def rewrite_in_place(path, data):
+    original = path.stat()
+    path.write_bytes(data)
+    os.utime(path, ns=(original.st_atime_ns, original.st_mtime_ns + 1_000_000))
+    assert path.stat().st_ino == original.st_ino
+
+
+def test_native_import_checks_the_same_file_during_queue_and_publication(native, tmp_path, monkeypatch):
+    audio = tmp_path / 'Master.wav'
+    audio.write_bytes(b'first recording')
+    client = window_client(native)
+    monkeypatch.setattr(ffmpeg, 'probe_media', lambda _: {'has_audio': True})
+
+    def enqueue():
+        selection = pick(native, 'import', audio)['files'][0]['selection']
+        response = client.post('/api/library/import', json={'native_file': selection}, headers=desktop_headers(native))
+        assert response.status_code == 200, response.text
+        assert '_native_identity' not in response.json()['source']
+        return client.app.state.audiolab.manager.get(response.json()['id'])
+
+    try:
+        job = enqueue()
+        assert len(job.source['_native_identity']) == 4
+
+        rewrite_in_place(audio, b'other recording')
+        with monkeypatch.context() as mac:
+            mac.setattr(tasks, 'get', Mock(side_effect=AssertionError('Do not run a task for a changed file')))
+            with pytest.raises(AudioLabError, match='changed or was replaced'):
+                tasks.run_job(job, None)
+
+        job = enqueue()
+        fake_result = {'files': [{'id': 'f0', 'path': str(audio)}]}
+        with monkeypatch.context() as mac:
+
+            def run(_ctx, _source):
+                rewrite_in_place(audio, b'after recording')
+                return fake_result
+
+            mac.setattr(tasks, 'get', lambda _: SimpleNamespace(run=run))
+            with pytest.raises(AudioLabError, match='changed or was replaced'):
+                tasks.run_job(job, None)
+
+        job = enqueue()
+        job.result = fake_result
+        with pytest.raises(AudioLabError, match='changed or was replaced'):
+            library.record(job, begin_commit=lambda: rewrite_in_place(audio, b'final recording'))
+        assert library.get(job.id) is None
+    finally:
+        client.close()
+
+
+def test_native_import_through_jobs_and_library_refuses_a_later_replacement(native, tmp_path, monkeypatch):
+    audio = tmp_path / 'Master.wav'
+    audio.write_bytes(b'first recording')
+    selection = pick(native, 'import', audio)['files'][0]['selection']
+    mgr = JobManager(runner=lambda *_: {}, stages_for=lambda *_: [])
+    job = mgr.submit('import', native.get(selection, 'import').source(), {})
+    job.result = {'files': [{'id': 'f0', 'path': str(audio)}]}
+    assert library.record(job)
+    monkeypatch.setattr(library.trash, 'move_to_trash', Mock())
+    client = window_client(native, manager=mgr)
+    try:
+        assert client.get(f'/api/library/{job.id}/files/f0').content == b'first recording'
+        assert client.get(f'/api/jobs/{job.id}/files/f0').content == b'first recording'
+        rewrite_in_place(audio, b'other recording')
+        assert client.get(f'/api/library/{job.id}/files/f0').status_code == 410
+        assert client.get(f'/api/jobs/{job.id}/files/f0').status_code == 410
+        assert (
+            client.post('/api/jobs', data={'task': 'analyze', 'source_job': job.id, 'source_file': 'f0'}).status_code
+            == 410
+        )
+        assert library.remove(job.id, trash_files=True)['trashed'] == []
+        library.trash.move_to_trash.assert_not_called()
+        assert audio.read_bytes() == b'other recording'
+    finally:
+        client.close()
+
+
+def test_native_kept_original_validates_source_staging_and_existing_copy(native, tmp_path, monkeypatch):
+    picked = tmp_path / 'Source.wav'
+    picked.write_bytes(b'first recording')
+    result = tmp_path / 'Result.wav'
+    result.write_bytes(b'result audio')
+    mgr = JobManager(runner=lambda *_: {}, stages_for=lambda *_: [])
+
+    def finished():
+        selected = pick(native, 'files', picked)['files'][0]['selection']
+        job = mgr.submit('enhance', native.get(selected, 'job').source(), {})
+        job.result = {'files': [{'id': 'f0', 'path': str(result)}], '_library': {'original': str(picked)}}
+        return job
+
+    job = finished()
+    with pytest.raises(AudioLabError, match='changed or was replaced'):
+        library.record(job, begin_commit=lambda: rewrite_in_place(picked, b'other recording'))
+    assert library.get(job.id) is None
+    assert not list(library.originals_dir().iterdir())
+
+    job = finished()
+    copy = library.link_or_copy
+    with monkeypatch.context() as mac:
+
+        def corrupt(*args, **kwargs):
+            staged = copy(*args, **kwargs)
+            staged.write_bytes(b'first recording')  # same byte count, different audio
+            return staged
+
+        mac.setattr(library, 'link_or_copy', corrupt)
+        with pytest.raises(AudioLabError, match='could not verify'):
+            library.record(job)
+    assert library.get(job.id) is None
+    assert not list(library.originals_dir().iterdir())
+
+    assert library.record(job)
+    kept = library.file_path(library.get(job.id), 'original')
+    later = finished()
+    assert library.record(later)
+    assert library.file_path(library.get(later.id), 'original') == kept
+    replacement = finished()
+    kept.write_bytes(b'first recording')
+    with pytest.raises(AudioLabError, match='could not verify'):
+        library.record(replacement)
+    assert library.get(replacement.id) is None
+
+
+def test_older_two_field_native_fingerprint_requires_a_new_selection(tmp_path):
+    path = tmp_path / 'Old.wav'
+    path.write_bytes(b'original')
+    st = path.stat()
+    with pytest.raises(AudioLabError, match='verified again'):
+        source_path({'path': str(path), '_native_identity': [st.st_dev, st.st_ino]})
+
+
+def test_duration_reads_one_explicitly_selected_file_with_a_bounded_header_probe(native, tmp_path, monkeypatch):
+    path = tmp_path / 'Long.wav'
+    sample_rate = 8000
+    size = 620 * sample_rate * 2
+    header = struct.pack(
+        '<4sI4s4sIHHIIHH4sI',
+        b'RIFF',
+        36 + size,
+        b'WAVE',
+        b'fmt ',
+        16,
+        1,
+        1,
+        sample_rate,
+        2 * sample_rate,
+        2,
+        16,
+        b'data',
+        size,
+    )
+    with path.open('wb') as f:
+        f.write(header)
+        f.truncate(len(header) + size)
+    probe = Mock(wraps=ffmpeg.probe_media)
+    monkeypatch.setattr(ffmpeg, 'probe_media', probe)
+    bridge = native.bridge()
+    folder_items = pick(native, 'batch', tmp_path)['files']
+    assert not folder_items[0].get('can_measure_duration')
+    assert bridge.duration(native.secret, folder_items[0]['selection']) is None
+    probe.assert_not_called()
+
+    picked = pick(native, 'files', path)['files'][0]
+    assert picked['can_measure_duration']
+    selection = picked['selection']
+    assert bridge.duration('wrong secret', selection) is None
+    assert bridge.duration(native.secret, str(path)) is None
+    probe.assert_not_called()
+    assert bridge.duration(native.secret, selection) == pytest.approx(620)
+    probe.assert_called_once_with(path, header_only=True)
+    assert bridge.duration(native.secret, selection) is None
+    assert probe.call_count == 1
+
+    picked = pick(native, 'files', path)['files'][0]['selection']
+    rewrite_in_place(path, b'changed')
+    assert bridge.duration(native.secret, picked) is None
+    assert probe.call_count == 1

@@ -157,12 +157,16 @@ def record(job, check_cancel: Callable[[], None] | None = None, begin_commit: Ca
     hints = result.get('_library') or {}
     keep = job.task in KEEPS_ORIGINAL and hints.get('original') and SETTINGS.get().keep_originals
     original = Path(hints['original']) if keep else None
-    external = bool(job.source.get('_native_identity'))
-    if original and external:
-        source_path(job.source)  # the selected file must still be the one the job opened
+    external = '_native_identity' in job.source
+    if external:
+        selected = source_path(job.source)
+        if original is not None and original != selected:
+            raise _unverified_original()
     check = check_cancel or (lambda: None)
     digests: dict = {}  # reuse an upload's digest only within this record; never retain its callbacks
     digest = file_sha1(original, check, digests) if original else None
+    if external and original and not digest:
+        raise _unverified_original()
     root = SETTINGS.output_dir
     stems = {
         p['file_id']: p['key'][5:]
@@ -170,6 +174,9 @@ def record(job, check_cancel: Callable[[], None] | None = None, begin_commit: Ca
         if p.get('file_id') and str(p.get('key', '')).startswith('stem:')
     }
     files = [_file_item(f, root, job.task, stems.get(f['id'])) for f in outputs]
+    if external and job.task == 'import':
+        for f in files:
+            f.update(_native_import=True, _identity=list(job.source['_native_identity']))
     metrics = result.get('metrics') or {}
     out_dir = result.get('output_dir')
     entry = {
@@ -212,7 +219,10 @@ def record(job, check_cancel: Callable[[], None] | None = None, begin_commit: Ca
         entry['measured'] = {k: _rounded(measured.get(k)) for k in ('integrated_lufs', 'true_peak_dbtp', 'duration_s')}
     with ExitStack() as cleanup:
         item = _original_item(original, digest, entry, hints) if original and digest else None
+        if external and original is not None and item is None:
+            raise _unverified_original()
         staged = None
+        staged_identity = existing_identity = None
         if item:
             item['stream'] = stream if item['downloaded'] else None  # the stream this download is
         if item and not item['downloaded']:
@@ -234,6 +244,10 @@ def record(job, check_cancel: Callable[[], None] | None = None, begin_commit: Ca
             folder = cleanup.enter_context(tempfile.TemporaryDirectory(prefix=STAGING_PREFIX, dir=originals_dir()))
             dst = originals_dir() / item['file']
             candidate = dst if _size(dst) == item['size_bytes'] else original
+            if external:
+                source_path(job.source)
+                if candidate == dst:
+                    existing_identity = _file_identity(candidate)
             stage = Path(folder) / item['file']
             try:
                 can_link = (candidate == dst or not external) and _linkable(candidate, dst)
@@ -241,13 +255,28 @@ def record(job, check_cancel: Callable[[], None] | None = None, begin_commit: Ca
             except FileNotFoundError:
                 if candidate == original:
                     raise
+                existing_identity = None
                 staged = link_or_copy(original, stage, check, link=not external and _linkable(original, dst))
+            if external:
+                source_path(job.source)
+                staged_identity = _file_identity(staged)
+                if staged_identity is None or file_sha1(staged, check) != digest:
+                    raise _unverified_original()
         check()
         with _lock:  # Library -> manager is the only nested lock order
             if begin_commit:
                 begin_commit()
             else:
                 check()
+            if external:
+                source_path(job.source)
+                if item:
+                    dst = originals_dir() / item['file']
+                    if _file_identity(staged) != staged_identity:
+                        raise _unverified_original()
+                    # A concurrent operation may have installed a different file of this size.
+                    if os.path.lexists(dst) and (existing_identity is None or _file_identity(dst) != existing_identity):
+                        raise _unverified_original()
             created = None
             try:
                 if item:
@@ -264,6 +293,13 @@ def record(job, check_cancel: Callable[[], None] | None = None, begin_commit: Ca
                     created.unlink(missing_ok=True)
                 raise
     return True
+
+
+def _unverified_original() -> AudioLabError:
+    return AudioLabError(
+        'AudioLab could not verify the kept original.',
+        hints=['Check that the source is unchanged, then choose it again.'],
+    )
 
 
 def _stream(value: Any) -> dict[str, Any] | None:
@@ -533,7 +569,7 @@ def file_path(entry: dict[str, Any], file_id: str) -> Path | None:
 
 def _file_current(item: dict[str, Any], path: Path) -> bool:
     """Once located, a replacement at the new path cannot inherit the reference or Trash permission."""
-    if not item.get('_located'):
+    if not (item.get('_located') or item.get('_native_import')):
         return path.is_file()
     identity = _stored_identity(item)
     return identity is not None and _no_link(path) and _file_identity(path) == identity
@@ -563,6 +599,17 @@ def folder(entry: dict[str, Any]) -> Path | None:
     return _resolve(entry, entry.get('output_dir'))
 
 
+def reveal_folder(entry: dict[str, Any]) -> Path | None:
+    """Use the current parent when all available result files share a relocated folder."""
+    parents = set()
+    relocated = False
+    for f in entry.get('files') or []:
+        if (p := _resolve(entry, f.get('path'))) and _file_current(f, p):
+            parents.add(p.parent)
+            relocated |= bool(f.get('_located'))
+    return parents.pop() if relocated and len(parents) == 1 else folder(entry)
+
+
 def _resolve(entry: dict[str, Any], stored: str | None) -> Path | None:
     p = Path(stored or '')
     if not stored or '..' in p.parts:
@@ -576,9 +623,11 @@ def public(entry: dict[str, Any], job_exists: bool = False) -> dict[str, Any]:
     for f in entry.get('files') or []:
         p = file_path(entry, f['id'])
         state = _file_state(p)
-        if f.get('_located'):
+        if f.get('_located') or f.get('_native_import'):
             state['exists'] = bool(p and _file_current(f, p))
         public_file = {k: v for k, v in f.items() if not k.startswith('_')}
+        if f.get('_located'):
+            public_file['located'] = True
         if f.get('_keep_in_place'):
             public_file['can_trash'] = False
         files.append({**public_file, **state, 'locatable': _stored_identity(f) is not None})

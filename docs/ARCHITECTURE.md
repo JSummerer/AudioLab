@@ -83,11 +83,16 @@ opaque IDs. Existing HTTP routes redeem the IDs on the local instance, for the m
 the same secret. Only desktop-server pages disallow embedding and child frames. Folder selection adds
 immediate supported files by name, up to the same 50-file limit as the New list.
 
-Native New sources keep their canonical path and file identity (device and inode) only in the job's
-private source record. Retry and re-run use that original selection in place. If the path is gone or
-now resolves to a different file, choose it again. Working data and covers still live in job folders,
-and Library originals that came from direct native inputs are copied. Library import retains its existing
-ownership and Trash rules.
+Native New and Library import sources retain a private canonical path and a filesystem fingerprint
+(device, inode, size and nanosecond modification time). The job checks that fingerprint before and after
+processing and during Library publication. Older two-field references require a fresh selection.
+Enhance copies its native original and verifies the staged bytes against the source hash before publishing.
+Library import checks the original file before playback or opt-in Trash. Settings folder selections
+use device and inode so ordinary changes inside the folder don't invalidate the selection.
+
+A direct single-file picker selection grants one optional duration lookup. The bridge uses a bounded
+header probe for supported local containers, and the UI discards results for abandoned drafts. Folder
+and multi-file selections skip that lookup.
 
 Locate records a result file's device, inode, size and nanosecond modification time during Library
 publication. Under the Library lock, it checks that the former path is unoccupied and the picked file
@@ -96,7 +101,9 @@ filesystem-specific, so copied, cross-volume and edited files may need to be add
 uses filesystem metadata rather than reading or hashing the selected audio. Entries without a saved
 identity cannot be verified because the grouping key can come from a different file. Located files
 outside their recorded output root are omitted from Trash actions, and Library reads check that the
-located path still points to the same file. Job records and output ownership roots stay as recorded.
+located path still points to the same file. Library reveal uses the current parent when all available
+results share one relocated folder. Each located file can also open its own folder when results are
+spread out. Job records and output ownership roots stay as recorded.
 
 ### Platform code
 OS behavior belongs in `system.py`. Existing exceptions are system Trash in `trash.py`, the executable

@@ -163,11 +163,18 @@ def _result_source(state: AppState, job_id: str, file_id: str, new_id: str) -> d
     """`source_file`: one file of an earlier job's result as the new job's file source (e.g. "Check the
     result"), linked into the new job's input like a re-run's upload; titled by its file name. (An
     Enhance that keeps it as the Library original copies it then: library.record.)"""
-    path = _result_file(state.job_or_404(job_id), file_id)  # 404 no such file, 410 gone
+    job = state.job_or_404(job_id)
+    path = _result_file(job, file_id)  # 404 no such file, 410 gone
     if path.suffix.lower() not in export.UPLOAD_EXT:
         raise HTTPException(400, 'This file has no audio to work with.')
-    dst = link_or_copy(path, state.manager.input_dir(new_id) / path.name)
-    return {'kind': 'file', 'name': path.name, 'path': str(dst), 'size_bytes': dst.stat().st_size, 'title': path.stem}
+    source = {'kind': 'file', 'name': path.name, 'path': str(path), 'title': path.stem}
+    if job.task == 'import' and '_native_identity' in job.source:
+        state.require_local('This job uses a file chosen on this computer.')
+        source.update(_native_identity=job.source['_native_identity'], size_bytes=job.source['size_bytes'])
+    else:
+        dst = link_or_copy(path, state.manager.input_dir(new_id) / path.name)
+        source.update(path=str(dst), size_bytes=dst.stat().st_size)
+    return source
 
 
 def _cover_dir(mgr: JobManager, job_id: str) -> Path:
@@ -377,9 +384,18 @@ def delete_job(state: State, job_id: str):
 
 
 # ----------------------------------------------------------------- files
+def _check_import_result(job: Job) -> None:
+    if job.task == 'import' and '_native_identity' in job.source:
+        try:
+            source_path(job.source)
+        except AudioLabError:
+            raise HTTPException(410, 'This file was moved, changed or deleted.') from None
+
+
 def _result_file(job: Job, file_id: str) -> Path:
     for f in (job.result or {}).get('files', []):
         if f.get('id') == file_id:
+            _check_import_result(job)
             p = Path(f.get('path') or '')
             if p.is_file():
                 return p
@@ -465,6 +481,7 @@ def download_file(state: State, job_id: str, file_id: str):
 @router.get('/api/jobs/{job_id}/zip')
 def download_zip(state: State, job_id: str):
     job = state.job_or_404(job_id)
+    _check_import_result(job)
     files = [f for f in (job.result or {}).get('files', []) if f.get('path') and Path(f['path']).is_file()]
     if job.status != 'done' or not files:
         raise HTTPException(404, 'There are no files to download for this job.')

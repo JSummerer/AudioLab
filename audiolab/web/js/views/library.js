@@ -606,8 +606,12 @@ function fileRow(c, entry, f) {
       c.toggles.set(f.id, play);
       playLabel(play, false);
     }
-    // In the app on this computer the file is already in the output folder: Show in Finder (above).
-    actions = [play, store.health?.local ? null : h('a', {
+    const local = store.health?.local;
+    const reveal = local && f.located ? h('button', {
+      type: 'button', class: 'btn btn-ghost btn-sm', 'aria-label': `Show the folder for ${f.name}`,
+      onclick: () => revealEntry(entry, f.id),
+    }, icon('folder', 14), 'Show folder') : null;
+    actions = [play, reveal, local ? null : h('a', {
       class: 'btn btn-ghost btn-sm', href: libraryFileUrl(entry.id, f.id, { download: true }), download: f.name,
       'aria-label': `Download ${label}`,
     }, icon('download', 14), h('span', { class: 'dl-text' }, 'Download'))];
@@ -941,9 +945,10 @@ function nameVersion(entry) {
   input.focus();
 }
 
-async function revealEntry(entry) {
+async function revealEntry(entry, fileId) {
   try {
-    const res = await api(libPath(entry.id, 'reveal'), { method: 'POST' });
+    const action = fileId ? `files/${encodeURIComponent(fileId)}/reveal` : 'reveal';
+    const res = await api(libPath(entry.id, action), { method: 'POST' });
     if (res?.fallback === 'output') toast('That folder was moved or deleted — opened the output folder instead.', { kind: 'info', timeout: 7000 });
   } catch (e) {
     toastError(e);

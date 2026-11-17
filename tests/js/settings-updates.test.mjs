@@ -1,4 +1,4 @@
-// Settings → Updates & add-ons: the AudioLab update row, the downloader row and the automatic
+// Settings → Help: the AudioLab update row, the downloader row and the automatic
 // check switch, rendered from the production module (see settings-harness.mjs).
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -241,4 +241,36 @@ test('yt-dlp versions compare part by part as numbers', () => {
   assert.equal(s.run('isNewer("2026.10.26.1", "2026.10.26")'), true);
   assert.equal(s.run('isNewer("2026.10.26", "2026.10.26")'), false);
   assert.equal(s.run('isNewer("2026.09.01", "2026.10.26")'), false);
+});
+
+test('Settings groups, legacy links, focused controls and diagnostic disclosure survive redraws', () => {
+  const s = setup({
+    local: true, ai: { install_supported: true }, ffmpeg: { ok: true },
+    updates: { app: {} }, downloader: { can_update: true }, formats: { download: [] },
+  }, { settings: { cookies_browser: '', output_dir: '/example', check_updates: false } });
+  s.run('body.children = []; settingsView.mount(body); renderAll()');
+  assert.deepEqual([...s.run('SECTIONS.map(([, name]) => name)')],
+    ['General', 'Output defaults', 'Downloads', 'AI add-on', 'Storage', 'Help']);
+  const disclosure = () => s.find('settingsMaintenance');
+  assert.ok(!disclosure().open);
+  for (const id of ['keepWorkFiles', 'copyReport', 'downloaderSpot']) assert.ok(disclosure().contains(s.find(id)), id);
+  assert.ok(s.find('settings-storage').contains(s.find('keepOriginals')));
+  for (const [link, section, focus] of [
+    ['output', 'defaults', 'outputDir'], ['cookies', 'downloads', 'cookiesBrowser'], ['ai', 'ai-addon', 'enableAi'],
+    ['updates', 'help', 'checkUpdates'], ['downloader', 'help', 'updateDownloader'],
+    ['files', 'defaults', 'outputDir'], ['look', 'general', 'settings-general'],
+  ]) {
+    assert.ok(s.run(`reveal("${link}", {smooth: false, flash: false})`), link);
+    assert.equal(s.run(`refs.links["${section}"]["aria-current"]`), 'true', link);
+    assert.equal(s.context.document.activeElement.id, focus, link);
+  }
+  assert.equal(disclosure().open, true);
+  s.find('keepWorkFiles').focus();
+  s.run('renderHelp()');
+  assert.equal(disclosure().open, true);
+  assert.equal(s.context.document.activeElement, s.find('keepWorkFiles'));
+  s.context.store.health.local = false;
+  s.run('renderDownloads()');
+  assert.equal(s.find('settings-downloads').hidden, true);
+  assert.equal(s.run('reveal("cookies", {})'), false);
 });

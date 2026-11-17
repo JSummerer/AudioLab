@@ -458,7 +458,7 @@ def output_folder(name: str, parent: Path | None = None) -> Path:
         raise storage_error(e) or AudioLabError(
             f'Could not create a folder in {root}: {e.strerror or e}.',
             hints=[
-                'Choose a different output folder in Settings → Files.',
+                'Choose a different output folder in Settings → Output defaults.',
                 'Check that the folder exists and you are allowed to write to it.',
             ],
         ) from e
@@ -474,7 +474,7 @@ def output_root(acq: Acquired) -> Path:
     except OSError as e:
         raise storage_error(e) or AudioLabError(
             f'Could not write to {root}: {e.strerror or e}.',
-            hints=['Choose a different output folder in Settings → Files.'],
+            hints=['Choose a different output folder in Settings → Output defaults.'],
         ) from e
     return root
 

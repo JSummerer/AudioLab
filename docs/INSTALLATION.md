@@ -30,6 +30,8 @@ plus the Library. Settings offers the [optional managed AI download](#optional-a
 You update the app by replacing it; **Settings → Updates & add-ons** says when a newer version exists and
 updates the downloader inside the app.
 
+For the current source checkout, see the [Settings section guide](USAGE.md#settings). The packaged Mac instructions below use the 2.5.1 menu names.
+
 ## Install from source
 
 Source setup uses Python 3.10–3.13, directly or through [uv](https://docs.astral.sh/uv/). It downloads
@@ -206,7 +208,7 @@ posting: names, links and tool output may be personal. Never share passwords, co
 
 For the downloaded app, see [Mac uninstall and optional cleanup](MACOS.md#uninstall).
 
-For source installations, quit first and check **Settings → Files** for your output folder. Preserve
+For source installations, quit first and check **Settings → Output defaults** for your output folder. Preserve
 audio/backups inside the project, including Docker's `output/`, before removing the source folder and
 any source shortcut. Keep originals and Library data if you want them after reinstalling.
 

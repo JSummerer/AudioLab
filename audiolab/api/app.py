@@ -65,7 +65,7 @@ async def _unexpected_error(request: Request, exc: Exception):
             'detail': f'Something went wrong in {APP_NAME}.',
             'hints': [
                 'Try again.',
-                'If it keeps happening, report it: Settings → About → "Copy system report" copies what is '
+                'If it keeps happening, report it: Settings → Help → Maintenance and diagnostics → "Copy system report" copies what is '
                 'needed for a bug report.',
             ],
             'fix': None,

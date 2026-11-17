@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Settings groups controls under General, Output defaults, Downloads, AI add-on, Storage and Help.
+  Help keeps maintenance and diagnostics in a disclosure. Existing Settings links still work.
 - New uses the formats in Settings on a fresh load and keeps your choices between jobs. Enhance starts
   with MP3 alone on new installs. Split shows the full format names.
 - Editing a link in New waits for Load. Editing a local file’s name preserves untouched embedded tags.

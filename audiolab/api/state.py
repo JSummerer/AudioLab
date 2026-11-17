@@ -105,7 +105,7 @@ class AppState:
             return {'ok': True}
         raise AudioLabError(
             f"The output folder isn't available: {root}.",
-            hints=['Connect the drive it is on, or choose another folder in Settings → Files.'],
+            hints=['Connect the drive it is on, or choose another folder in Settings → Output defaults.'],
         )
 
     def reveal_app_folder(self, target: str) -> dict[str, Any]:

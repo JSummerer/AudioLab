@@ -178,7 +178,7 @@ def preflight(
     if output_dir is not None and task != 'analyze' and not system.folder_writable(output_dir):
         raise AudioLabError(
             f"The output folder isn't available: {output_dir}.",
-            hints=['Connect the drive it is on, or choose another folder in Settings → Files.'],
+            hints=['Connect the drive it is on, or choose another folder in Settings → Output defaults.'],
         )
     reasons, hints = [], []
     report: dict[str, object] = {'task': task, 'quality': quality, 'device': device}

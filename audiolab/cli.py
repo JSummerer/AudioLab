@@ -307,7 +307,7 @@ def cmd_install_ai(args) -> int:
     if is_packaged():
         from .errors import AudioLabError
 
-        raise AudioLabError('Open AudioLab Settings → Updates & add-ons to install or remove the optional AI add-on.')
+        raise AudioLabError('Open AudioLab Settings → AI add-on to install or remove the optional AI add-on.')
 
     cmd = install_command()
     print('Installing AI software (torch + demucs). Model files download on first use…')

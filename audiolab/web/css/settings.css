@@ -38,7 +38,7 @@
 }
 
 /* Rows: one hairline between neighbours (a spot's wrapper or a group counts as one row). */
-.set-rows > * + * { border-top: 1px solid var(--line); }
+.set-rows + .set-rows, .set-rows > * + * { border-top: 1px solid var(--line); }
 .set-rows > .storage-info[hidden] + * { border-top: 0; }
 .set-rows .adv-row { grid-template-columns: minmax(0, 1fr) auto; gap: var(--s-2) var(--s-6); padding: var(--s-3) 0; border-bottom: 0; }
 .set-rows .adv-row-stack { grid-template-columns: minmax(0, 1fr); gap: var(--s-3); }
@@ -75,10 +75,10 @@
 .folder-edit .field[aria-invalid="true"] { border-color: var(--danger); }
 .folder .callout { margin-top: 2px; }
 
-/* Storage: job files, the kept originals with their switches, then work files. */
+/* Storage: job files and kept originals. */
 .storage-info:focus, .originals-info:focus { outline: none; }
 
-/* About: facts, paths short with the full one on hover and a copy button. */
+/* Help: facts, paths short with the full one on hover and a copy button. */
 .set-rows > .facts { padding: var(--s-3) 0; }
 .path-value { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; vertical-align: top; }
 .path-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

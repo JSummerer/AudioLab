@@ -119,7 +119,7 @@ def test_unreachable_output_folder(tmp_path, monkeypatch):
             assert r.status_code == 400 and r.json()['detail'] == f"The output folder isn't available: {gone}."
             with pytest.raises(AudioLabError, match="output folder isn't available") as refused:
                 preflight(60.0, tmp_path, 'enhance', output_dir=SETTINGS.output_dir)
-            assert 'Settings → Files' in refused.value.hints[0]
+            assert 'Settings → Output defaults' in refused.value.hints[0]
             preflight(60.0, tmp_path, 'analyze', output_dir=SETTINGS.output_dir)  # Check writes nothing there
             fixed = c.put('/api/settings', json={'output_dir': str(tmp_path / 'music')})
             assert fixed.status_code == 200 and fixed.json()['output_dir'] == str(tmp_path / 'music')

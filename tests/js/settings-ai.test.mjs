@@ -1,4 +1,4 @@
-// The AI add-on row of Settings → Updates & add-ons, rendered from the production module
+// The AI add-on row of Settings → AI add-on, rendered from the production module
 // (see settings-harness.mjs). Lifecycle controls and Storage refresh timing, not layout.
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
@@ -10,7 +10,7 @@ function setup(ai, options) {
   return {
     ...s,
     button: s.find,
-    render: (next) => { s.context.store.health.ai = next; s.run('renderSystem()'); },
+    render: (next) => { s.context.store.health.ai = next; s.run('renderAi()'); },
   };
 }
 const managed = (patch = {}) => ({
@@ -45,7 +45,7 @@ test('a pending Storage refresh survives leaving and reopening Settings inside t
   vm.runInNewContext(`
     scroller = { addEventListener() {}, removeEventListener() {} };
     spy = () => {};
-    renderAll = () => renderSystem();
+    renderAll = () => renderAi();
     renderStorageInfo = () => {};
   `, s.context);
   const terminal = managed({ state: 'partial', removable: true, install_ok: false });

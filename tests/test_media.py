@@ -832,8 +832,11 @@ def test_download_errors_by_kind():
     # something unknown: plain words, yt-dlp's text only as the detail — and no automatic downloader update
     e = youtube._friendly_error('ERROR: [foo] bar: Something odd happened (code 7)', 'u')
     assert str(e) == "The download didn't work." and e.fix is None
-    assert e.detail == 'Something odd happened (code 7)' and 'Updates & add-ons' in e.hints[-1]
-    assert youtube._UPDATE_HINT == 'Update the downloader: Settings → Updates & add-ons → "Update downloader".'
+    assert e.detail == 'Something odd happened (code 7)' and 'Maintenance and diagnostics' in e.hints[-1]
+    assert (
+        youtube._UPDATE_HINT
+        == 'Update the downloader: Settings → Help → Maintenance and diagnostics → "Update downloader".'
+    )
 
 
 def test_unknown_download_error_does_not_update_the_downloader(tmp_path, monkeypatch):

@@ -388,7 +388,7 @@ def test_a_saved_output_folder_inside_app_data_is_refused_before_any_work(
     if legacy:
         with pytest.raises(AudioLabError, match='separate from AudioLab’s app data folder') as refused:
             spec.run(ctx, source)
-        assert any('Settings → Files' in hint for hint in refused.value.hints)
+        assert any('Settings → Output defaults' in hint for hint in refused.value.hints)
         assert not folder.exists() and SETTINGS.settings_file.read_text() == saved  # nothing made or rewritten
     else:
         with pytest.raises(_WorkStarted):  # unchanged: the work starts

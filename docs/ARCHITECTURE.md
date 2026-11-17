@@ -438,7 +438,7 @@ audio array to the chain rather than retaining a second obsolete buffer through 
 
 Output is user-owned and is never deleted automatically: removing jobs or Library records keeps it, unless
 the user opts in to moving a result's files to the system Trash (Remove from Library, Keep only this version). App data also
-contains user audio copies: do not treat the whole folder as a disposable cache. Settings → About
+contains user audio copies: do not treat the whole folder as a disposable cache. Settings → Help → Maintenance and diagnostics
 opens the actual app data/log folders for optional manual cleanup. The app has no recursive uninstall
 endpoint; output folders inside the data folder are refused now, but older versions allowed them, so
 automatic root deletion would be unsafe. The Core app's cache setup does not redirect `HOME` or claim to contain all macOS/WebKit data.

@@ -61,7 +61,9 @@ def validate_output_location(target: Path) -> None:
     if resolved.is_relative_to(data_root) or data_root.is_relative_to(resolved):
         raise AudioLabError(
             'Choose an output folder separate from AudioLab’s app data folder (jobs, Library and AI storage).',
-            hints=['Choose a folder such as Music/AudioLab in Settings → Files, outside the app data folder.'],
+            hints=[
+                'Choose a folder such as Music/AudioLab in Settings → Output defaults, outside the app data folder.'
+            ],
         )
 
 

@@ -17,7 +17,7 @@ For first-time setup, use the [Mac app guide](MACOS.md) or [source installation 
 Enhance starts with MP3 on a new install. New takes its format choices from Settings when the page loads.
 Choices you make in New carry over between jobs and views until you reload or change that default in Settings.
 
-Finished audio goes to **`Music/AudioLab`** in your home folder. Change that in **Settings → Files**.
+Finished audio goes to **`Music/AudioLab`** in your home folder. Change that in **Settings → Output defaults**.
 Existing output files are kept; a new result gets a numbered name if needed. A job that fails or is
 cancelled while still working removes the files it had saved in that attempt, and nothing else; a
 finished result is never removed. If AudioLab crashes or is force-quit while a job runs, the files that
@@ -79,8 +79,22 @@ For older entries, or files copied to another drive, use **Add a file…** to ad
 Locate updates playback and comparison in the Library. Job history stays as recorded. A file located
 outside its recorded output root stays in place even when you opt to move other files to the Trash.
 
-For links, the YouTube sign-in (Settings → Downloads & sign-in) is used only when YouTube refuses a
+For links, the YouTube sign-in (Settings → Downloads) is used only when YouTube refuses a
 video without it. YouTube can block accounts that download a lot; a spare Google account is safer.
+
+## Settings
+
+| Section | Controls |
+|---|---|
+| General | Theme and whether More options and job details start open |
+| Output defaults | Output folder, Save and Split formats, Enhance formats and cover art |
+| Downloads | YouTube browser sign-in on a local server |
+| AI add-on | Install, update, repair or remove the optional AI features |
+| Storage | Job files, kept originals and reuse |
+| Help | App updates and automatic checks. Open **Maintenance and diagnostics** for the downloader, audio engine, work files, system report and app-data folders. |
+
+In the 2.5.1 Mac app, the output folder is under **Files**, AI and updates share **Updates & add-ons**,
+and the system report is under **About**.
 
 ## Automatic enhancement
 

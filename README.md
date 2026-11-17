@@ -51,7 +51,7 @@ Compare at the same point with **Match volume**. [See the controls](docs/USAGE.m
 
 ## Optional AI
 
-For **Split** and **Enhance → AI stems**, choose **Settings → Updates & add-ons → Enable AI features** and wait for **Ready**.
+For **Split** and **Enhance → AI stems**, choose **Settings → Updates & add-ons → Enable AI features** and wait for **Ready**. In the current source checkout this is **Settings → AI add-on**.
 The download is about **570 MB**. 2.5.1 reuses a compatible **AI 1.0.0** installation.
 You can remove it in Settings later. [AI setup and removal](docs/MACOS.md#optional-ai)
 

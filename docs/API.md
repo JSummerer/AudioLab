@@ -11,7 +11,7 @@ Percent-encode the query value; characters such as `+`, `&` and `#` are part of 
 
 **Errors:** non-2xx responses carry `{"detail": "human readable message"}`. Failures AudioLab explains (`400`)
 also carry `"hints": ["what you can try", …]` and `"fix"` (see Job `error`). Anything unexpected is a `500` with
-`{"detail": "Something went wrong in AudioLab.", "hints": [… Settings → About → "Copy system report" …], "fix": null}`
+`{"detail": "Something went wrong in AudioLab.", "hints": [… Settings → Help → Maintenance and diagnostics → "Copy system report" …], "fix": null}`
 (the traceback goes to the log); a full disk is `500` "The disk is full." and a folder AudioLab may not write to
 (permissions, a read-only drive) `500` "AudioLab can't write there.", both with hints.
 
@@ -433,7 +433,7 @@ for under the format picker.
 `upload_extensions`: the file types `POST /api/jobs` accepts as `file` (audio and video containers ffmpeg reads) —
 the UI's file picker and drop check use this one list.
 `output_dir_ok`: the output folder is there and writable, or can be made. `false` (e.g. on a drive that isn't
-connected): show a notice pointing to Settings → Files. Settings still load and save; jobs that write files fail
+connected): show a notice pointing to Settings → Output defaults. Settings still load and save; jobs that write files fail
 before they start ("The output folder isn't available: …"); Check still works.
 `packaged`: the self-contained core app, with its own Python runtime, FFmpeg, Deno and downloader.
 AI has its own capability: `ai.install_supported`, independent of `packaged`. It is true only when the packaged build

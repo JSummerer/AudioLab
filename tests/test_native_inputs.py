@@ -322,7 +322,10 @@ def test_locate_updates_library_only_and_protects_result_outside_output_root(nat
 
         old.write_bytes(b'occupied')
         body = {'native_file': key}
-        assert client.post(endpoint, json=body, headers=headers).status_code == 400
+        occupied = client.post(endpoint, json=body, headers=headers)
+        assert occupied.status_code == 400
+        assert occupied.json()['detail'] == 'There is already a file or folder at the saved location.'
+        assert occupied.json()['hints'] == ['Refresh the Library.']
         assert client.get(entry_url).json()['files'][0]['path'] == old.name
         old.unlink()
 
@@ -388,8 +391,10 @@ def test_located_file_inside_root_can_be_trashed_but_replacement_cannot(native, 
 
     entry = library.get(first_job.id)
     assert not library.public(entry)['files'][0]['exists']
-    with pytest.raises(AudioLabError):
+    with pytest.raises(AudioLabError, match='A different file has replaced the one saved here') as exc:
         library.locate_file(first_job.id, 'f0', picked_location(native, first_moved))
+    assert exc.value.hints == ['Remove this entry from the Library, keep its files, then add the replacement file.']
+    assert library.get(first_job.id) == entry
     assert library.remove(first_job.id, trash_files=True)['trash_failed'] == [first_moved.name]
     assert library.remove(second_job.id, trash_files=True)['trashed'] == [second_moved.name]
     assert trashed == [second_moved]

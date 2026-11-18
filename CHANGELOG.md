@@ -24,13 +24,14 @@
   Submission errors stay beside Start until you retry or change the source.
 - Enhance and Check describe their adjustments and measurements. Brighten muffled highs is an on/off
   switch, and the Library explains how the kept original is used for comparison and Adjust.
-- Compare reports when it cannot align a late WebM passage. A later request retries the bounded alignment check.
+- Compare reports when it cannot align a late WebM passage.
 
 - Saving a track uses the playlist you submitted, even if you looked up the same track in another playlist.
 
 - Use **Locate…** in the app window to reconnect a missing Library file recorded by this version,
   after moving or renaming it on the same drive. If you retag an imported or located file in place,
-  choose it again to confirm the edit. Removing a version tells you when files located outside the
+  choose it again to confirm the edit. If an editor replaced the file, Locate explains how to
+  add the replacement. Removing a version tells you when files located outside the
   output folder stayed in place. Open a located file’s current folder from its row.
 
 - In the app window, choose one or several files or a folder from New, choose the output folder

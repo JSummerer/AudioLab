@@ -93,7 +93,12 @@ def test_unaligned_late_seek_never_decodes_a_long_prefix(tmp_path, monkeypatch):
     monkeypatch.setattr(ffmpeg, '_decode', silence)
     with pytest.raises(AudioLabError, match='line up'):
         ffmpeg.decode_pcm(src, 3600 * ffmpeg.PCM_RATE, ffmpeg.PCM_GRID)
-    assert max(offsets) <= 25 * ffmpeg.PCM_RATE
+    probes = [s * ffmpeg.PCM_RATE for s in (1, 10, 25)]
+    assert offsets == probes
     offsets.clear()
+    with pytest.raises(AudioLabError, match='line up'):
+        ffmpeg.decode_pcm(src, 3601 * ffmpeg.PCM_RATE, ffmpeg.PCM_GRID)
+    assert offsets == []
+    src.write_bytes(b'changed')
     assert ffmpeg._seek_shift(src, None) is None
-    assert offsets == [s * ffmpeg.PCM_RATE for s in (1, 10, 25)]
+    assert offsets == probes

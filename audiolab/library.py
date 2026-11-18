@@ -452,6 +452,11 @@ def locate_file(entry_id: str, file_id: str, picked: Selection) -> dict[str, Any
             and selected != identity
         )
         if previous is None or (not reconfirm and os.path.lexists(previous)):
+            if candidate == previous and selected[:2] != identity[:2]:
+                raise AudioLabError(
+                    'A different file has replaced the one saved here.',
+                    hints=['Remove this entry from the Library, keep its files, then add the replacement file.'],
+                )
             raise AudioLabError(
                 'There is already a file or folder at the saved location.', hints=['Refresh the Library.']
             )

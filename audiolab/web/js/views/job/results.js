@@ -100,10 +100,7 @@ function filesBlocks(job, r, ctx) {
   if (!all.length) out.push(block('Your files', h('p', { class: 'muted' }, 'No files were produced.'), foot));
   else if (files.length) out.push(h('section', { class: 'block job-files' }, h('h2', { class: 'block-title' }, 'Your files'), list, foot));
   if (tracks.length) {
-    const t = trackRows(job.id, tracks.filter(exists), {
-      download: !local,
-      fileNote: (f) => f.verification ? h('span', { class: 'muted small' }, exportCheckText(f.verification)) : null,
-    });
+    const t = trackRows(job.id, tracks.filter(exists), { download: !local });
     const gone = tracks.filter((f) => !exists(f));
     ctx.onCleanup(() => t.destroy());
     out.push(h('details', { class: 'block tracks-block job-files', open: true },
@@ -133,7 +130,7 @@ function fileRow(job, f) {
       // Narrow windows show the size after the name instead of in its own column.
       h('span', { class: 'file-name', title: f.name }, f.name,
         there && f.size_bytes ? h('span', { class: 'file-size-inline' }, ` · ${fmtBytes(f.size_bytes)}`) : null),
-      f.verification ? h('span', { class: 'file-name' }, exportCheckText(f.verification)) : null),
+      !isTrack(f) && f.verification ? h('span', { class: 'file-name' }, exportCheckText(f.verification)) : null),
     h('span', { class: 'file-size' }, there ? fmtBytes(f.size_bytes) : ''),
     download
       ? h('a', { class: 'btn btn-ghost btn-sm', href: fileUrl(job.id, f.id), download: f.name, 'aria-label': `Download ${f.label || f.name}` }, icon('download', 14), h('span', { class: 'dl-text' }, 'Download'))

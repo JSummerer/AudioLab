@@ -127,7 +127,7 @@ def test_master_reuses_the_analysis_measurement_of_the_reference(delivery, monke
 def test_meter_error_and_ceiling_miss_keep_the_exports(delivery, monkeypatch):
     source, ctx, notes = delivery(('mp3_320', 'wav16', 'wav24', 'aac_256'))
     ctx.options['split_tracks'] = True  # tracks are cut in the first format, the MP3
-    ctx.options['tracklist'] = '0:00 Retry\n0:02 Over\n0:04 Missing\n0:06 Still over'
+    ctx.options['tracklist'] = '0:00 Within\n0:02 Over\n0:04 Missing\n0:06 Slightly over'
     actual_encode = export.run_ffmpeg
     track_encodes = {i: [] for i in range(1, 5)}
 
@@ -151,7 +151,7 @@ def test_meter_error_and_ceiling_miss_keep_the_exports(delivery, monkeypatch):
             track = int(path.name[1:3])
             if track == 3:
                 raise AudioLabError('Meter failed', detail=private_detail)
-            excess = {1: 0.3 if len(track_encodes[1]) == 1 else -0.1, 2: 0.6, 4: 0.3}[track]
+            excess = {1: -0.1, 2: 0.6, 4: 0.3}[track]
             return {
                 **reading,
                 'true_peak_dbtp': ceiling_dbtp + excess,
@@ -202,33 +202,32 @@ def test_meter_error_and_ceiling_miss_keep_the_exports(delivery, monkeypatch):
     # The MP3 was encoded once more, turned down, before it was saved: no warning, a plain "What we did" line.
     mp3 = files['mp3_320']['verification']
     assert len(lossy_checks) == 4 and mp3['status'] == 'verified' and mp3['ceiling_dbtp'] == export.LOSSY_LIMIT_DBTP
-    assert mp3['message'] is None and len(result['warnings']) == 6
+    assert mp3['message'] is None and len(result['warnings']) == 4
     line = 'Turned the MP3 down slightly so its peaks stay under the limit (-1.0 dB; encoding raises peaks).'
     assert line in result['summary'] and not any('Turned the AAC' in s for s in result['summary'])
     tracks = [f for f in result['files'] if f.get('group') == 'tracks']
     assert [(f['start_s'], f['end_s']) for f in tracks] == [(0, 2), (2, 4), (4, 6), (6, 8)]
     assert all(Path(f['path']).is_file() for f in tracks)
     assert len(list(Path(result['tracks_dir']).iterdir())) == 4
-    fixed, over, missing, still_over = [f['verification'] for f in tracks]
-    assert fixed['status'] == 'verified' and fixed['trim_db'] == 1.8
-    assert over['status'] == 'warning' and over['trim_db'] == 1.0
-    assert '02 - Over.mp3' in over['message'] and 'past 2 dB below the master' in over['message']
-    assert missing['status'] == 'unverified' and missing['trim_db'] == 1.0
+    within, over, missing, slightly_over = [f['verification'] for f in tracks]
+    assert within['status'] == 'verified' and within['message'] is None
+    assert over['status'] == slightly_over['status'] == 'warning'
+    assert over['true_peak_dbtp'] == pytest.approx(0.5) and slightly_over['true_peak_dbtp'] == pytest.approx(0.2)
+    assert missing['status'] == 'unverified' and missing['true_peak_dbtp'] is None
     assert '03 - Missing.mp3' in missing['message'] and private_detail not in missing['message']
-    assert still_over['status'] == 'warning' and still_over['trim_db'] == 1.8
-    assert '04 - Still over.mp3' in still_over['message'] and 'even after it was turned down' in still_over['message']
-    assert '2 tracks were turned down further during export.' in result['summary']
-    for check in (over, missing, still_over):
-        assert check['message'] in result['warnings'] and ('warning', check['message']) in notes
-    assert [len(track_encodes[i]) for i in range(1, 5)] == [2, 1, 1, 2]
-    assert all('volume=-1.00dB' in commands[0] for commands in track_encodes.values())
-    for track in (1, 4):
-        first, second = track_encodes[track]
-        assert second == first.replace('volume=-1.00dB', 'volume=-1.80dB')
+    group = 'Track checks — 1 within the peak limit, 2 over the peak limit, 1 could not be checked.'
+    assert result['warnings'].count(group) == 1 and group not in result['summary']
+    assert notes.count(('warning', group)) == 1
+    for check in (over, missing, slightly_over):
+        assert check['message'] not in result['warnings'] and ('warning', check['message']) not in notes
+    assert all(f['verification']['trim_db'] == 1.0 for f in tracks)
+    assert all(len(commands) == 1 and 'volume=-1.00dB' in commands[0] for commands in track_encodes.values())
 
     job = Job(ctx.job_id, 'enhance', source, ctx.options, title='Generated', result=result)
     assert library.record(job)
-    saved_tracks = [f for f in library.public(library.get(job.id))['files'] if f['kind'] == 'track']
+    entry = library.public(library.get(job.id))
+    assert entry['track_check_summary'] == group
+    saved_tracks = [f for f in entry['files'] if f['kind'] == 'track']
     assert [f['verification'] for f in saved_tracks] == [
         {k: v for k, v in f['verification'].items() if k != 'message'} for f in tracks
     ]

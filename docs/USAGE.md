@@ -57,7 +57,7 @@ sessions use a path field.
 - **Check:** inspect measurements and a spectrogram. Tempo, musical key and content type are estimates.
   Check reports measured loudness and its variation, true peaks, runs near full scale, and the estimated
   frequency range. Near-full-scale runs indicate possible clipping. The report also identifies samples
-  above full scale in the floating-point analysis copy.
+  above full scale in the decoded audio.
 
 **More options** holds the name, [cover art](#cover-art), formats and processing controls. **Tracks**
 shows up front for a recording with chapters, a pasted tracklist or more than 10 minutes, else under
@@ -151,16 +151,14 @@ but their transient behavior differs from a conventional causal EQ and can inclu
 
 Each full-length export gets its own loudness and peak check before it is saved. Encoding raises the peaks
 of an MP3, AAC or Opus file: it may use the master's headroom up to just under full scale (-0.1 dBTP, or
-your ceiling if that is higher) and is saved as encoded. Only a file that goes over that is encoded once
+your ceiling if that is higher) and is saved as encoded. Only a full-length export that goes over that is encoded once
 more, turned down by the excess plus 0.5 dB, and only when that is at most 2 dB; otherwise it is kept as
 encoded, with a warning. Lossless files are held to the selected ceiling and never re-encoded. A warning
 means a file is still over its limit or could not be measured; try a lower ceiling or a lossless format
 when more headroom is needed. Check judges a lossy file's peaks by the same limit.
-Enhance also checks each MP3, AAC or Opus track. Each track starts with the turn-down applied to the
-full file. A track over the limit can be encoded once more if the total turn-down would stay within
-2 dB of the master. A warning identifies any track that still needs attention. Individual tracks can
-end up at different gains. Checking adds a decode of each lossy track, and any retry adds another
-encode and decode of that track. Lossless track cuts and Save / Convert cuts have no individual check.
+Enhance also checks each MP3, AAC or Opus track. Tracks keep the gain of their format's full export.
+Checking takes one extra decode per lossy track. A single line reports how many passed, went over
+the limit or could not be measured. Lossless track cuts and Save / Convert cuts have no individual check.
 
 Master readings describe the audio before encoding. **Show details** adds the LUFS/dBTP readings and
 the technical figures behind each line of **What we did**. Library's

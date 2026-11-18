@@ -129,8 +129,8 @@ check's 0.05 dB tolerance). The corresponding alert threshold for other sources 
 The peak card already indicates little headroom above -1 dBTP for those sources. "Above full scale"
 means a measured true peak above 0 dBTP. `is_clipping` and `clipped_samples_pct` are legacy field names
 for the near-full-scale run detector. The report describes such runs as possible clipping, using the
-signal's own sample peak as the counting reference above about +3 dBFS. Floating-point samples above
-full scale in the analysis copy have their own finding.
+signal's own sample peak as the counting reference above about +3 dBFS. Samples above full scale in the decoded audio have their own finding, including when resampling
+an integer source produces them.
 `loudness_label` and `loudness_range_label` are the descriptive categories displayed for audible material,
 based on the measured LUFS and LU respectively. Older results may lack these fields.
 `tone_timeline` (recordings longer than 3 minutes, from the whole-file level scan; else absent):
@@ -149,7 +149,7 @@ The bass measurement uses a 90 Hz low-pass matching the mono fold's magnitude, 0
 Any eligible negative window sets `antiphase_bass` and bypasses automatic mono bass; an explicit On
 override still applies it with an explanation. These gates are conservative engineering choices, not
 a diagnosis of the recording's intent. Older results may have excerpt-only stereo measurements.
-Bandwidth uses the mean power of the channels so that opposite-phase content counts toward the frequency range.
+Bandwidth uses the stronger of the mid and side spectra at each frequency, including opposite-phase content.
 `is_lossy_cutoff` is a legacy flag for a detected sharp cutoff or a low source sample-rate limit.
 Long recordings still use bounded excerpts for spectrum, key and classifier features (`analysis_basis`
 describes these). If those excerpts are silent, the whole-file
@@ -180,7 +180,7 @@ integrated loudness at the file's rate and estimates true peak at 192 kHz; `tole
 Loudness is `null` below the meter's gate or without a complete 400 ms block; a silent peak is `null`.
 For `unverified`, the readings and `ceiling_met` are `null`. Each file is checked before it gets its
 name. Encoding raises a lossy file's peaks: it may use the master's headroom up to its limit and is then
-saved as encoded. A lossy file whose peaks come out above its limit is encoded once more from the same
+saved as encoded. A full-length lossy export whose peaks come out above its limit is encoded once more from the same
 master, turned down by the excess plus 0.5 dB, and checked again, but only when that turn-down (margin
 included) is at most 2 dB. Only that version is saved, `verification` describes it, and `summary` gets a
 line such as "Turned the AAC down slightly so its peaks stay under the limit (-0.6 dB; encoding raises
@@ -190,11 +190,10 @@ encoded, or one still over after its re-encode) and a failed measurement keep th
 lossy files, even after it was turned down. For more room, use a lower peak ceiling or a lossless format
 (+0.20 dBTP after saving, turned down 0.8 dB; limit -0.10 dBTP)." or "The WAV 24-bit file goes over the
 peak ceiling. For more room, use a lower peak ceiling (-0.60 dBTP after saving; ceiling -1.00 dBTP)."
-`message` is null for a verified file. Each lossy Enhance track starts with the trim of its format's full
-file. It gets one separate check and, when needed, one re-encode and recheck of that track only. The 2 dB
-bound includes the inherited trim, the new reduction and its margin. A track that would exceed that
-bound keeps its initial encode with a warning naming the track. `verification.trim_db` on tracks records
-the total turn-down from the master. A track may be turned down more than its neighbour. Track check
+`message` is null for a verified file. Each lossy Enhance track keeps its full export's trim and gets one check.
+`verification.trim_db` on a track records the inherited turn-down from the master. Each track's
+measurements and message remain in `files[].verification`. The job reports one grouped line in
+`summary` if all checked tracks pass, or in `warnings` if any exceed the limit or cannot be measured. Track check
 metadata is absent on lossless Enhance cuts, Save / Convert cuts and older unchecked tracks.
 `metrics.after` still describes the master, before export; the checks are measurements at creation,
 not proof that a file has not been edited later or that every decoder will produce identical peaks.
@@ -635,8 +634,9 @@ calibration: it analyzes and renders the complete original again.
 `applied` and `metrics` use the Result fields above.
 The projection omits source paths, tracklists and raw tool errors, bounds strings/lists and rejects
 non-finite numbers. Older entries omit `processing`; no historical settings are invented.
-Enhance `files[].verification` keeps the Result export checks, including those for lossy tracks, except `message`. Library
-`loudness.result_lufs` remains the master measurement; the compare player uses the selected export's
+Enhance `files[].verification` keeps the Result export checks, including those for lossy tracks, except `message`.
+When tracks have recorded verification, the Library entry includes `track_check_summary`, one line
+with the counts for the recorded outcomes. Library `loudness.result_lufs` remains the master measurement; the compare player uses the selected export's
 measured loudness when available. An explicitly unverified/unmeasurable export disables volume matching;
 legacy entries with no check use their original master-based estimate.
 

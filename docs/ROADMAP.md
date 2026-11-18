@@ -79,10 +79,9 @@ promises. Completed changes belong in [CHANGELOG.md](../CHANGELOG.md).
   the same master.
 - AAC track starts: on the real song, MP3 and Opus tracks stayed under the lossy limit (at most −0.24 and
   −0.48 dBTP), but AAC tracks cut inside a loud passage peaked up to +2.9 dBTP within 15 ms of their start
-  (+2.75 with the older, larger turn-down). Enhance now checks each lossy track and warns when a peak miss
-  remains. Save / Convert uses the same cut path. Further work is to give the AAC encoder audio before the
+  (+2.75 with the older, larger turn-down). Enhance checks each cut at the full export’s gain and groups the peak warnings. Save / Convert uses the same cut path. Further work is to give the AAC encoder audio before the
   cut while preserving the exact played boundaries. Verify both playback length and gain across cuts.
-- The Library tracks the turn-down of checked lossy tracks. The Library still lacks the full-length file's
+- The Library records each checked lossy track’s inherited turn-down. The Library still lacks the full-length file's
   turn-down, and its version line shows the loudness
   target, not the delivered level. An expert choice for lossy peaks is a possible later addition if testers ask.
 - Peak-meter gap: on a dense, hard-limited test signal, a 24-bit WAV measured −0.88 dBTP after saving while

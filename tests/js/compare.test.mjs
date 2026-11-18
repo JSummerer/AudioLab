@@ -522,13 +522,15 @@ const entry = (id, group = 'file:test', duration_s = 20) => ({ id, group, durati
   original: { kept: true }, loudness: { original_lufs: -20, result_lufs: -14 }, compare_file_id: 'f0',
   files: [{ id: 'f0', name: 'fixture.wav', label: 'WAV', kind: 'enhanced', mime: 'audio/wav', playable: true, exists: true }] });
 
-test('an expired job’s Library card shows a checked track miss alongside a passing full export', async (t) => {
+test('a job and its Library card report track checks once alongside a passing full export', async (t) => {
   const result = entry('tracks');
   result.job_exists = false;
   result.files[0].verification = { status: 'verified', ceiling_met: true };
   const warning = { status: 'warning', ceiling_met: false, true_peak_dbtp: 0.8, ceiling_dbtp: -0.1 };
+  const group = 'Track checks — 2 over the peak limit.';
+  result.track_check_summary = group;
   result.files.push(
-    { id: 'f1', name: '01 - Opening.m4a', label: '01 · Opening', track: 1, kind: 'track', exists: true },
+    { id: 'f1', name: '01 - Opening.m4a', label: '01 · Opening', track: 1, kind: 'track', exists: false, verification: warning },
     { id: 'f2', name: '02 - Loud cut.m4a', label: '02 · Loud cut', track: 2, kind: 'track', exists: true, verification: warning },
   );
 
@@ -538,8 +540,20 @@ test('an expired job’s Library card shows a checked track miss alongside a pas
   const checks = details.querySelectorAll('li').map((row) => row.textContent);
   assert.equal(checks.length, 2);
   assert.match(checks[0], /WAV — Peak within its limit/);
-  assert.match(checks[1], /02 · Loud cut — Peak above its limit/);
-  assert.equal(card(result.id).textContent.match(/Peak above its limit/g).length, 1);
+  assert.equal(checks[1], group);
+  assert.doesNotMatch(details.textContent, /02 · Loud cut|01 · Opening/);
+
+  const { doneView } = await import('../../audiolab/web/js/views/job/results.js');
+  const job = { id: 'finished', task: 'enhance', status: 'done', source: {}, options: {}, result: {
+    files: result.files.map((f) => f.kind === 'track' ? { ...f, group: 'tracks' } : f),
+    warnings: [group],
+  } };
+  const cleanups = [];
+  const page = doneView(job, { onCleanup: (fn) => cleanups.push(fn) }).map((node) => node.textContent).join(' ');
+  cleanups.forEach((fn) => fn());
+  assert.equal(page.split(group).length, 2);
+  assert.doesNotMatch(page, /its peaks go over the limit/);
+  assert.match(page, /peaks stay under the limit/);
 });
 
 test('Redo as uses the resolved Auto recipe to preserve only the same AI action', async (t) => {

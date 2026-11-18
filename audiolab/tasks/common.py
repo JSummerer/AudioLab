@@ -642,8 +642,7 @@ def split_into_tracks(
     tracklist) inside a new folder `folder_name` under `parent`. Returns Result.files
     entries (ids from f<start>, with group/track/start_s/end_s) and the folder —
     ([], None) when the source has no usable tracklist. `trim_db`: dB the tracks are turned
-    down by initially, the same as their format's full file (media.export). A
-    supplied check can re-encode individual lossy tracks."""
+    down by, the same as their format's full file (media.export). A supplied check measures lossy cuts."""
     tracks = acq.metadata.get('tracks') or []
     if not tracks:
         progress(100)

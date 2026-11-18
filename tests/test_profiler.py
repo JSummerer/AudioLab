@@ -95,20 +95,24 @@ def test_edge_inputs():
     assert classify(audio_features(noise, SR), 30.0, None)['type'] != 'speech'
 
 
-def test_check_describes_float_overs_and_even_range_as_measurements(tmp_path):
+def test_check_describes_decoded_overs_and_even_range_as_measurements(tmp_path):
+    from audiolab.media.ffmpeg import decode_reference
     from audiolab.tasks.analyze import describe
 
-    t = np.arange(SR * 15) / SR
-    tone = 1.05 * np.sin(2 * np.pi * 1000 * t)
+    rate = 32000
+    t = np.arange(rate * 15) / rate
+    tone = np.clip(1.05 * np.sin(2 * np.pi * 1000 * t), -1, 1)
     path = tmp_path / 'sine.wav'
-    sf.write(path, tone, SR, subtype='FLOAT')
-    report = analyze_file(path)[0]
+    sf.write(path, np.column_stack([tone, tone]), rate, subtype='PCM_16')
+    reference = tmp_path / 'reference.wav'
+    decode_reference(path, reference)  # resampling the integer source can produce overs in the analysis copy
+    report = analyze_file(reference, source_rate=rate)[0]
 
     assert report['lra'] < 3 and report['loudness_range_label'] == 'Very even'
     assert report['loudness_label'] == 'Very loud'
     findings = {alert['title'] for alert in report['alerts']}
     assert 'Runs at full scale (possible clipping)' in findings
-    assert 'Floating-point samples above full scale' in findings
+    assert 'Measured samples above full scale' in findings
     assert f'Loudness range is very even ({report["lra"]:.1f} LU).' in describe(report, {})
     assert 'Overall loudness is very loud' in ' '.join(describe(report, {}))
 
@@ -157,6 +161,18 @@ def test_bandwidth_counts_highs_in_opposite_phase():
     expected = detect_bandwidth(stereo, SR)
     assert expected['full_range'] and not expected['is_lossy_cutoff'], expected
     assert profile(stereo, SR, 1.0, 'whole file')['bandwidth'] == expected
+
+
+def test_bandwidth_recognizes_cutoff_above_uncorrelated_floor():
+    rng = np.random.default_rng(19)
+    n = 2 * SR
+    below = np.fft.rfftfreq(n, 1 / SR) <= 16000
+    signal = np.fft.rfft(rng.normal(0, 0.045, n))
+    noise = np.fft.rfft(rng.normal(0, 0.0055, (n, 2)), axis=0)
+    stereo = np.fft.irfft(np.where(below[:, None], signal[:, None], noise), axis=0).astype(np.float32)
+    expected = detect_bandwidth(stereo, SR)
+    assert expected['is_lossy_cutoff'] and 15500 <= expected['cutoff_hz'] <= 16500, expected
+    assert profile(stereo, SR, 2.0, 'whole file')['bandwidth'] == expected
 
 
 def test_top_end_bright_dull_normal():

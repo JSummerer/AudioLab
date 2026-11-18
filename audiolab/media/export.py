@@ -554,7 +554,7 @@ def _commit(staging: Path, dst: Path) -> Path:
 # don't follow a small turn-down exactly (up to 0.3 dB less than the turn-down on a real song).
 LOSSY_LIMIT_DBTP = -0.1
 TRIM_MARGIN_DB = 0.5
-TRIM_MAX_DB = 2.0  # bound for the total trim, including any trim inherited by a track
+TRIM_MAX_DB = 2.0  # maximum turn-down of a full lossy export
 
 # Audio codecs that keep every sample (FFmpeg's names, matched by prefix: pcm_s16le, …); any other is lossy.
 # WavPack counts as lossless although hybrid (lossy) WavPack exists: it is rare, and the verdict is stricter.
@@ -616,14 +616,15 @@ def _transcode(
     trim_db: float = 0.0,
     check: Check | None = None,
     ceiling_dbtp: float | None = None,
+    retry_lossy: bool = False,
 ) -> dict:
     """Convert `src` into format `fmt` at `dst`: {'path', 'verification', 'trim_db'}.
 
     `trim_db` turns the audio down by that many dB (track cuts get their full file's trim).
     `check` measures the staged file before it gets its name, against `peak_limit(fmt, ceiling_dbtp)` (the
-    master's ceiling). When a lossy file's peaks come out above that limit, it is encoded once more from
-    `src`, turned down by the excess plus TRIM_MARGIN_DB if the total trim stays within TRIM_MAX_DB, and checked again;
-    that version replaces the first before anything is saved. Otherwise the file is kept as encoded.
+    master's ceiling). Full exports enable `retry_lossy`: an over-limit lossy file is encoded once more
+    from `src`, turned down by the excess plus TRIM_MARGIN_DB if the trim stays within TRIM_MAX_DB, and
+    checked again. Tracks keep the same gain as their full export.
     `verification` is the reading of the file as saved, `trim_db` the gain taken off in all (0.0: none).
 
     `cover`: the JPEG to embed (in formats supported by AudioLab). None = no picture: a picture `src`
@@ -724,12 +725,13 @@ def _transcode(
     try:
         with_art = encode(staging, art, -trim_db, progress.sub(0, 50) if check else progress)
         if check:
-            step = progress.sub(50, 75)
+            can_retry = retry_lossy and spec.kind == 'lossy'
+            step = progress.sub(50, 75 if can_retry else 100)
             step(0, f'Checking the saved {spec.label}…')
             limit = peak_limit(spec.key, ceiling_dbtp)
             verification = check(staging, step, limit, duration_s)
             peak = verification.get('true_peak_dbtp')
-            if spec.kind == 'lossy' and verification.get('ceiling_met') is False and peak is not None:
+            if can_retry and verification.get('ceiling_met') is False and peak is not None:
                 excess = round(peak - limit + TRIM_MARGIN_DB, 2)
                 total_trim = round(trim_db + excess, 2)
                 if excess > 0 and total_trim <= TRIM_MAX_DB:
@@ -802,6 +804,7 @@ def export(
             sample_rate=sample_rate,
             check=check,
             ceiling_dbtp=ceiling_dbtp,
+            retry_lossy=True,
         )
         path = made['path']
         outputs.append(
@@ -834,8 +837,7 @@ def export_tracks(
 ) -> list[dict[str, object]]:
     """Cut `src` into `tracks` ([{n, title, start_s, end_s}], see youtube.make_tracks) and
     save each one as 'NN - <title>.<ext>' in format `fmt`, turned down by `trim_db` like the full
-    file of that format. When supplied, `check` measures each lossy track and allows one
-    extra encode within the total trim bound (`_transcode`).
+    file of that format. When supplied, `check` measures each lossy track at that gain.
 
     `tags` describe the whole set: its title becomes the album, its artist the album
     artist; a track titled 'Artist - Track' gets its own artist. Tracks that start past

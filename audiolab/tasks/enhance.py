@@ -15,7 +15,7 @@ from ..analysis import profile as prof
 from ..context import Progress, TaskContext
 from ..errors import AudioLabError, Cancelled
 from ..media import export
-from ..media.verification import PEAK_TOLERANCE_DB, measure_export
+from ..media.verification import PEAK_TOLERANCE_DB, measure_export, track_check_summary
 from ..previews import make_previews
 from ..processing import report_details
 from ..recipes.base import ADVANCED_CHOICES, QUALITIES, automatic_compressor, eq_bands, section_eq
@@ -123,9 +123,7 @@ def _short(file: dict[str, Any]) -> str:
     return spec.short if spec else file['label']
 
 
-def _check_message(
-    file: dict[str, Any], check: dict[str, Any], trim_db: float, inherited_trim_db: float = 0.0
-) -> str | None:
+def _check_message(file: dict[str, Any], check: dict[str, Any], trim_db: float) -> str | None:
     """The warning for a saved file whose check failed or found its peaks over its limit (the peak ceiling, or
     for a lossy file the limit just under full scale: export.peak_limit), in the shape of the summary lines
     (a plain sentence; the figures in one trailing bracket)."""
@@ -142,16 +140,10 @@ def _check_message(
         if lossy
         else ('the peak ceiling', 'ceiling', 'a lower peak ceiling')
     )
-    retried = trim_db > inherited_trim_db
-    still = ', even after it was turned down' if retried else ''
+    still = ', even after it was turned down' if trim_db and not track else ''
     trimmed = f', turned down {trim_db:.1f} dB' if trim_db else ''
-    reason = (
-        f' The estimated turn-down needed would take it past {export.TRIM_MAX_DB:g} dB below the master.'
-        if track and not retried
-        else ''
-    )
     return (
-        f'The {name} goes over {limit}{still}.{reason} For more room, use {room} '
+        f'The {name} goes over {limit}{still}. For more room, use {room} '
         f'({check["true_peak_dbtp"]:+.2f} dBTP after saving{trimmed}; {word} {check["ceiling_dbtp"]:+.2f} dBTP).'
     )
 
@@ -317,12 +309,9 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
                 'message': None,
             }
 
-    def note_check(file: dict[str, Any], trim_db: float, inherited_trim_db: float = 0.0) -> None:
-        measurement = file['verification']
-        measurement['message'] = _check_message(file, measurement, trim_db, inherited_trim_db)
-        if measurement['message']:
-            report.setdefault('warnings', []).append(measurement['message'])
-            ctx.note('warning', measurement['message'])
+    def warn(message: str) -> None:
+        report.setdefault('warnings', []).append(message)
+        ctx.note('warning', message)
 
     outputs = export.export(
         master,
@@ -339,7 +328,10 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
     files = common.file_entries(outputs)
     trimmed = []
     for file, out in zip(files, outputs):
-        note_check(file, out['trim_db'])
+        measurement = file['verification']
+        measurement['message'] = _check_message(file, measurement, out['trim_db'])
+        if measurement['message']:
+            warn(measurement['message'])
         if out['trim_db'] and file['verification']['status'] == 'verified':
             trimmed.append((_short(file), out['trim_db']))
     track_files, tracks_dir, tracks_lines = [], None, []
@@ -361,14 +353,15 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
             ceiling_dbtp=params.tp_ceiling_db,
         )
         tracks_lines = [common.tracks_summary(acq, track_files, tracks_dir)]
-        additional_trim = 0
         for file in track_files:
             if measurement := file.get('verification'):
-                note_check(file, measurement['trim_db'], inherited_trim_db)
-                additional_trim += measurement['trim_db'] > inherited_trim_db
-        if additional_trim:
-            noun = 'track was' if additional_trim == 1 else 'tracks were'
-            tracks_lines.append(f'{additional_trim} {noun} turned down further during export.')
+                measurement['message'] = _check_message(file, measurement, inherited_trim_db)
+        track_note, needs_attention = track_check_summary(track_files)
+        if track_note:
+            if needs_attention:
+                warn(track_note)
+            else:
+                tracks_lines.append(track_note)
     track_files += common.cover_file(ctx, source, acq, folder, start=len(files) + len(track_files))
 
     before = report.get('input') or {k: analysis.get(k) for k in ('integrated_lufs', 'true_peak_dbtp', 'lra')}

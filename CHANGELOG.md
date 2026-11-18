@@ -12,9 +12,9 @@
   **AI when supported** for Auto. Concerts have no AI option. Adjust works with saved versions that
   used the non-AI chain, including those that fell back from a requested AI option.
 
-- Enhance checks each MP3, AAC and Opus track's peaks before saving. It can retry that track once
-  within a 2 dB total turn-down from the master. Any remaining miss or failed measurement names the
-  affected track in the warning.
+- Enhance checks the peaks of each MP3, AAC and Opus track. All tracks keep the gain of their
+  format’s full export, so neighboring tracks stay at the same relative level. One line reports
+  how many tracks passed, went over the limit or could not be checked.
 
 - Settings groups controls under General, Output defaults, Downloads, AI add-on, Storage and Help.
   Help keeps maintenance and diagnostics in a disclosure. Details on a missing audio engine opens its diagnostic.
@@ -51,8 +51,9 @@
   and Opus 1.6 dB quieter than the WAV (measured loudness); now MP3 is as loud, AAC 0.7 dB and Opus 1.1 dB
   quieter. Check judges a lossy file's peaks by the same limit.
 - Check reports measurements with consistent words for loudness and loudness range. It flags runs near
-  full scale as possible clipping and identifies above-full-scale samples in the floating-point analysis copy.
-  Its frequency-range estimate counts highs in both channels, including opposite-phase highs.
+  full scale as possible clipping and reports above-full-scale samples in the decoded audio.
+  Its frequency-range estimate uses the stronger mid or side power at each frequency. This keeps
+  opposite-phase highs visible while retaining sensitivity to cutoffs followed by low-level stereo noise.
 - WMA Lossless sources count as lossless: in Enhance, a dull top end can get the gentle high-end lift, as
   with FLAC or WAV.
 

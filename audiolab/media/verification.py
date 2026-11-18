@@ -1,6 +1,8 @@
 """Measure the audio decoded from a finished export in one FFmpeg pass."""
 
 import re
+from collections import Counter
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Literal, TypedDict
 
@@ -30,6 +32,23 @@ class ExportMeasurement(TypedDict):
     ceiling_met: bool
     tolerance_db: float
     message: str | None
+
+
+def track_check_summary(tracks: Iterable[dict]) -> tuple[str | None, bool]:
+    """One line for all measured tracks and whether it needs attention. Older cuts have no check."""
+    counts = Counter(check.get('status') for track in tracks if isinstance(check := track.get('verification'), dict))
+    parts = [
+        f'{counts[status]} {label}'
+        for status, label in (
+            ('verified', 'within the peak limit'),
+            ('warning', 'over the peak limit'),
+            ('unverified', 'could not be checked'),
+        )
+        if counts[status]
+    ]
+    if not parts:
+        return None, False
+    return 'Track checks — ' + ', '.join(parts) + '.', bool(counts['warning'] or counts['unverified'])
 
 
 def _read_peak(stderr: str, meter: str) -> float | None:

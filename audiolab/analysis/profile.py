@@ -152,15 +152,20 @@ def detect_bandwidth(x: np.ndarray, sr: int = 48000, source_rate: int | None = N
     """Where does the audio content actually stop?
 
     Looks for a sharp drop above 4 kHz, otherwise estimates the upper end
-    of the range. Each channel's power counts even if it cancels in the mid
-    signal. A spectrum with only a few tones has no range to judge.
+    of the range. At each frequency the stronger of mid and side counts, so
+    opposite-phase content survives. A spectrum with only a few tones has no range to judge.
     """
-    freqs, _, psd = average_psd(x, sr, channels=True)
-    return _bandwidth_from_psd(freqs, psd, sr, source_rate)
+    freqs, mid, channels = average_psd(x, sr, channels=True)
+    return _bandwidth_from_psd(freqs, mid, channels, sr, source_rate)
 
 
-def _bandwidth_from_psd(freqs: np.ndarray, psd: np.ndarray, sr: int, source_rate: int | None = None) -> dict[str, Any]:
-    """Bandwidth verdict from an existing Welch spectrum (same rules as detect_bandwidth)."""
+def _bandwidth_from_psd(
+    freqs: np.ndarray, mid: np.ndarray, channels: np.ndarray, sr: int, source_rate: int | None = None
+) -> dict[str, Any]:
+    """Bandwidth verdict from the existing Welch spectra."""
+    # Mean L/R power is mid power + side power, for mid=(L+R)/2 and side=(L-R)/2.
+    # Taking the stronger one preserves wide highs without adding the two uncorrelated noise floors.
+    psd = np.maximum(mid, channels - mid)
     db = 10.0 * np.log10(psd + 1e-20)
     band = (freqs > 100.0) & (freqs < min(20000.0, sr / 2))
     if not band.any() or float((db[band] > db.max() - 50.0).mean()) < 0.01:
@@ -409,7 +414,7 @@ def profile(
     check()
     freqs, psd, psd_ch = average_psd(x, sr, channels=True)
     bands = octave_bands_db(freqs, psd)
-    bandwidth = _bandwidth_from_psd(freqs, psd_ch, sr, source_rate)
+    bandwidth = _bandwidth_from_psd(freqs, psd, psd_ch, sr, source_rate)
     mud_est = (bands['250'] + bands['500']) / 2.0
     broadband = sum(bands.values()) / len(bands)
     mud_excess = round(mud_est - broadband, 2)
@@ -439,8 +444,8 @@ def profile(
         alerts.append(
             {
                 'level': 'info',
-                'title': 'Floating-point samples above full scale',
-                'message': f'The loudest sample in the measurement reaches {20 * math.log10(sample_peak):+.2f} dBFS.',
+                'title': 'Measured samples above full scale',
+                'message': f'The loudest sample in the decoded audio reaches {20 * math.log10(sample_peak):+.2f} dBFS.',
             }
         )
     limit = HOT_PEAK_DBTP if peak_limit_dbtp is None else peak_limit_dbtp

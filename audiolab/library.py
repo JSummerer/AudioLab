@@ -40,6 +40,7 @@ from typing import Any
 from . import adjust_drafts, processing, trash
 from .errors import AudioLabError
 from .media.export import FORMATS
+from .media.verification import track_check_summary
 from .native_inputs import source_path
 from .settings import SETTINGS
 from .system import replace_file
@@ -667,6 +668,9 @@ def public(entry: dict[str, Any], job_exists: bool = False) -> dict[str, Any]:
     }
     if entry.get('task') == 'enhance':
         out['adjust_quality'] = processing.adjust_quality(entry.get('processing'))
+        track_note, _ = track_check_summary(f for f in files if f.get('kind') == 'track')
+        if track_note:
+            out['track_check_summary'] = track_note
     if entry.get('tone_timeline'):
         out['has_tone_timeline'] = True  # the data: GET /api/library/{id}/tone-timeline (keeps the list small)
     if entry.get('overview') and kept:

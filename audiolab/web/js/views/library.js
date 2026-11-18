@@ -483,7 +483,8 @@ function processingDetails(entry, files, open) {
           [h('dt', null, label), h('dd', { class: 'num' }, `${fmt(v, 2)}${unit}`)])) : null) : null,
       processingMeasurements(p?.metrics, section),
       checked.length ? section('Export checks',
-        h('ul', { class: 'plain-list' }, checked.map((f) => exportCheck(f)))) : null,
+        h('ul', { class: 'plain-list' }, checked.filter((f) => f.kind !== 'track').map(exportCheck),
+          entry.track_check_summary ? h('li', null, entry.track_check_summary) : null)) : null,
       selected || overrides.length ? section('Requested settings',
         selected ? h('p', null, selected) : null,
         overrides.length ? h('dl', { class: 'facts' }, overrides.map(([label, value]) =>

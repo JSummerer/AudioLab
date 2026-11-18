@@ -522,38 +522,53 @@ const entry = (id, group = 'file:test', duration_s = 20) => ({ id, group, durati
   original: { kept: true }, loudness: { original_lufs: -20, result_lufs: -14 }, compare_file_id: 'f0',
   files: [{ id: 'f0', name: 'fixture.wav', label: 'WAV', kind: 'enhanced', mime: 'audio/wav', playable: true, exists: true }] });
 
-test('a job and its Library card report track checks once alongside a passing full export', async (t) => {
+test('a job and its Library card group track checks and identify each track needing attention', async (t) => {
   const result = entry('tracks');
   result.job_exists = false;
-  result.files[0].verification = { status: 'verified', ceiling_met: true };
-  const warning = { status: 'warning', ceiling_met: false, true_peak_dbtp: 0.8, ceiling_dbtp: -0.1 };
-  const group = 'Track checks — 2 over the peak limit.';
+  const passed = { status: 'verified', ceiling_met: true };
+  const over = { status: 'warning', ceiling_met: false, true_peak_dbtp: 0.8, ceiling_dbtp: -0.1 };
+  const unchecked = { status: 'unverified', ceiling_met: null, true_peak_dbtp: null };
+  const group = 'Track checks — 1 within the peak limit, 1 over the peak limit, 1 could not be checked.';
+  result.files[0].verification = passed;
   result.track_check_summary = group;
   result.files.push(
-    { id: 'f1', name: '01 - Opening.m4a', label: '01 · Opening', track: 1, kind: 'track', exists: false, verification: warning },
-    { id: 'f2', name: '02 - Loud cut.m4a', label: '02 · Loud cut', track: 2, kind: 'track', exists: true, verification: warning },
+    { id: 'f1', name: '01 - Opening.m4a', label: '01 · Opening', track: 1, kind: 'track', exists: false, verification: unchecked },
+    { id: 'f2', name: '02 - Loud cut.m4a', label: '02 · Loud cut', track: 2, kind: 'track', exists: true, verification: over },
+    { id: 'f3', name: '03 - Quiet.m4a', label: '03 · Quiet', track: 3, kind: 'track', exists: true, verification: passed },
+    { id: 'f4', name: '04 - Older.m4a', label: '04 · Older', track: 4, kind: 'track', exists: true },
   );
 
   const { card } = await librarySetup(t, [result]);
   const details = card(result.id).querySelector('.lib-processing');
   assert.equal(details.querySelector('summary').textContent, 'Processing details · Export warning');
-  const checks = details.querySelectorAll('li').map((row) => row.textContent);
-  assert.equal(checks.length, 2);
-  assert.match(checks[0], /WAV — Peak within its limit/);
-  assert.equal(checks[1], group);
-  assert.doesNotMatch(details.textContent, /02 · Loud cut|01 · Opening/);
+  assert.deepEqual(details.querySelectorAll('li').map((row) => row.textContent), [
+    'WAV — Peak within its limit', group,
+    '01 · Opening — Could not check the saved file',
+    '02 · Loud cut — Peak above its limit (0.80 dBTP · limit −0.10 dBTP)',
+  ]);
 
+  // Job files carry their own warning text. Library entries keep the measurements alone.
+  const messages = {
+    f1: 'The AAC track “01 - Opening.m4a” was saved, but its loudness and peaks could not be verified.',
+    f2: 'The AAC track “02 - Loud cut.m4a” goes over the limit for lossy files (+0.80 dBTP after saving; limit -0.10 dBTP).',
+  };
   const { doneView } = await import('../../audiolab/web/js/views/job/results.js');
   const job = { id: 'finished', task: 'enhance', status: 'done', source: {}, options: {}, result: {
-    files: result.files.map((f) => f.kind === 'track' ? { ...f, group: 'tracks' } : f),
+    files: result.files.map((f) => f.kind === 'track' ? { ...f, group: 'tracks',
+      verification: f.verification && { ...f.verification, message: messages[f.id] || null } } : f),
     warnings: [group],
   } };
+  const page = new FakeNode('main');
   const cleanups = [];
-  const page = doneView(job, { onCleanup: (fn) => cleanups.push(fn) }).map((node) => node.textContent).join(' ');
+  page.append(...doneView(job, { onCleanup: (fn) => cleanups.push(fn) }));
   cleanups.forEach((fn) => fn());
-  assert.equal(page.split(group).length, 2);
-  assert.doesNotMatch(page, /its peaks go over the limit/);
-  assert.match(page, /peaks stay under the limit/);
+  assert.equal(page.textContent.split(group).length, 2);
+  assert.match(page.querySelector('.file-row').textContent, /peaks stay under the limit/);
+  assert.ok(page.querySelector('.is-missing').textContent.includes(messages.f1));
+  const tracks = page.querySelectorAll('.track-row');
+  assert.equal(tracks.length, 3);
+  assert.match(tracks[0].textContent, /02 - Loud cut.m4a” goes over the limit/);
+  for (const row of tracks.slice(1)) assert.equal(row.querySelector('small'), null);
 });
 
 test('Redo as uses the resolved Auto recipe to preserve only the same AI action', async (t) => {

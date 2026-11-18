@@ -14,7 +14,8 @@
 
 - Enhance checks the peaks of each MP3, AAC and Opus track. All tracks keep the gain of their
   format’s full export, so neighboring tracks stay at the same relative level. One line reports
-  how many tracks passed, went over the limit or could not be checked.
+  how many tracks passed, went over the limit or could not be checked. The job page and Library
+  also identify each track that exceeded the limit or could not be checked.
 
 - Settings groups controls under General, Output defaults, Downloads, AI add-on, Storage and Help.
   Help keeps maintenance and diagnostics in a disclosure. Details on a missing audio engine opens its diagnostic.

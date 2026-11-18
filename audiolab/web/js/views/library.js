@@ -22,7 +22,7 @@ import {
 } from '../compare.js';
 import { adjustLink, adjustUnavailable } from './adjust.js';
 import { PROCESSING_LABELS, LIGHT_KEYS, enhanceAIChoice } from './new/state.js';
-import { loudnessWord, peakVerdict } from './job/readings.js';
+import { loudnessWord, peakVerdict, trackCheckNeedsAttention } from './job/readings.js';
 import { eqSummary } from '../eq.js';
 import { sectionSummary } from '../section-eq.js';
 
@@ -484,7 +484,8 @@ function processingDetails(entry, files, open) {
       processingMeasurements(p?.metrics, section),
       checked.length ? section('Export checks',
         h('ul', { class: 'plain-list' }, checked.filter((f) => f.kind !== 'track').map(exportCheck),
-          entry.track_check_summary ? h('li', null, entry.track_check_summary) : null)) : null,
+          entry.track_check_summary ? h('li', null, entry.track_check_summary) : null,
+          checked.filter((f) => f.kind === 'track' && trackCheckNeedsAttention(f)).map(exportCheck))) : null,
       selected || overrides.length ? section('Requested settings',
         selected ? h('p', null, selected) : null,
         overrides.length ? h('dl', { class: 'facts' }, overrides.map(([label, value]) =>

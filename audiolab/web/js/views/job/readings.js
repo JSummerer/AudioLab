@@ -7,6 +7,11 @@ import { block } from '../../ui.js';
 import { toneChart } from '../../tone-chart.js';
 import { audioLine, streamLine } from '../../compare.js';
 
+export function trackCheckNeedsAttention(file) {
+  const status = file.verification?.status;
+  return status === 'warning' || status === 'unverified';
+}
+
 export function loudnessWord(l) {
   if (l == null) return '–';
   if (l >= -9) return 'Very loud';

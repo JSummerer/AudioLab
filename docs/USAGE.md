@@ -160,7 +160,9 @@ means a file is still over its limit or could not be measured; try a lower ceili
 when more headroom is needed. Check judges a lossy file's peaks by the same limit.
 Enhance also checks each MP3, AAC or Opus track. Tracks keep the gain of their format's full export.
 Checking takes one extra decode per lossy track. A single line reports how many passed, went over
-the limit or could not be measured. Lossless track cuts and Save / Convert cuts have no individual check.
+the limit or could not be measured. For a track that went over the limit or could not be measured,
+read its note on the job page or under **Export checks** in the Library. Lossless track cuts and
+Save / Convert cuts have no individual check.
 
 Master readings describe the audio before encoding. **Show details** adds the LUFS/dBTP readings and
 the technical figures behind each line of **What we did**. Library's

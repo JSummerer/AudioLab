@@ -15,6 +15,7 @@ import { PROCESSING_LABELS, qualityAfterRecipeChange } from '../new/state.js';
 import { footer, journalBlock } from './status.js';
 import {
   summaryBlock, musicFacts, metricsBlock, sourceLine, decisionsBlock, spectrogramBlock, analyzeResult, toneBlock, streamNote,
+  plainLine, trackCheckNeedsAttention,
 } from './readings.js';
 
 const isTrack = (f) => f.group === 'tracks';
@@ -100,7 +101,7 @@ function filesBlocks(job, r, ctx) {
   if (!all.length) out.push(block('Your files', h('p', { class: 'muted' }, 'No files were produced.'), foot));
   else if (files.length) out.push(h('section', { class: 'block job-files' }, h('h2', { class: 'block-title' }, 'Your files'), list, foot));
   if (tracks.length) {
-    const t = trackRows(job.id, tracks.filter(exists), { download: !local });
+    const t = trackRows(job.id, tracks.filter(exists), { download: !local, checkNote: trackCheckNote });
     const gone = tracks.filter((f) => !exists(f));
     ctx.onCleanup(() => t.destroy());
     out.push(h('details', { class: 'block tracks-block job-files', open: true },
@@ -130,11 +131,18 @@ function fileRow(job, f) {
       // Narrow windows show the size after the name instead of in its own column.
       h('span', { class: 'file-name', title: f.name }, f.name,
         there && f.size_bytes ? h('span', { class: 'file-size-inline' }, ` · ${fmtBytes(f.size_bytes)}`) : null),
-      !isTrack(f) && f.verification ? h('span', { class: 'file-name' }, exportCheckText(f.verification)) : null),
+      isTrack(f) ? trackCheckNote(f) : f.verification ? h('span', { class: 'file-name' }, exportCheckText(f.verification)) : null),
     h('span', { class: 'file-size' }, there ? fmtBytes(f.size_bytes) : ''),
     download
       ? h('a', { class: 'btn btn-ghost btn-sm', href: fileUrl(job.id, f.id), download: f.name, 'aria-label': `Download ${f.label || f.name}` }, icon('download', 14), h('span', { class: 'dl-text' }, 'Download'))
       : there ? null : h('span', { class: 'lib-missing' }, icon('alert', 14), 'Moved or deleted'));
+}
+
+function trackCheckNote(file) {
+  if (!trackCheckNeedsAttention(file)) return null;
+  const check = file.verification;
+  const text = check.message ? (showDetails() ? check.message : plainLine(check.message)) : exportCheckText(check);
+  return h('small', { class: 'muted' }, text);
 }
 
 /** The peak check of a saved file (docs/API.md "verification"), in plain words; the loudness and

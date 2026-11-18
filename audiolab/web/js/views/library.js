@@ -979,11 +979,11 @@ function trashSwitch(label, help) {
 }
 
 /** What the Trash did, as a toast line; files it couldn't move get their own warning. */
-function trashResult(res, done, entries) {
+function trashResult(res, done) {
   const moved = res?.trashed?.length || 0;
   const failed = res?.trash_failed || [];
-  const keptOutside = entries.some((entry) => entry.files?.some((f) => f.exists && f.can_trash === false));
-  const keptNote = keptOutside ? ' Files located outside the output folder stayed in place.' : '';
+  const kept = res?.located_files_kept || 0;
+  const keptNote = kept ? ` ${kept} located file${kept === 1 ? '' : 's'} outside the output folder stayed in place.` : '';
   toast(`${done}${moved ? ` ${moved} file${moved === 1 ? '' : 's'} moved to the Trash.` : ''}${keptNote}`, { kind: 'ok' });
   if (failed.length) {
     const names = failed.slice(0, 3).join(', ') + (failed.length > 3 ? ` and ${failed.length - 3} more` : '');
@@ -1013,7 +1013,7 @@ async function removeEntry(entry) {
   const toTrash = !!trash?.on();
   try {
     const res = await api(`${libPath(entry.id)}${toTrash ? '?trash_files=1' : ''}`, { method: 'DELETE' });
-    trashResult(res, toTrash ? 'Removed from the Library.' : 'Removed from the Library. Your files stay where they are.', toTrash ? [entry] : []);
+    trashResult(res, toTrash ? 'Removed from the Library.' : 'Removed from the Library. Your files stay where they are.');
   } catch (e) {
     toastError(e); // 409: the Trash isn't available here, nothing was removed
   }
@@ -1039,7 +1039,7 @@ async function keepOnly(entry) {
   try {
     const res = await api(libPath(entry.id, 'keep-only'), { method: 'POST', json: { trash_files: !!trash?.on() } });
     const removed = res?.removed ?? n;
-    trashResult(res, `Kept this version. ${removed} other${removed === 1 ? '' : 's'} removed from the Library.`, others);
+    trashResult(res, `Kept this version. ${removed} other${removed === 1 ? '' : 's'} removed from the Library.`);
   } catch (e) {
     toastError(e);
   }

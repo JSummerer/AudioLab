@@ -335,7 +335,7 @@ def locate_file(request: Request, state: State, entry_id: str, file_id: str, bod
     if not isinstance(body, dict) or body.keys() != {'native_file'}:
         raise HTTPException(400, 'Choose the missing file in the app window.')
     picked = native_selection(request, state, body['native_file'], 'locate')
-    entry = library.locate_file(entry_id, file_id, picked.checked_path())
+    entry = library.locate_file(entry_id, file_id, picked)
     if entry is None:
         raise HTTPException(404, 'This file is no longer in the Library.')
     state.forget('storage')

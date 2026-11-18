@@ -37,8 +37,9 @@
   in Settings, and pick files to add to the Library. New reads files chosen in the app where they
   are, so they need no upload and the browser upload size limit does not apply. A folder adds up
   to 50 supported files at its top level. Choosing a single file shows Tracks for long recordings
-  when its duration can be read. A finished render stays available in the job if its source moves or
-  changes. AudioLab reports when it could not save a Library entry or keep the original.
+  when its duration can be read. AudioLab checks for file changes while reading a picked source.
+  After a render finishes, its files stay available in the job even if its source moves or changes.
+  AudioLab reports when it could not save a Library entry or keep the original.
 - If the app window fails to open, AudioLab stops its local server and reports the failure.
 
 - Library lookups reject a damaged record whose ID differs from its filename.

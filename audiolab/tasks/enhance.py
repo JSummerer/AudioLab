@@ -287,7 +287,7 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
     tags = common.tags_for(
         acq, f' {common.version_label("Enhanced", version)}', common.made_by(recipe.name, params.target_lufs)
     )
-    cover = common.cover_art(ctx, acq, source)
+    cover = common.cover_art(ctx, acq)
     rate = params.sample_rate if params.sample_rate != 48000 else None
     split = bool(opts.get('split_tracks'))
 

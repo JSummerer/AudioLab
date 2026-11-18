@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from audiolab import library, system, tasks
 from audiolab.api import create_app
+from audiolab.context import TaskContext
 from audiolab.errors import AudioLabError
 from audiolab.jobs import JobManager
 from audiolab.media import export, ffmpeg, proc
@@ -245,6 +246,32 @@ def test_finished_render_survives_replacement_of_picked_source(native, tmp_path,
         mgr.shutdown()
 
 
+@pytest.mark.parametrize('task', ['analyze', 'download'])
+def test_picked_file_replaced_after_acquisition_is_never_processed(native, tmp_path, monkeypatch, task):
+    path = tmp_path / 'Selected.wav'
+    other = tmp_path / 'Unrelated.wav'
+    samples = np.arange(48000) / 48000
+    for file, frequency in [(path, 440), (other, 880)]:
+        sf.write(file, 0.2 * np.sin(2 * np.pi * frequency * samples), 48000)
+    selection = pick(native, 'files', path)['files'][0]['selection']
+    source = native.get(selection, 'job').source()
+    options = tasks.validate(task, {'format': 'wav'}, source)
+    acquire = common.acquire
+
+    def replace_after_acquisition(*args, **kwargs):
+        acq = acquire(*args, **kwargs)
+        other.replace(path)
+        return acq
+
+    monkeypatch.setattr(common, 'acquire', replace_after_acquisition)
+    job = SimpleNamespace(task=task, options=options, source=source)
+    ctx = TaskContext('test', tmp_path / 'work', options, tasks.stages_for(job))
+    with pytest.raises(AudioLabError, match='changed or was replaced'):
+        tasks.run_job(job, ctx)
+    assert not list((tmp_path / 'out').rglob('*.wav'))
+    assert not common.reference_path(ctx).exists()
+
+
 @pytest.mark.parametrize('fmt', ['original', 'video'])
 def test_download_run_refuses_to_move_a_local_source(tmp_path, fmt, monkeypatch):
     path = tmp_path / 'Source.wav'
@@ -321,20 +348,30 @@ def test_locate_updates_library_only_and_protects_result_outside_output_root(nat
 
         rewrite_in_place(new, b'audio with edited tags')
         assert client.get(media_url).status_code == 410
+        stale = picked_location(native, new)
+        rewrite_in_place(new, b'final tags')
+        with pytest.raises(AudioLabError, match='changed or was replaced'):
+            library.locate_file(job.id, 'f0', stale)
         key = pick(native, 'locate', new)['files'][0]['selection']
         refreshed = client.post(endpoint, json={'native_file': key}, headers=headers)
         assert refreshed.status_code == 200
         assert refreshed.json()['files'][0]['can_trash'] is False
-        assert client.get(media_url).content == b'audio with edited tags'
+        assert client.get(media_url).content == b'final tags'
 
         removed = client.delete(entry_url, params={'trash_files': True}).json()
+        assert removed['located_files_kept'] == 1
         assert removed['trashed'] == [] and new.is_file() and trashed == []
         assert client.post(endpoint, json={'native_file': key}, headers=headers).status_code == 404
     finally:
         client.close()
 
 
-def test_located_file_inside_root_can_be_trashed_but_replacement_cannot(tmp_path, monkeypatch):
+def picked_location(native, path):
+    key = pick(native, 'locate', path)['files'][0]['selection']
+    return native.get(key, 'locate')
+
+
+def test_located_file_inside_root_can_be_trashed_but_replacement_cannot(native, tmp_path, monkeypatch):
     first = tmp_path / 'out' / 'First.wav'
     second = first.with_name('Second.wav')
     _, first_job = finished_file(first)
@@ -344,21 +381,46 @@ def test_located_file_inside_root_can_be_trashed_but_replacement_cannot(tmp_path
     trashed = []
     monkeypatch.setattr(library.trash, 'move_to_trash', trashed.append)
 
-    assert library.locate_file(first_job.id, 'f0', first_moved)
-    assert library.locate_file(second_job.id, 'f0', second_moved)
+    assert library.locate_file(first_job.id, 'f0', picked_location(native, first_moved))
+    assert library.locate_file(second_job.id, 'f0', picked_location(native, second_moved))
     first_moved.rename(first.with_name('Kept.wav'))
     first_moved.write_bytes(b'unrelated replacement')
 
     entry = library.get(first_job.id)
     assert not library.public(entry)['files'][0]['exists']
     with pytest.raises(AudioLabError):
-        library.locate_file(first_job.id, 'f0', first_moved)
+        library.locate_file(first_job.id, 'f0', picked_location(native, first_moved))
     assert library.remove(first_job.id, trash_files=True)['trash_failed'] == [first_moved.name]
     assert library.remove(second_job.id, trash_files=True)['trashed'] == [second_moved.name]
     assert trashed == [second_moved]
 
 
-def test_locate_refuses_legacy_entry_without_independent_file_identity(tmp_path):
+def test_keep_only_reports_external_files_that_actually_stayed(native, tmp_path, monkeypatch):
+    # An imported version can share the physical file of a relocated version. Another file has the same name.
+    out = tmp_path / 'out'
+    _, keep = finished_file(out / 'Keep.wav')
+    for name in ('Shared', 'Outside'):
+        original = out / f'{name}.wav'
+        _, job = finished_file(original)
+        folder = tmp_path / name
+        folder.mkdir()
+        path = original.rename(folder / 'Mix.wav')
+        library.locate_file(job.id, 'f0', picked_location(native, path))
+    shared = tmp_path / 'Shared' / 'Mix.wav'
+    mgr = JobManager(runner=lambda *_: {}, stages_for=lambda *_: [])
+    imported = mgr.submit('import', {'kind': 'file', 'name': shared.name, 'path': str(shared)}, {})
+    imported.result = {'files': [{'id': 'f0', 'path': str(shared)}]}
+    assert library.record(imported)
+    bin_dir = tmp_path / 'test-trash'
+    bin_dir.mkdir()
+    monkeypatch.setattr(library.trash, 'move_to_trash', lambda p: p.rename(bin_dir / p.name))
+
+    result = library.keep_only(keep.id, trash_files=True)
+    assert result['trashed'] == ['Mix.wav'] and result['located_files_kept'] == 1
+    assert (bin_dir / shared.name).is_file() and (tmp_path / 'Outside' / 'Mix.wav').is_file()
+
+
+def test_locate_refuses_legacy_entry_without_independent_file_identity(native, tmp_path):
     old = tmp_path / 'out' / 'Master.wav'
     _, job = finished_file(old, task='import')
     entry = library.get(job.id)
@@ -371,7 +433,7 @@ def test_locate_refuses_legacy_entry_without_independent_file_identity(tmp_path)
 
     assert not library.public(entry)['files'][0]['locatable']
     with pytest.raises(AudioLabError, match='no saved identity') as exc:
-        library.locate_file(job.id, 'f0', candidate)
+        library.locate_file(job.id, 'f0', picked_location(native, candidate))
     assert exc.value.hints == ['Add the file to the Library again.']
 
 

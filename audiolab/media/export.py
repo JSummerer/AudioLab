@@ -617,6 +617,7 @@ def _transcode(
     check: Check | None = None,
     ceiling_dbtp: float | None = None,
     retry_lossy: bool = False,
+    check_source: Callable[[], None] | None = None,
 ) -> dict:
     """Convert `src` into format `fmt` at `dst`: {'path', 'verification', 'trim_db'}.
 
@@ -643,6 +644,8 @@ def _transcode(
     if dst.suffix.lower() != spec.ext:
         dst = dst.with_name(dst.name + spec.ext)
     dst.parent.mkdir(parents=True, exist_ok=True)
+    if check_source:
+        check_source()
     info = probe_media(src)
     if duration_s is None:
         duration_s = info.get('duration_s')
@@ -708,14 +711,20 @@ def _transcode(
 
     def encode(target: Path, art: bool, gain_db: float, step: Progress) -> bool:
         """Write `target`; False when the cover had to be left out."""
+        if check_source:
+            check_source()
         try:
             run_ffmpeg(build(art, target, gain_db), progress=step, duration_s=duration_s, what=f'{spec.label} export')
         except AudioLabError:
             if not art:
                 raise
             target.unlink(missing_ok=True)  # cover muxing failed: keep the audio, drop the art
+            if check_source:
+                check_source()
             run_ffmpeg(build(False, target, gain_db), progress=step, duration_s=duration_s, what=f'{spec.label} export')
             art = False
+        if check_source:
+            check_source()  # verify the source while this encode is still staged
         if not target.is_file() or target.stat().st_size == 0:
             raise AudioLabError(f'{spec.label} export produced an empty file.')
         return art
@@ -766,6 +775,7 @@ def export(
     sample_rate: int | None = None,
     check: Check | None = None,
     ceiling_dbtp: float | None = None,
+    check_source: Callable[[], None] | None = None,
 ) -> list[dict[str, object]]:
     """Write `master` in every requested format into `out_dir`.
 
@@ -786,6 +796,8 @@ def export(
     for s in specs:
         ext_count[s.ext] = ext_count.get(s.ext, 0) + 1
     base = sanitize_filename(basename, room=40)  # title + ' (Enhanced)', ' - Vocals' etc.
+    if check_source:
+        check_source()
     duration = probe_media(master).get('duration_s')
     outputs = []
     n = len(specs)
@@ -805,6 +817,7 @@ def export(
             check=check,
             ceiling_dbtp=ceiling_dbtp,
             retry_lossy=True,
+            check_source=check_source,
         )
         path = made['path']
         outputs.append(
@@ -834,6 +847,7 @@ def export_tracks(
     trim_db: float = 0.0,
     check: Check | None = None,
     ceiling_dbtp: float | None = None,
+    check_source: Callable[[], None] | None = None,
 ) -> list[dict[str, object]]:
     """Cut `src` into `tracks` ([{n, title, start_s, end_s}], see youtube.make_tracks) and
     save each one as 'NN - <title>.<ext>' in format `fmt`, turned down by `trim_db` like the full
@@ -848,7 +862,11 @@ def export_tracks(
     src, folder = Path(src), Path(folder)
     spec = resolve_format(fmt)
     check = check if spec.kind == 'lossy' else None
+    if check_source:
+        check_source()
     dur = probe_media(src).get('duration_s')
+    if check_source:
+        check_source()  # even a probe that finds no playable cuts must describe the chosen file
     todo = [t for t in tracks if dur is None or float(t['start_s']) < dur - 0.05]
     total = len(todo)
     width = max(2, len(str(total)))
@@ -885,6 +903,7 @@ def export_tracks(
             trim_db=trim_db,
             check=check,
             ceiling_dbtp=ceiling_dbtp,
+            check_source=check_source,
         )
         path = made['path']
         verification = made['verification']

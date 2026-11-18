@@ -41,7 +41,7 @@ from . import adjust_drafts, processing, trash
 from .errors import AudioLabError
 from .media.export import FORMATS
 from .media.verification import track_check_summary
-from .native_inputs import source_path
+from .native_inputs import Selection, source_path
 from .settings import SETTINGS
 from .system import replace_file
 from .util import FOLDER_JUNK, PLAYABLE_EXT, link_or_copy, media_type, sanitize_filename
@@ -427,7 +427,7 @@ def _stored_identity(item: dict[str, Any]) -> list[int] | None:
     return None
 
 
-def locate_file(entry_id: str, file_id: str, candidate: Path) -> dict[str, Any] | None:
+def locate_file(entry_id: str, file_id: str, picked: Selection) -> dict[str, Any] | None:
     """Relink a moved file or confirm an in-place edit to a previously selected file."""
     with _lock:
         entry = get(entry_id)
@@ -443,11 +443,11 @@ def locate_file(entry_id: str, file_id: str, candidate: Path) -> dict[str, Any] 
                 hints=['Add the file to the Library again.'],
             )
         previous = _resolve(entry, item.get('path'))
-        selected = _file_identity(candidate)
+        candidate = picked.checked_path()
+        selected = list(picked.identity)
         reconfirm = (
             candidate == previous
             and (item.get('_located') or item.get('_native_import'))
-            and selected is not None
             and selected[:2] == identity[:2]  # same device and inode; the user picked the edited file again
             and selected != identity
         )
@@ -818,15 +818,14 @@ def remove(entry_id: str, trash_files: bool = False) -> dict[str, Any] | None:
         if entry is None:
             return None
         others = [e for e in _all() if e.get('id') != entry_id]
-        trashed, failed = _trash_files([entry], others) if trash_files else ([], [])
+        outcome = _trash_files([entry], others) if trash_files else {'trashed': [], 'trash_failed': []}
         (SETTINGS.library_dir / f'{entry_id}.json').unlink(missing_ok=True)
         freed = _drop_unused_original(entry)
     return {
         'deleted': entry_id,
         'original_removed': freed is not None,
         'freed_bytes': freed or 0,
-        'trashed': trashed,
-        'trash_failed': failed,
+        **outcome,
     }
 
 
@@ -842,15 +841,15 @@ def keep_only(entry_id: str, trash_files: bool = False) -> dict[str, Any] | None
         dropped = [e for e in entries if e.get('group') == entry.get('group') and e.get('id') != entry_id]
         ids = {e.get('id') for e in dropped}
         remaining = [e for e in entries if e.get('id') not in ids]
-        trashed, failed = _trash_files(dropped, remaining) if trash_files else ([], [])
+        outcome = _trash_files(dropped, remaining) if trash_files else {'trashed': [], 'trash_failed': []}
         for e in dropped:
             (SETTINGS.library_dir / f'{e["id"]}.json').unlink(missing_ok=True)
         for e in dropped:  # after all of them are gone: a file they shared goes once
             _drop_unused_original(e)
-    return {'kept': entry_id, 'removed': len(dropped), 'trashed': trashed, 'trash_failed': failed}
+    return {'kept': entry_id, 'removed': len(dropped), **outcome}
 
 
-def _trash_files(entries: list[dict[str, Any]], remaining: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
+def _trash_files(entries: list[dict[str, Any]], remaining: list[dict[str, Any]]) -> dict[str, Any]:
     """Move the files of `entries` that are still there (results, tracks, saved cover, an imported
     file) to the system Trash, then their folders that are left empty. Returns the names of the
     files trashed and of those that couldn't be (they stay). Never touched: a file an entry in
@@ -865,6 +864,7 @@ def _trash_files(entries: list[dict[str, Any]], remaining: list[dict[str, Any]])
     used_folders = {_real(p) for e in remaining if (p := folder(e))} | {_real(SETTINGS.output_dir)}
     trashed: list[str] = []
     failed: list[str] = []
+    protected: set[Path] = set()  # an external location another removed entry might also reference
     folders: dict[Path, Path] = {}  # a folder that may go when empty -> its entry's output root
 
     def move(p: Path) -> bool:
@@ -884,13 +884,11 @@ def _trash_files(entries: list[dict[str, Any]], remaining: list[dict[str, Any]])
         own = folder(e) if not imported and root is not None else None
         for f in e.get('files') or []:
             p = file_path(e, f.get('id') or '')
-            if (
-                f.get('_keep_in_place')
-                or p is None
-                or not os.path.lexists(p)
-                or _real(p) in in_use
-                or _inside(_real(p), data, strict=False)
-            ):
+            if f.get('_keep_in_place'):
+                if p is not None and _file_current(f, p):
+                    protected.add(p)
+                continue
+            if p is None or not os.path.lexists(p) or _real(p) in in_use or _inside(_real(p), data, strict=False):
                 continue
             # Never through or of a link: no link anywhere on an imported file's path (it was stored
             # resolved), and an AudioLab output lies in its root with no link on the way (a folder or the
@@ -900,6 +898,7 @@ def _trash_files(entries: list[dict[str, Any]], remaining: list[dict[str, Any]])
                 failed.append(p.name)
                 continue
             trashed.append(p.name)
+            protected.discard(p)
             if own is not None and p.parent.is_relative_to(own):
                 folders[p.parent] = root  # its folder, or Tracks/ inside it
         if own is not None:
@@ -909,7 +908,8 @@ def _trash_files(entries: list[dict[str, Any]], remaining: list[dict[str, Any]])
             continue
         if _empty_folder(d):
             move(d)  # a folder that stays is not worth a message: its files are what the user asked about
-    return trashed, failed
+    kept = sum(p.is_file() for p in protected)
+    return {'trashed': trashed, 'trash_failed': failed, **({'located_files_kept': kept} if kept else {})}
 
 
 def _plain_inside(p: Path, root: Path) -> bool:

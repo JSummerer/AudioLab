@@ -71,7 +71,9 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
     spectro = common.previews_dir(ctx) / 'spectrogram.png'
     media = {}
     try:
+        acq.check_source()
         ffmpeg.render_spectrogram(acq.path, spectro, progress=p.sub(70, 100))
+        acq.check_source()
         media['spectrogram'] = str(spectro)
     except Exception as e:  # a missing picture must not fail the analysis
         ctx.note('warning', f'Spectrogram skipped: {e}')

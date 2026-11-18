@@ -82,7 +82,9 @@ confirm the change. Its saved measurements still describe the original run.
 For older entries, or files copied to another drive, use **Add a file…** to add them again.
 Locate updates playback and comparison in the Library. Use **Show folder** beside a located file to
 open its current folder. Job history stays as recorded. A file located
-outside its recorded output root stays in place even when you opt to move other files to the Trash.
+outside its recorded output folder stays in place when removing its located version. If you also
+imported the same file directly, opting to trash the import can move it. The removal message reports
+how many located files stayed.
 
 For links, the YouTube sign-in (Settings → Downloads) is used only when YouTube refuses a
 video without it. YouTube can block accounts that download a lot; a spare Google account is safer.

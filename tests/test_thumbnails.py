@@ -152,7 +152,7 @@ def test_thumbnail_midstream_cancel_propagates_and_cleans_up(tmp_path, monkeypat
         elif entrypoint == 'best_effort':
             youtube.download_thumbnail(source['thumbnail'], ctx.work_dir / 'cover.jpg', ctx.progress)
         elif entrypoint == 'cover_art':
-            common.cover_art(ctx, acquired, source)
+            common.cover_art(ctx, acquired)
         else:
             common.cover_file(ctx, source, acquired, tmp_path / 'out', 0)
     assert response.read_calls == 1

@@ -673,7 +673,7 @@ def test_cover_art_takes_over_an_uploads_picture(tmp_path):
     for opts, expect in [({'embed_cover': True}, 'taken over'), ({'embed_cover': False}, None)]:
         ctx = TaskContext('t', tmp_path / f'job{len(opts)}{expect}', opts, [('acquire', 'Getting audio', 1)])
         acq = common.acquire(ctx, source, ctx.stage('acquire'), task='enhance')
-        cover = common.cover_art(ctx, acq, source)
+        cover = common.cover_art(ctx, acq)
         if expect:
             info = ffmpeg.probe_media(cover)
             assert (info['video_codec'], info['width']) == ('mjpeg', 1400)
@@ -683,7 +683,7 @@ def test_cover_art_takes_over_an_uploads_picture(tmp_path):
     export.cover_jpeg(art, own)
     ctx = TaskContext('t', tmp_path / 'job_own', {'embed_cover': False}, [('acquire', 'Getting audio', 1)])
     acq = common.acquire(ctx, {**source, '_cover': str(own)}, ctx.stage('acquire'), task='enhance')
-    assert common.cover_art(ctx, acq, source) == own  # an own picture is always used
+    assert common.cover_art(ctx, acq) == own  # an own picture is always used
 
 
 def test_save_cover_option_keeps_the_full_size_picture(tmp_path):

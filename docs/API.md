@@ -602,8 +602,9 @@ For Library result files, `locatable` reflects whether the record has a saved fi
 The desktop can relink a missing file after a same-drive move or rename, including imported files recorded
 with an identity. A new selection can confirm an edit in place to a located or natively imported
 file at its recorded path if its device and inode still match. Historical job measurements stay as recorded.
-A located file has `located: true`. An external relocation sets `can_trash: false`, and Remove and Keep only leave that file
-in place. The file's original job record is unaffected.
+A located file has `located: true`. An external relocation sets `can_trash: false`. When Remove
+or Keep only sends files to the Trash, its optional `located_files_kept` counts distinct
+externally located files that stayed. A separately imported version can also reference the same file. The file's original job record is unaffected.
 New Enhance entries retain `processing: {requested, resolved, applied, metrics}` after job removal.
 `requested` holds validated recipe, quality, formats, advanced settings and cover/split switches;
 `resolved` holds `{recipe, params, decisions}` and, when available, `bandwidth`

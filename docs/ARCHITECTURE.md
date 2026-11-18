@@ -84,8 +84,9 @@ the same secret. Only desktop-server pages disallow embedding and child frames. 
 immediate supported files by name, up to the same 50-file limit as the New list.
 
 Native New and Library import sources retain a private canonical path and a filesystem fingerprint
-(device, inode, size and nanosecond modification time). The job checks that fingerprint before processing and during
-Library publication. Imports also recheck it after the task because the file itself is the result.
+(device, inode, size and nanosecond modification time). The job checks that fingerprint when reading the picked input and during Library publication.
+Convert checks before publishing each staged encode. Enhance and Split continue from their verified
+work reference after decoding. Imports also recheck it after the task because the file itself is the result.
 A completed render stands on its own. If Library publication detects a changed source, the job
 finishes with its output files and a warning that the Library entry could not be added.
 Enhance copies its native original and verifies the staged bytes against the source hash before publishing.

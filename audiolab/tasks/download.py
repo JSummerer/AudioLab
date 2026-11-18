@@ -61,7 +61,8 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
     split = ctx.options.get('split_tracks')
     untouched = fmt in ('original', 'video')
     # None: no picture at all — "Add cover art" off also keeps a converted file's own picture out
-    cover = common.cover_art(ctx, acq, source) if split or not untouched else None
+    cover = common.cover_art(ctx, acq) if split or not untouched else None
+    check_source = acq.check_source if acq.native_identity is not None else None
 
     p = ctx.stage('convert')
     src = acq.path
@@ -73,7 +74,16 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
         outputs = [{'path': str(dst), 'label': label, 'format': fmt, 'kind': 'video' if video else 'audio'}]
     else:
         key = export.DOWNLOAD_FORMATS[fmt]
-        outputs = export.export(acq.path, out_root, base, [key], tags=common.tags_for(acq), cover=cover, progress=p)
+        outputs = export.export(
+            acq.path,
+            out_root,
+            base,
+            [key],
+            tags=common.tags_for(acq),
+            cover=cover,
+            progress=p,
+            check_source=check_source,
+        )
         ctx.stage('save', 'Saving…')
 
     files = common.file_entries(outputs)
@@ -95,6 +105,7 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
             cover,
             ctx.stage('tracks', 'Splitting into tracks…'),
             start=len(files),
+            check_source=check_source,
         )
         summary.append(common.tracks_summary(acq, tracks, folder))
         if tracks and untouched:

@@ -1024,7 +1024,7 @@ test('Remove and Keep only ask first; files go to the Trash only when the user o
   const env = await librarySetup(t, [entry('one'), mixed]);
   const toasts = toastRoot(t);
   const calls = libraryWrites((path) => (path.endsWith('/keep-only') ? { kept: 'one', removed: 1, trashed: [], trash_failed: [] }
-    : { deleted: 'x', trashed: ['fixture.wav'], trash_failed: ['cover.jpg'] }));
+    : { deleted: 'x', trashed: ['fixture.wav'], trash_failed: ['cover.jpg'], located_files_kept: 1 }));
   named(env.card('one'), 'Remove from Library').click();
   let dlg = confirmIn('Remove from the Library?');
   const trash = find(dlg, (n) => n.getAttribute('role') === 'switch');
@@ -1040,7 +1040,7 @@ test('Remove and Keep only ask first; files go to the Trash only when the user o
   await flush();
   assert.deepEqual(calls.at(-1), ['/api/library/two?trash_files=1', 'DELETE', null]);
   assert.match(toasts.textContent, /Removed from the Library\. 1 file moved to the Trash\./);
-  assert.match(toasts.textContent, /Files located outside the output folder stayed in place\./);
+  assert.match(toasts.textContent, /1 located file outside the output folder stayed in place\./);
   assert.match(toasts.textContent, /Couldn’t move this file to the Trash, so it stays where it is: cover\.jpg\./);
   named(env.card('one'), 'Remove from Library').click();
   answerDialog(confirmIn('Remove from the Library?'), 'cancel');

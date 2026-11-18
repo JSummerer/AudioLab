@@ -74,6 +74,7 @@
 .tracks-block > summary .block-title::before { content: "▸ "; color: var(--ink-3); }
 .tracks-block[open] > summary .block-title::before { content: "▾ "; }
 .tracks-block[open] > summary { margin-bottom: var(--s-3); }
+.tracks-block small { overflow-wrap: anywhere; }
 .tracks-where { margin: calc(-1 * var(--s-1)) 0 var(--s-3); font-size: var(--fs-small); color: var(--ink-2); overflow-wrap: anywhere; }
 .tracks-block .tracks + .files { margin-top: 0; }
 

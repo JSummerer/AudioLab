@@ -5,7 +5,7 @@
 // /downloader; #/settings/output opens the folder field): the page scrolls there and
 // flashes it. Changes save immediately; a small "Saved ✓" next to the setting confirms it.
 // Paths show short, the full one on hover. A section with nothing to show hides, tab and all.
-import { IS_MAC, h, icon, clear, append, shortFolder, fmtBytes, fmtDurationWords } from '../dom.js';
+import { IS_MAC, h, icon, clear, shortFolder, fmtBytes, fmtDurationWords } from '../dom.js';
 import { api } from '../api.js';
 import { chooseNative, nativeWindow } from '../native.js';
 import { store, on, saveSettings, loadHealth, deviceLabel, appName, isFinished, forgetShown, formatInfo, ENHANCE_PRESETS } from '../store.js';
@@ -81,14 +81,16 @@ export const settingsView = {
 
     on('health', () => {
       if (!visible) return;
-      if (folderDraft == null) renderFiles(); // never redraw the folder field under the user's typing
-      if (defaultsWaiting) renderDefaults();
-      renderDownloads();
-      renderAi();
-      renderHelp();
+      keepReadingPosition(() => {
+        if (folderDraft == null) renderFiles(); // never redraw the folder field under the user's typing
+        if (defaultsWaiting) renderDefaults();
+        renderDownloads();
+        renderAi();
+        renderHelp();
+      });
     });
-    on('settings', () => { if (visible && !saving) { renderDefaults(); renderGeneral(); renderDownloads(); renderAi(); renderHelp(); renderStorage(); } });
-    on('jobs', () => { if (visible) renderStorageInfo(); });
+    on('settings', () => { if (visible && !saving) refreshSettings(); });
+    on('jobs', () => { if (visible && storage.data?.jobs_bytes != null) renderStorageInfo(); });
   },
 
   show(section, { same = false } = {}) {
@@ -204,11 +206,46 @@ function fill(key, ...nodes) {
 
 function fillRows(body, ...nodes) {
   const focusedId = body.contains(document.activeElement) ? document.activeElement.id : '';
-  append(clear(body), nodes);
+  body.replaceChildren(...nodes.flat(Infinity).filter(Boolean));
   if (focusedId) {
     const next = [focusedId, ...(FOCUS_NEXT[focusedId] || [])].map((id) => document.getElementById(id)).find(Boolean);
     next?.focus({ preventScroll: true });
   }
+}
+
+/** Keep the focused control in place while visible. After a manual scroll, use the
+ *  row below the sticky tabs instead. Only a synchronous redraw owns this snapshot. */
+function keepReadingPosition(draw) {
+  if (!visible || !scroller?.scrollTop) { draw(); return; }
+  const scrollTop = scroller.scrollTop;
+  const bounds = scroller.getBoundingClientRect();
+  const readingTop = Math.max(bounds.top, refs.nav.getBoundingClientRect().bottom);
+  let anchor = document.activeElement;
+  const rect = anchor?.id && settingsView.el.contains(anchor) && anchor.getBoundingClientRect();
+  if (!rect || rect.top < readingTop || rect.top >= bounds.bottom) {
+    const at = document.elementFromPoint(bounds.left + bounds.width / 2, readingTop + 1);
+    anchor = at?.closest('[data-setting], [id]') || null;
+  }
+  if (!settingsView.el.contains(anchor) || anchor === settingsView.el) anchor = null;
+  const before = anchor?.getBoundingClientRect().top;
+  draw();
+  const replacement = anchor?.id ? document.getElementById(anchor.id)
+    : anchor && settingsView.el.querySelector(`[data-setting="${anchor.dataset.setting}"]`);
+  // Storage totals can arrive above a deep link after it has already landed.
+  const after = replacement?.getBoundingClientRect();
+  const wanted = after && after.bottom > after.top ? scroller.scrollTop + after.top - before : scrollTop;
+  if (scroller.scrollTop !== wanted) scroller.scrollTop = wanted;
+}
+
+function refreshSettings() {
+  keepReadingPosition(() => {
+    renderDefaults();
+    renderGeneral();
+    renderDownloads();
+    renderAi();
+    renderHelp();
+    renderStorage();
+  });
 }
 
 /** Label + help + control. `setting` names the settings key it changes (for "Saved ✓").
@@ -241,12 +278,7 @@ async function save(patch, { quiet = false, mark = true, desktop = false } = {})
     return true;
   } catch (e) {
     if (!quiet) toastError(e);
-    renderDefaults();
-    renderGeneral();
-    renderDownloads();
-    renderAi();
-    renderHelp();
-    renderStorage();
+    refreshSettings();
     if (quiet) throw e;
     return false;
   } finally {
@@ -555,7 +587,7 @@ function appUpdateRow() {
 async function checkUpdates() {
   if (checkPending || store.health?.updates?.checking) return; // the button only looks disabled
   checkPending = true;
-  renderHelp();
+  keepReadingPosition(renderHelp);
   try {
     const res = await api('/api/system/check-updates', { method: 'POST' });
     if (res && typeof res === 'object' && store.health) store.health = { ...store.health, updates: res };
@@ -565,7 +597,7 @@ async function checkUpdates() {
     checkPending = false;
     await loadHealth().catch(() => {});
     if (visible) {
-      renderHelp();
+      keepReadingPosition(renderHelp);
       const u = appUpdateState(store.health);
       if (u) announce(`${appName()}: ${u.detail}.`);
     }
@@ -653,12 +685,12 @@ function downloaderRows() {
 async function downloaderAction(kind, run) {
   if (dlPending) return;
   dlPending = kind;
-  renderHelp();
+  keepReadingPosition(renderHelp);
   try { await run(); } catch (e) { toastError(e); }
   finally {
     await loadHealth().catch(() => {});
     dlPending = null;
-    if (visible) renderHelp();
+    if (visible) keepReadingPosition(renderHelp);
   }
 }
 
@@ -763,12 +795,12 @@ function aiButton(id, label, style, action) {
     onclick: async () => {
       if (aiPending) return;
       aiPending = true;
-      renderAi();
+      keepReadingPosition(renderAi);
       try { await action(); } catch (e) { toastError(e); }
       finally {
         await loadHealth().catch(() => {});
         aiPending = false;
-        if (visible) renderAi();
+        if (visible) keepReadingPosition(renderAi);
       }
     },
   }, label);
@@ -821,7 +853,10 @@ function scheduleStorageRefresh() {
 function renderStorageInfo() {
   const el = refs.storageInfo;
   const d = storage.data;
-  if (!d || d.jobs_bytes == null) { el.hidden = true; renderOriginalsInfo(d); return; }
+  if (!d || d.jobs_bytes == null) {
+    keepReadingPosition(() => { el.hidden = true; renderOriginalsInfo(d); });
+    return;
+  }
   const finished = [...store.jobs.values()].filter(isFinished).length;
   // Jobs finished or were cleared elsewhere: the sizes are stale, fetch them again.
   if (storage.finished != null && storage.finished !== finished) {
@@ -849,12 +884,14 @@ function renderStorageInfo() {
   const extra = [];
   if (finished && d.finished_bytes) extra.push(`Clearing frees about ${fmtBytes(d.finished_bytes)}.`);
   if (d.models_bytes) extra.push(`AI add-on / models: ${fmtBytes(d.models_bytes)}.`);
-  el.hidden = false;
-  clear(el).append(row(
-    `Job files: ${fmtBytes(d.jobs_bytes)} · ${finished} finished job${finished === 1 ? '' : 's'}`,
-    ['Logs, previews and copies kept for each job, in app data. Files in your output folder aren’t counted, and clearing jobs keeps them.', ...extra].join(' '),
-    btn));
-  renderOriginalsInfo(d);
+  keepReadingPosition(() => {
+    el.hidden = false;
+    fillRows(el, row(
+      `Job files: ${fmtBytes(d.jobs_bytes)} · ${finished} finished job${finished === 1 ? '' : 's'}`,
+      ['Logs, previews and copies kept for each job, in app data. Files in your output folder aren’t counted, and clearing jobs keeps them.', ...extra].join(' '),
+      btn));
+    renderOriginalsInfo(d);
+  });
 }
 
 /** What is kept now, with "Delete kept originals". Shown (without numbers) even when /api/storage
@@ -885,7 +922,7 @@ function renderOriginalsInfo(d) {
     });
   }
   const amount = !known ? '' : n ? `: ${fmtBytes(d.originals_bytes)} · ${n} file${n === 1 ? '' : 's'}` : ': none';
-  clear(refs.originalsInfo).append(row(
+  fillRows(refs.originalsInfo, row(
     `Kept originals${amount}`,
     'Copies of the originals of Enhance results, in app data. The Library needs them to compare a result at full length, and Adjust to rework it. Your output files aren’t touched.',
     del));

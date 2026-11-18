@@ -19,6 +19,7 @@
 
 - Settings groups controls under General, Output defaults, Downloads, AI add-on, Storage and Help.
   Help keeps maintenance and diagnostics in a disclosure. Details on a missing audio engine opens its diagnostic.
+  Status refreshes keep the current control or row in view, including when opening Settings from a link.
 - New uses the formats in Settings on a fresh load and keeps your choices between jobs. Enhance starts
   with MP3 alone on new installs. Split shows the full format names.
 - Changing a link in New waits for Load. Extra spaces around the same link keep it loaded. Editing a local file’s name preserves untouched embedded tags.

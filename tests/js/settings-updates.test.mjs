@@ -279,3 +279,59 @@ test('Settings groups, legacy links, focused controls and diagnostic disclosure 
   assert.equal(s.find('settings-downloads').hidden, true);
   assert.equal(s.run('reveal("cookies", {})'), false);
 });
+
+test('the first Settings link and a later manual scroll keep their place across asynchronous redraws', async () => {
+  const s = setup(packaged());
+  const events = {};
+  const health = Promise.withResolvers();
+  const storage = Promise.withResolvers();
+  const check = Promise.withResolvers();
+  s.context.on = (name, handler) => { events[name] = handler; };
+  s.context.loadHealth = async () => { await health.promise; events.health(); };
+  s.context.api = (path) => path === '/api/storage' ? storage.promise : check.promise;
+
+  // Model the two real changes in document order: storage totals appear above Help,
+  // and an available-update note appears above the engine. Coordinates are CSS fixtures.
+  const viewport = {
+    scrollTop: 0, clientHeight: 500, scrollHeight: 4000, addEventListener() {},
+    getBoundingClientRect: () => ({ top: 0, bottom: 500, left: 0, width: 800 }),
+  };
+  s.body.closest = () => viewport;
+  const make = s.context.h;
+  s.context.h = (...args) => {
+    const el = make(...args);
+    const pageTop = () => {
+      const helpTop = 1400 + (s.run('refs.storageInfo.hidden') ? 0 : 150);
+      return el.id === 'ffmpegSpot' ? helpTop + 900 + (s.find('getUpdate') ? 80 : 0) : helpTop;
+    };
+    el.getBoundingClientRect = () => {
+      const top = el.tag === 'nav' ? 0 : pageTop() - viewport.scrollTop;
+      return { top, bottom: top + 40 };
+    };
+    el.scrollIntoView = () => { viewport.scrollTop = pageTop() - 200; };
+    return el;
+  };
+  s.context.document.elementFromPoint = () => s.find('ffmpegSpot');
+  s.run('body.children = []; settingsView.mount(body); settingsView.show("ffmpeg")');
+  const top = (id) => s.find(id).getBoundingClientRect().top;
+  assert.equal(top('ffmpegSpot'), 200);
+  assert.equal(s.find('settingsMaintenance').open, true);
+
+  health.resolve();
+  storage.resolve({ jobs_bytes: 20 });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(top('ffmpegSpot'), 200, 'the first load populated Storage above the open engine row');
+  assert.equal(s.context.document.activeElement, s.find('ffmpegSpot'));
+
+  s.run('settingsView.show("updates", { same: true })');
+  const pending = s.find('checkUpdates').onclick();
+  assert.equal(top('checkUpdates'), 200);
+  viewport.scrollTop += top('ffmpegSpot') - 40; // read the engine row while the check is in flight
+  assert.ok(top('checkUpdates') < 0);
+  check.resolve(updates({}, { latest: '2.5.0', available: true, url: 'https://github.com/owner/AudioLab/releases/latest' }));
+  await pending;
+  assert.ok(s.find('getUpdate'));
+  assert.equal(top('ffmpegSpot'), 40, 'the visible row stayed below the tabs as the new update note appeared');
+  assert.equal(s.find('settingsMaintenance').open, true);
+  assert.equal(s.context.document.activeElement, s.find('checkUpdates'), 'manual scrolling leaves keyboard focus alone');
+});

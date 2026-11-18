@@ -20,7 +20,17 @@ export class Element {
       this.children.push(n);
     }
   }
-  closest(tag) { return this.tag === tag ? this : this.parent?.closest(tag); }
+  replaceChildren(...nodes) {
+    if (activeDocument?.activeElement !== this && this.contains(activeDocument?.activeElement)) {
+      activeDocument.activeElement = activeDocument.body;
+    }
+    this.children = [];
+    this.append(...nodes);
+  }
+  closest(selector) {
+    const matches = selector === '[data-setting], [id]' ? this.dataset?.setting || this.id : this.tag === selector;
+    return matches ? this : this.parent?.closest(selector);
+  }
   scrollIntoView() {}
   addEventListener() {}
   setAttribute(k, v) { this[k] = v; }

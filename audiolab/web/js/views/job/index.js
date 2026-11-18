@@ -8,11 +8,11 @@
 // page stops its players, timers and polling.
 import { h, icon, clear, fmtDuration } from '../../dom.js';
 import { api, mediaUrl } from '../../api.js';
-import { store, on, isActive, isFinished, upsertJob, taskLabel, jobsFence, mayInsertJob, showDetails, setShown } from '../../store.js';
+import { RECIPE_LABELS, store, on, isActive, isFinished, upsertJob, taskLabel, jobsFence, mayInsertJob, showDetails, setShown } from '../../store.js';
 import { meter, statusLed, statusWord, callout } from '../../ui.js';
 import { back, go } from '../../router.js';
 import { liveView, updateLive, failedView, cancelledView } from './status.js';
-import { doneView, RECIPE_SHORT } from './results.js';
+import { doneView } from './results.js';
 
 export const TASK_ICON = { download: 'download', enhance: 'sparkle', separate: 'layers', analyze: 'gauge', import: 'file' };
 
@@ -214,7 +214,7 @@ function eyebrowText(job) {
   let what;
   switch (job.task) {
     case 'enhance':
-      what = [job.options?.quality === 'light' ? 'Volume evened out' : 'Enhanced', RECIPE_SHORT[r.recipe?.key] || r.recipe?.name];
+      what = [job.options?.quality === 'light' ? 'Volume evened out' : 'Enhanced', RECIPE_LABELS[r.recipe?.key] || r.recipe?.name];
       break;
     case 'download': {
       const format = (main?.label || '').split(' · ')[0].replace(/^Original \((.+)\)$/, '$1 (original)');
@@ -226,7 +226,7 @@ function eyebrowText(job) {
       what = [n ? `Split into ${n} stems` : 'Split'];
       break;
     }
-    case 'analyze': what = ['Quality check']; break;
+    case 'analyze': what = ['Measurements']; break;
     case 'import': what = ['Added to the Library']; break;
     default: what = [taskLabel(job)];
   }

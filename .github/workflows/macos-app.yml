@@ -2,6 +2,11 @@ name: Build macOS tester app
 
 'on':
   workflow_dispatch:
+    inputs:
+      create_draft:
+        description: Create an unpublished GitHub release draft for the selected version tag
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -11,6 +16,8 @@ jobs:
     # Native validation runs on macOS 15; the deployment target remains macOS 14.
     runs-on: macos-15
     timeout-minutes: 60
+    outputs:
+      manifest_sha256: ${{ steps.draft_artifacts.outputs.manifest_sha256 }}
     defaults:
       run:
         shell: bash
@@ -31,6 +38,21 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      - name: Verify the draft release tag
+        if: inputs.create_draft
+        run: |
+          if [[ ! "$GITHUB_REF" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Select an existing vX.Y.Z tag to create a release draft." >&2
+            exit 1
+          fi
+          version="$(python3 -c 'from audiolab import __version__; print(__version__)')"
+          if [[ "$GITHUB_REF_NAME" != "v$version" ||
+                "$(git rev-parse "$GITHUB_REF^{commit}")" != "$GITHUB_SHA" ||
+                "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]]; then
+            echo "The release tag, source version and checked-out commit must match." >&2
+            exit 1
+          fi
 
       - name: Record build host and source
         run: |
@@ -147,15 +169,39 @@ jobs:
           (evidence / 'native-smoke.json').write_text(json.dumps(result, indent=2) + '\n')
           PY
 
+      - name: Record the draft artifact identity
+        if: inputs.create_draft
+        id: draft_artifacts
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          release="$AUDIOLAB_PACKAGE_WORK_DIR/release-$version-arm64"
+          "$AUDIOLAB_BUILD_PYTHON" - "$version" <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          work = Path(os.environ['AUDIOLAB_PACKAGE_WORK_DIR'])
+          info_path = work / 'dist/AudioLab.app/Contents/Resources/build-info.json'
+          info = json.loads(info_path.read_text())
+          if (info.get('version'), info.get('commit'), info.get('architecture')) != (
+              sys.argv[1], os.environ['GITHUB_SHA'], 'arm64'
+          ):
+              sys.exit('The packaged app does not match the checked version and commit.')
+          PY
+          hdiutil verify "$release/AudioLab-$version-macOS-arm64.dmg"
+          manifest="$(shasum -a 256 "$release/SHA256SUMS.txt")"
+          printf 'manifest_sha256=%s\nrelease_dir=%s\n' "${manifest%% *}" "${release##*/}" >> "$GITHUB_OUTPUT"
+
       - name: Upload validated release files
         uses: actions/upload-artifact@v7
         with:
           name: AudioLab-macOS-arm64-${{ github.run_id }}
           path: |
-            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/release-*/*.dmg
-            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/release-*/*.tar.gz
-            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/release-*/ai-catalog.json
-            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/release-*/SHA256SUMS.txt
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/${{ steps.draft_artifacts.outputs.release_dir || 'release-*' }}/*.dmg
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/${{ steps.draft_artifacts.outputs.release_dir || 'release-*' }}/*.tar.gz
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/${{ steps.draft_artifacts.outputs.release_dir || 'release-*' }}/ai-catalog.json
+            ${{ env.AUDIOLAB_PACKAGE_WORK_DIR }}/${{ steps.draft_artifacts.outputs.release_dir || 'release-*' }}/SHA256SUMS.txt
           if-no-files-found: error
           compression-level: 0
           retention-days: 1
@@ -186,3 +232,89 @@ jobs:
             ${{ runner.temp }}/audiolab-native/data/logs/
           if-no-files-found: warn
           retention-days: 7
+
+  draft:
+    name: Create release draft
+    if: inputs.create_draft
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: macos-release-draft-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Download this run's validated release artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "AudioLab-macOS-arm64-$GITHUB_RUN_ID" --dir "$RUNNER_TEMP/release"
+
+      - name: Verify the exact release assets
+        env:
+          VERIFIED_MANIFEST: ${{ needs.package.outputs.manifest_sha256 }}
+        run: |
+          cd "$RUNNER_TEMP/release"
+          manifest="$(sha256sum SHA256SUMS.txt)"
+          if [[ "${manifest%% *}" != "$VERIFIED_MANIFEST" ]]; then
+            echo "The artifact checksum file differs from the validated build." >&2
+            exit 1
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          # Check the expected regular files and the paths in the checksum manifest before reading them.
+          python3 - "$version" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          version = sys.argv[1]
+          expected = {
+              f'AudioLab-{version}-macOS-arm64.dmg',
+              f'AudioLab-{version}-third-party-sources-arm64.tar.gz',
+              'ai-catalog.json',
+          }
+          manifest = Path('SHA256SUMS.txt')
+          files = list(Path('.').iterdir())
+          if (
+              {path.name for path in files} != expected | {manifest.name}
+              or any(path.is_symlink() or not path.is_file() or not path.stat().st_size for path in files)
+          ):
+              sys.exit('The build must provide only the new DMG, core sources, catalog and checksums.')
+          rows = [re.fullmatch(r'[0-9a-f]{64}  \./([^/]+)', line) for line in manifest.read_text().splitlines()]
+          if len(rows) != len(expected) or {row[1] for row in rows if row} != expected:
+              sys.exit('The checksum manifest does not cover exactly the expected release files.')
+          PY
+          sha256sum --check --strict SHA256SUMS.txt
+
+      - name: Create a new unpublished release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$RUNNER_TEMP/release"
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+          existing="$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[][] | .tag_name')"
+          if grep -Fxq -- "$tag" <<< "$existing"; then
+            echo "A draft or published release already exists for $tag." >&2
+            exit 1
+          fi
+          # Ensure the remote tag has not moved during the build. An annotated tag needs its peeled commit.
+          remote="$(git ls-remote --exit-code "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" \
+            "$GITHUB_REF" "$GITHUB_REF^{}")"
+          commit="$(awk -v ref="$GITHUB_REF" '$2 == ref {tag = $1} $2 == ref "^{}" {peeled = $1}
+            END {print (peeled ? peeled : tag)}' <<< "$remote")"
+          if [[ "$commit" != "$GITHUB_SHA" ]]; then
+            echo "$tag no longer points to the validated commit." >&2
+            exit 1
+          fi
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
+            --title "AudioLab $version (beta)" --generate-notes \
+            "AudioLab-$version-macOS-arm64.dmg" "AudioLab-$version-third-party-sources-arm64.tar.gz" \
+            ai-catalog.json SHA256SUMS.txt

@@ -67,3 +67,26 @@ def test_playlist_ordinary_failure_still_continues(monkeypatch):
     monkeypatch.setattr(tasks, 'validate', lambda *_: {})
     assert cli._run_task('download', 'https://example.invalid/playlist', {}, SimpleNamespace()) == 1
     assert started == ['bad', 'good']
+
+
+def test_batch_continues_after_missing_input_and_discards_only_failed_attempt(tmp_path, monkeypatch):
+    from audiolab.media import export
+
+    source = tmp_path / 'input.wav'
+    source.write_bytes(b'original')
+    out = tmp_path / 'exports'
+    out.mkdir()
+    saved = []
+
+    def run(ctx, info):
+        saved.append(export.place_file(source, out / 'song.wav'))
+        if len(saved) == 1:
+            raise AudioLabError('Second format failed')
+        return {'files': []}
+
+    monkeypatch.setattr(tasks, 'get', lambda _: SimpleNamespace(stages=lambda *_: [('save', 'Save', 1)], run=run))
+    monkeypatch.setattr(tasks, 'validate', lambda *_: {})
+    args = SimpleNamespace(inputs=[str(tmp_path / 'missing.wav'), str(source), str(source)], keep=True)
+    assert cli._run_many('download', args, {}) == 1
+    assert saved == [out / 'song.wav'] * 2
+    assert saved[-1].read_bytes() == source.read_bytes() == b'original'

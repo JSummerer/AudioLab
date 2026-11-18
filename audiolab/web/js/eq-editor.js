@@ -1,4 +1,5 @@
 import { clear, fmtSigned, h, icon } from './dom.js';
+import { DRAFT_FIELD_LIMIT, DRAFT_EQ_TEXT_LIMIT } from './adjust-draft.js';
 import { canonicalEq, EQ_FIELDS, EQ_MAX_BANDS, eqField, formatEq, normalizeEqBand } from './eq.js';
 import { EQ_SAMPLE_RATE, eqFrequency, eqX, responseDb, responseFilters, responseFrequencies } from './eq-response.js';
 
@@ -42,7 +43,10 @@ export function graphicalEqField({ bands = [], savedBands = [], context = {}, la
   const note = h('p', { class: 'small muted eq-editor-note', id: `${id}-instructions` },
     `Full-strength response at ${EQ_SAMPLE_RATE / 1000} kHz. Fades and dynamics change the audition. `,
     'Drag bands or use the arrow keys to move them. Use the fields for exact values.');
-  const text = eqField({ id: `${id}-text`, text: draftState?.text ?? formatEq(draft.bands), label: `${label} as text`, onInput: editText });
+  const text = eqField({
+    id: `${id}-text`, label: `${label} as text`, onInput: editText,
+    text: draftState?.text ?? formatEq(draft.bands), maxLength: DRAFT_EQ_TEXT_LIMIT,
+  });
   text.textarea.addEventListener('blur', endSession);
   const textPanel = h('details', { class: 'eq-editor-text disclosure', open: draftState?.textOpen },
     h('summary', null, 'Type or paste EQ values'), text.el);
@@ -117,6 +121,8 @@ export function graphicalEqField({ bands = [], savedBands = [], context = {}, la
   }
 
   function editNumber(source) {
+    // Number inputs keep their step controls but do not support HTML maxlength.
+    if (source.value.length > DRAFT_FIELD_LIMIT) source.value = source.value.slice(0, DRAFT_FIELD_LIMIT);
     const { parsed, problems } = readNumbers();
     if (problems.length) invalid(problems, source);
     else change({ ...draft, bands: parsed.map((row) => row.band) }, { source });
@@ -293,10 +299,10 @@ export function graphicalEqField({ bands = [], savedBands = [], context = {}, la
       numbers, errorNote, textPanel),
     read,
     setContext(next) { context = next || {}; draw(); },
-    snapshot() {
+    snapshot({ history: includeHistory = true } = {}) {
       const numbers = errors.length && errorSource !== text.textarea
         ? rows.map(({ inputs }) => Object.fromEntries(fields.map((key) => [key, inputs[key].value]))) : null;
-      return { ...copyDraft(draft), history: history.map(copyDraft), text: text.textarea.value, textOpen: textPanel.open, numbers };
+      return { ...copyDraft(draft), history: includeHistory ? history.map(copyDraft) : undefined, text: text.textarea.value, textOpen: textPanel.open, numbers };
     },
   };
 }

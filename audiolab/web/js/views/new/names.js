@@ -18,25 +18,9 @@ export function shownName(src) {
   return { title: src.meta?.title || d.title, artist: typeof src.meta?.artist === 'string' ? src.meta.artist : d.artist };
 }
 
-/**
- * `options.meta`: only fields the user actually changed (a reused job re-sends its own).
- * `artist: ""` clears the artist; a title can't be emptied (blank = keep the original).
- * An uploaded file sends both once the editor was saved: the server names it by the file's
- * own tags, which the card (file name, no artist) doesn't know, so "unchanged" means nothing.
- */
+/** Only explicit overrides travel with the job. Missing fields keep the source tags. */
 export function metaPayload(src) {
-  if (!src?.meta) return null;
-  const d = nameDefaults(src);
-  const out = {};
-  const title = (src.meta.title || '').trim();
-  if (src.kind === 'file') return { title: title || d.title, artist: (src.meta.artist || '').trim() };
-  if (title && (src.kind === 'job' || title !== d.title)) out.title = title;
-  if (typeof src.meta.artist === 'string') {
-    const artist = src.meta.artist.trim();
-    // A reused job's source artist is unknown here: send it when set, or when it was erased on purpose.
-    if (src.kind === 'job' ? (artist || src.artistCleared) : artist !== d.artist) out.artist = artist;
-  }
-  return Object.keys(out).length ? out : null;
+  return src?.meta && Object.keys(src.meta).length ? src.meta : null;
 }
 
 /** The Name row of More options: "Edit name" (and Undo once renamed), or the editor while editing. */
@@ -60,28 +44,47 @@ export function nameEditor(src) {
   const cur = shownName(src);
   const draft = src.draft || cur;
   const title = h('input', { class: 'field field-sm', id: 'metaTitle', value: draft.title, autocomplete: 'off', spellcheck: 'false', maxlength: 200 });
-  const artist = h('input', { class: 'field field-sm', id: 'metaArtist', value: draft.artist, autocomplete: 'off', spellcheck: 'false', maxlength: 200, placeholder: 'Unknown' });
+  const unknownArtist = src.kind === 'file' || src.kind === 'job';
+  let artistEdited = !!draft.artistEdited;
+  const artist = h('input', { class: 'field field-sm', id: 'metaArtist', value: draft.artist, autocomplete: 'off', spellcheck: 'false', maxlength: 200,
+    placeholder: unknownArtist ? 'Keep source artist' : 'Unknown' });
+  const rememberDraft = () => { src.draft = { title: title.value, artist: artist.value, artistEdited }; };
+  const updatePlaceholder = () => {
+    if (unknownArtist) artist.placeholder = artistEdited || src.meta?.artist === '' ? 'Artist will be cleared' : 'Keep source artist';
+  };
+  updatePlaceholder();
   const close = () => { src.editing = false; src.draft = null; redraw('source', 'options', 'action'); focusIn('.name-edit-btn'); };
   const save = () => {
-    const next = { title: title.value.trim(), artist: artist.value.trim() };
-    if (src.kind === 'job') {
-      // Compare with what was shown (it may include the earlier job's own name).
-      const before = shownName(src);
-      if (next.title !== before.title || next.artist !== before.artist) {
-        src.artistCleared = !next.artist && (!!before.artist || !!src.artistCleared);
-        src.meta = next;
-      }
-    } else if (src.kind === 'file') {
-      src.meta = next; // sent as it is (see metaPayload)
-    } else {
-      const d = nameDefaults(src);
-      const same = (next.title || d.title) === d.title && next.artist === d.artist;
-      src.meta = same ? null : next;
+    const next = { ...src.meta };
+    const defaults = nameDefaults(src);
+    const t = title.value.trim();
+    const a = artist.value.trim();
+    if (t !== cur.title) {
+      if (t && t !== defaults.title) next.title = t;
+      else delete next.title;
     }
+    if (a !== cur.artist || artistEdited) {
+      if (unknownArtist || a !== defaults.artist) next.artist = a;
+      else delete next.artist;
+    }
+    src.meta = Object.keys(next).length ? next : null;
     close();
   };
+  const clearArtist = unknownArtist ? h('button', {
+    type: 'button', class: 'btn btn-ghost btn-sm', onclick: () => {
+      artist.value = '';
+      artistEdited = true;
+      updatePlaceholder();
+      rememberDraft();
+      artist.focus();
+    },
+  }, 'Clear artist tag') : null;
   for (const input of [title, artist]) {
-    input.addEventListener('input', () => { src.draft = { title: title.value, artist: artist.value }; });
+    input.addEventListener('input', () => {
+      if (input === artist) artistEdited = true;
+      updatePlaceholder();
+      rememberDraft();
+    });
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); save(); }
       else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
@@ -93,5 +96,6 @@ export function nameEditor(src) {
       h('label', { class: 'name-field', for: 'metaArtist' }, h('span', { class: 'name-field-label' }, 'Artist'), artist)),
     h('div', { class: 'name-actions' },
       h('button', { type: 'button', class: 'btn btn-key btn-sm', onclick: save }, icon('check', 14), 'Save name'),
+      clearArtist,
       h('button', { type: 'button', class: 'btn btn-ghost btn-sm', onclick: close }, 'Cancel')));
 }

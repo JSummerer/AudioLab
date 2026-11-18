@@ -14,7 +14,10 @@ For first-time setup, use the [Mac app guide](MACOS.md) or [source installation 
 3. Press the main action button. Follow progress in **Activity**, then play the result or open its folder
    with **Show in Finder** (**Show in folder** on Windows and Linux).
 
-Finished audio goes to **`Music/AudioLab`** in your home folder. Change that in **Settings → Files**.
+Enhance starts with MP3 on a new install. New takes its format choices from Settings when the page loads.
+Choices you make in New carry over between jobs and views until you reload or change that default in Settings.
+
+Finished audio goes to **`Music/AudioLab`** in your home folder. Change that in **Settings → Output defaults**.
 Existing output files are kept; a new result gets a numbered name if needed. A job that fails or is
 cancelled while still working removes the files it had saved in that attempt, and nothing else; a
 finished result is never removed. If AudioLab crashes or is force-quit while a job runs, the files that
@@ -37,12 +40,24 @@ site; a local file is the simplest starting point. For a playlist, choose the it
 A link opened from another page (`/?url=…`) waits in the link field until you press **Load**.
 Use only material you have permission to process.
 
+In the app window, **Choose files** reads the selected audio and video files where they are. You can
+select several at once. **Choose folder** adds up to 50 supported files directly in the chosen folder,
+in name order. Each starts its own job. Keep the selected file unchanged and at its current path until
+the job finishes. If it changes after the audio is rendered, the finished files stay available on
+the job page. A warning explains when the Library could not keep the result and its original. For a single file, AudioLab shows Tracks
+for long recordings when it can read the duration. Enhance can save a separate original copy for comparisons.
+File drops and the browser's file chooser upload the files and use the server's upload limit.
+Settings → Output defaults and Library → Add a file use the system picker in the app window. Local browser
+sessions use a path field.
+
 - **Save / Convert:** convert formats, save an original stream, or cut chapters/a pasted tracklist into tracks.
 - **Enhance:** choose a recipe or use Auto. "Volume only" mainly adjusts volume. "Tone and volume" uses
-  the recipe's processing. "AI stems" adds the optional AI stage.
+  the recipe's processing. The available AI option depends on the audio type.
 - **Split:** produce vocals/instrumental or four stems using the optional AI pack.
 - **Check:** inspect measurements and a spectrogram. Tempo, musical key and content type are estimates.
-  Frequency range can suggest limitations; it cannot prove a file's encoding history.
+  Check reports measured loudness and its variation, true peaks, runs near full scale, and the estimated
+  frequency range. Near-full-scale runs indicate possible clipping. The report also identifies samples
+  above full scale in the decoded audio.
 
 **More options** holds the name, [cover art](#cover-art), formats and processing controls. **Tracks**
 shows up front for a recording with chapters, a pasted tracklist or more than 10 minutes, else under
@@ -60,8 +75,33 @@ and **Delete the kept original…** (when one is kept). Removing keeps the
 files unless you switch on **Also move its files to the Trash**; nothing is ever deleted permanently.
 Kept originals use disk space separately from your output folder; manage them in Settings → Storage.
 
-For links, the YouTube sign-in (Settings → Downloads & sign-in) is used only when YouTube refuses a
+For missing Library files recorded since this feature was added, **Locate…** lets you choose the same
+file after moving or renaming it on the same drive. Choose the file with its original extension.
+If you edit a located or natively imported file in place, use **Locate…** and select it again to
+confirm the change. Its saved measurements still describe the original run.
+For older entries, or files copied to another drive, use **Add a file…** to add them again.
+Locate updates playback and comparison in the Library. Use **Show folder** beside a located file to
+open its current folder. Job history stays as recorded. A file located
+outside its recorded output folder stays in place when removing its located version. If you also
+imported the same file directly, opting to trash the import can move it. The removal message reports
+how many located files stayed.
+
+For links, the YouTube sign-in (Settings → Downloads) is used only when YouTube refuses a
 video without it. YouTube can block accounts that download a lot; a spare Google account is safer.
+
+## Settings
+
+| Section | Controls |
+|---|---|
+| General | Theme and whether More options and job details start open |
+| Output defaults | Output folder, Save and Split formats, Enhance formats and cover art |
+| Downloads | YouTube browser sign-in on a local server |
+| AI add-on | Install, update, repair or remove the optional AI features |
+| Storage | Job files, kept originals and reuse |
+| Help | App updates and automatic checks. Open **Maintenance and diagnostics** for the downloader, audio engine, work files, system report and app-data folders. |
+
+In the 2.5.1 Mac app, the output folder is under **Files**, AI and updates share **Updates & add-ons**,
+and the system report is under **About**.
 
 ## Automatic enhancement
 
@@ -71,11 +111,13 @@ video without it. YouTube can block accounts that download a lot; a spare Google
 |---|---|---|
 | **Volume only** | Mainly loudness; keeps the original tone | No |
 | **Tone and volume** | Tone, dynamics and loudness using the chosen recipe | No |
-| **AI stems** | Adds an AI stage to the recipe; takes longer | Yes |
+| **Balance parts separately** | Separates DJ sets and songs into parts, then adjusts each part’s tone | Yes |
+| **Isolate voice** | Keeps the AI voice estimate and removes the estimated backing and background sounds | Yes |
+| **AI when supported** | Uses the AI option for the detected recipe when audio type is Auto | Yes |
 
-Start with "Volume only" or "Tone and volume". AI stems can alter tone and is not a guarantee that you
-will prefer the sound. Versions 2.4.0b4 to 2.5.0 called "Tone and volume" Adaptive. Earlier versions called these
-choices Light, Standard and Best; existing screenshots still show those names. The **Standard / Fine-tuned AI model** choice is separate from Enhance processing;
+Concerts offer Volume only and Tone and volume. Switching to an audio type with a different AI option
+returns to Tone and volume. Versions 2.4.0b4 to 2.5.0 called "Tone and volume" Adaptive. Earlier versions
+called these choices Light, Standard and Best. The **Standard / Fine-tuned AI model** choice is separate from Enhance processing;
 see [hardware guidance](HARDWARE.md).
 
 Auto chooses from the same recipes you can select yourself:
@@ -88,9 +130,8 @@ Auto chooses from the same recipes you can select yourself:
 | Podcast / speech | Rumble filtering, clarity and more even volume |
 
 The app explains its choices, and you can override them. Noise reduction is off unless you explicitly
-choose it. The highs are lifted only when the measured top end is dull, and **Sharp S sounds** (Auto)
-softens S sounds and cymbal hits only where they jump out; choose Strong for harsh recordings or Off.
-AI stems can separate and recombine music stems or isolate speech before processing.
+choose it. The Song and Podcast recipes can lift presence near 3 kHz when the top end is in balance.
+The air lift is reserved for a dull top end on eligible sources. **Sharp S sounds** (Auto) softens S sounds and cymbal hits only where they jump out; choose Strong for harsh recordings or Off.
 These operations may change the sound in ways you dislike; compare before choosing your preferred result.
 Exporting a compressed source as WAV/FLAC does not restore missing detail.
 
@@ -112,14 +153,19 @@ but their transient behavior differs from a conventional causal EQ and can inclu
 
 Each full-length export gets its own loudness and peak check before it is saved. Encoding raises the peaks
 of an MP3, AAC or Opus file: it may use the master's headroom up to just under full scale (-0.1 dBTP, or
-your ceiling if that is higher) and is saved as encoded. Only a file that goes over that is encoded once
+your ceiling if that is higher) and is saved as encoded. Only a full-length export that goes over that is encoded once
 more, turned down by the excess plus 0.5 dB, and only when that is at most 2 dB; otherwise it is kept as
 encoded, with a warning. Lossless files are held to the selected ceiling and never re-encoded. A warning
 means a file is still over its limit or could not be measured; try a lower ceiling or a lossless format
 when more headroom is needed. Check judges a lossy file's peaks by the same limit.
-The file stays saved. Master readings describe the audio before encoding, and split tracks are not
-individually checked. Job pages and the Library say this in plain words; **Show details** adds the
-LUFS/dBTP readings and the technical figures behind each line of **What we did**. Library's
+Enhance also checks each MP3, AAC or Opus track. Tracks keep the gain of their format's full export.
+Checking takes one extra decode per lossy track. A single line reports how many passed, went over
+the limit or could not be measured. For a track that went over the limit or could not be measured,
+read its note on the job page or under **Export checks** in the Library. Lossless track cuts and
+Save / Convert cuts have no individual check.
+
+Master readings describe the audio before encoding. **Show details** adds the LUFS/dBTP readings and
+the technical figures behind each line of **What we did**. Library's
 **Processing details** keeps settings, reasons, actual changes and
 file checks even after the job expires. Older entries have only the details they originally recorded.
 
@@ -147,10 +193,15 @@ depends on the music player and its supported formats.
 
 Screenshots use generated sample audio; the displayed loudness difference is specific to that sample.
 
-In **Library**, open a recording's versions and choose **Compare with the original** on an enhanced result.
-This needs a kept original; **Settings → Storage → Keep originals** controls future jobs.
+In **Library**, open a recording's versions and choose **Compare**. The panel opens with **Original**
+when a kept copy is available for that version. Choose another saved version in **Compare with**,
+including a file you added to the same recording. **Settings → Storage → Keep originals** controls
+whether future Enhance jobs keep an original for comparing.
 
-Press **Play**, then switch between **Original** and **Enhanced** to hear the same point in the recording.
+Use **Name version…** in a version's menu to give it a label in the Library and in comparisons.
+Clear the field to use the default label again.
+
+Press **Play**, then switch between the two versions to hear the same point in the recording.
 Use the timeline or **−10 s / +10 s** to move around.
 **Match volume** reduces the louder side for a fairer comparison. Turn it off to hear the actual level
 difference. It changes playback only, not the saved files.
@@ -162,9 +213,9 @@ The range must be at least one second. Points use a 40 ms grid; both versions re
 short fades at the boundaries. Seeking outside the range turns Repeat off. A valid range also follows
 you between versions of the same recording.
 
-Choose **Compare with the original** on another enhanced version of the same recording to keep
-your position, selected side and volume-matching choice. If you were playing, playback continues
-after any brief buffering needed to load that version.
+When comparing with **Original**, choose **Compare** on another enhanced version of the same
+recording to keep your position, selected side and volume-matching choice. If you were playing,
+playback continues after any brief buffering needed to load that version.
 Switching to another recording or an ordinary file player starts a separate listening session.
 
 For newly processed versions, **Changes timeline** shows where low-mid control, de-essing, compression
@@ -181,18 +232,25 @@ Library to hear the actual exported version. Dragging changes the graph; render 
 Changed settings mark the audio stale. Undo, bypass and reset help compare alternatives, and keeping
 the existing version is a valid result. Opening or leaving Adjust does not create an export.
 
+Adjust saves edits automatically in the app’s Library data. Wait for **Draft saved** before quitting.
+The next time you open that version, Adjust restores the passage, section timing, settings and EQ
+(including incomplete input). **Discard draft** starts again from the version’s saved settings. Undo
+history and rendered auditions last only in the current session. A changed original or processing
+record starts a fresh draft. Reopening Adjust shows the latest saved revision. If your window still
+has conflicting unsaved edits, you can review them. **Load saved draft** asks before replacing them.
+
 A section preview is an estimate: it uses nearby audio for context, while the full render checks the
 whole recording again. Even retained full-recording gain cannot predict how EQ changes the next full
 render's normalization. Auditions exclude saved-format compression artifacts. Short previews are currently
-available for results made with "Volume only" or "Tone and volume". They need saved settings and a kept
-original; AI stems needs a full render. Preview work joins the ordinary queue, so it may wait for a running job.
+available for versions confirmed to have used no AI processing, with saved settings and a kept original.
+That includes versions for which the AI option fell back to Tone and volume. Apply from such a version
+uses Tone and volume again. Preview work joins the ordinary queue, so it may wait for a running job.
 If a file's timing cannot be aligned reliably for a short preview, AudioLab explains the problem;
 try a WAV or FLAC original or run Enhance on the full recording. **Apply to full recording** reanalyzes
 the complete original and verifies new exports, preserving previous versions. It reuses available
 saved artwork. Compare the actual exports afterwards; a short audition is never promoted to a master.
 
-**Compare versions** plays two versions of the same recording at matched volume, including a file you
-added. When versions differ by more than 1 dB, Library says so: louder often sounds better at first.
+When saved versions differ by more than 1 dB, Library points to the matched comparison.
 Adjust also accepts loudness, compression, custom EQ and section EQ changes.
 
 Job pages may offer a shorter preview of the final master when a full comparison is unavailable;
@@ -200,6 +258,9 @@ it does not include output codec artifacts. There is no Delta mode
 in the current app; listening to Original and Enhanced is the supported comparison.
 
 ## Command line
+
+A batch continues past a missing input. If a command fails or you cancel it during processing, AudioLab removes the outputs from that attempt. Files from earlier completed inputs stay. The `--keep` flag keeps working files for inspection.
+
 
 From the project folder, the executable is `.venv/bin/audiolab` on macOS/Linux or
 `.\.venv\Scripts\audiolab.exe` in Windows PowerShell. Substitute that path for `audiolab` below unless

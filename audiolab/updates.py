@@ -87,18 +87,6 @@ def newest_app_release(releases: Any, current: str) -> str | None:
     return best[1] if best else None
 
 
-def ytdlp_version_key(text: Any) -> tuple[int, ...] | None:
-    """yt-dlp versions are dates (2026.08.19, also written 2026.8.19) with an optional hotfix number."""
-    if not isinstance(text, str) or not re.fullmatch(r'\d{1,4}(?:\.\d{1,6}){1,3}', text.strip()):
-        return None
-    return tuple(int(part) for part in text.strip().split('.'))
-
-
-def ytdlp_newer(candidate: Any, than: Any) -> bool:
-    new, old = ytdlp_version_key(candidate), ytdlp_version_key(than)
-    return new is not None and (old is None or new > old)
-
-
 # ------------------------------------------------------------------- GitHub
 def check_url(url: str) -> None:
     parts = urllib.parse.urlsplit(url)

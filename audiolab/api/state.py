@@ -2,7 +2,6 @@
 hub, the AI installer, keep-awake, short-lived caches (health parts, link probes) and the
 helpers several routes share. Routes receive it with the `State` dependency."""
 
-import re
 import threading
 import time
 from collections.abc import Callable
@@ -17,9 +16,10 @@ from ..errors import AudioLabError
 from ..jobs import Job, JobManager
 from ..media import export, ffmpeg, youtube, ytdlp_update
 from ..settings import LIMITS, SETTINGS
+from ..util import JOB_ID_RE
 from .events import Hub
+from .security import is_loopback
 
-JOB_ID_RE = re.compile(r'^j_\d{8}_\d{6}_[0-9a-f]{6}$')
 PROBE_TTL_S = 15 * 60
 SHUTDOWN_TIMEOUT_S = 5.0
 
@@ -105,7 +105,7 @@ class AppState:
             return {'ok': True}
         raise AudioLabError(
             f"The output folder isn't available: {root}.",
-            hints=['Connect the drive it is on, or choose another folder in Settings → Files.'],
+            hints=['Connect the drive it is on, or choose another folder in Settings → Output defaults.'],
         )
 
     def reveal_app_folder(self, target: str) -> dict[str, Any]:
@@ -222,7 +222,7 @@ class AppState:
             self._probes[url] = (now, result)
             if result.get('kind') == 'playlist':
                 for e in result.get('entries', []):
-                    self._probes[f'entry:{e["url"]}'] = (now, {'playlist_title': result.get('title'), **e})
+                    self._probes[f'entry:{e["url"]}'] = (now, e)
 
     def cached_probe(self, key: str) -> dict[str, Any] | None:
         with self._probe_lock:
@@ -235,3 +235,21 @@ def get_state(request: Request) -> AppState:
 
 
 State = Annotated[AppState, Depends(get_state)]
+
+
+def native_selection(request: Request, state: AppState, selection, purpose: str):
+    native = getattr(request.app.state, 'native_inputs', None)
+    if (
+        not state.local
+        or native is None
+        or request.client is None
+        or not is_loopback(request.client.host)
+        or request.headers.get('host') != native.address
+        or request.headers.get('origin') != native.origin
+        or not native.authorizes(request.headers.get('x-audiolab-desktop'))
+    ):
+        raise HTTPException(403, 'Choose this file or folder in the AudioLab app window.')
+    item = native.get(selection, purpose)
+    if item is None:
+        raise HTTPException(410, 'This selection is no longer available. Choose it again.')
+    return item

@@ -185,7 +185,7 @@ class ManagedAI:
         if output == root or output in root.parents or root in output.parents:
             raise AudioLabError(
                 'The output folder overlaps the managed AI folder. AudioLab will not change the AI pack.',
-                hints=['Choose an output folder outside the app data folder in Settings → Files.'],
+                hints=['Choose an output folder outside the app data folder in Settings → Output defaults.'],
             )
 
     def _mark_root(self) -> None:

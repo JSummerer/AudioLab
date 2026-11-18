@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { api } from '../../audiolab/web/js/api.js';
+import { draftWriter } from '../../audiolab/web/js/adjust-draft.js';
 import { auditionRequests } from '../../audiolab/web/js/adjust-audition.js';
 import { auditionPower, loadAuditionSpectrum } from '../../audiolab/web/js/audition-spectrum.js';
-import { basisMessage } from '../../audiolab/web/js/views/adjust.js';
+import { adjustUnavailable, basisMessage } from '../../audiolab/web/js/views/adjust.js';
 
 const deferred = () => {
   let resolve;
@@ -10,6 +12,21 @@ const deferred = () => {
   return { promise, resolve };
 };
 const nextTurn = () => new Promise((resolve) => setImmediate(resolve));
+
+test('Adjust uses the server-confirmed mode for a saved best fallback', () => {
+  const entry = {
+    task: 'enhance', original: { kept: true }, adjust_quality: 'standard',
+    processing: {
+      requested: { recipe: 'music', quality: 'best', formats: ['wav16'] },
+      resolved: {
+        recipe: { key: 'music' },
+        params: { target_lufs: -12, tp_ceiling_db: -1, volume_only: false, ai_stage: 'stem_eq' },
+      },
+    },
+  };
+  assert.equal(adjustUnavailable(entry), '');
+  assert.match(adjustUnavailable({ ...entry, adjust_quality: null }), /no AI processing/);
+});
 
 test('leaving while submitting releases the late audition, without displaying it', async () => {
   const submission = deferred();
@@ -158,4 +175,42 @@ test('an omitted whole-master correction is part of the stated audition basis', 
   }
   assert.match(basisMessage(result({ gain: 'retained_target_delta', omitted_post_limiter_gain_db: -2 }), true),
     /peak cap\..*turned down 2\.0 dB/);
+});
+
+test('draft saves serialize in-flight edits, retain failed changes for retry and clear on discard', async () => {
+  const writes = [];
+  const first = deferred();
+  const store = draftWriter({ revision: 4, basis: 'version' }, (body) => {
+    writes.push(body);
+    if (writes.length === 1) return first.promise;
+    if (writes.length === 2) throw new Error('Disk full');
+    return Promise.resolve({ revision: body.revision + 1 });
+  });
+  store.queue({ from: '0' });
+  const saving = store.flush();
+  store.queue({ from: '1:' });
+  first.resolve({ revision: 5 });
+  assert.equal(await saving, false);
+  assert.match(store.message, /Disk full/);
+  assert.equal(await store.flush(), true);
+  store.queue(null);
+  await store.flush();
+  assert.deepEqual(writes.map(({ revision, data }) => [revision, data]), [[4, { from: '0' }], [5, { from: '1:' }], [5, { from: '1:' }], [6, null]]);
+});
+
+test('large Unicode drafts can use the normal fetch path even on pagehide', async (t) => {
+  const keepalive = [];
+  t.mock.method(globalThis, 'fetch', async (_, options) => {
+    keepalive.push(options.keepalive);
+    return Response.json({ revision: 1 });
+  });
+  const graph = { bands: [], bypassed: false, invalid: true, text: '界'.repeat(4096), textOpen: true, numbers: null };
+  const sections = Array.from({ length: 8 }, (_, i) => ({ id: String(i), from: '', to: '', fade: '' }));
+  const data = { from: '', length: '15', scope: 'global', values: {}, sections,
+    graphs: Object.fromEntries(['global', ...sections.map((s) => s.id)].map((id) => [id, graph])) };
+  const json = { basis: 'version', revision: 0, data };
+  assert.ok(Buffer.byteLength(JSON.stringify(json)) > 65536);
+  await api('/api/library/test/adjust-draft', { method: 'PUT', json });
+  await api('/api/library/test/adjust-draft', { method: 'PUT', json, keepalive: true });
+  assert.deepEqual(keepalive, [false, false]);
 });

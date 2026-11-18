@@ -554,7 +554,7 @@ def _commit(staging: Path, dst: Path) -> Path:
 # don't follow a small turn-down exactly (up to 0.3 dB less than the turn-down on a real song).
 LOSSY_LIMIT_DBTP = -0.1
 TRIM_MARGIN_DB = 0.5
-TRIM_MAX_DB = 2.0  # a bound, not a clamp: a file that needs more (margin included) is kept as encoded, with a warning
+TRIM_MAX_DB = 2.0  # maximum turn-down of a full lossy export
 
 # Audio codecs that keep every sample (FFmpeg's names, matched by prefix: pcm_s16le, …); any other is lossy.
 # WavPack counts as lossless although hybrid (lossy) WavPack exists: it is rare, and the verdict is stricter.
@@ -580,9 +580,8 @@ def source_peak_limit(codec: str | None) -> float | None:
     return round(LOSSY_LIMIT_DBTP + PEAK_TOLERANCE_DB, 2) if lossy_codec(codec) else None
 
 
-# Measures a staged export against a true-peak limit: `check(path, progress, limit_dbtp)` -> a reading with at
-# least `ceiling_dbtp` (the limit), `true_peak_dbtp` and `ceiling_met` (media.verification.measure_export's shape).
-Check = Callable[[Path, Progress, float], dict]
+# Measures a staged export against a true-peak limit. The estimated duration is for progress reporting.
+Check = Callable[[Path, Progress, float, float | None], dict]
 
 
 def transcode(
@@ -617,14 +616,16 @@ def _transcode(
     trim_db: float = 0.0,
     check: Check | None = None,
     ceiling_dbtp: float | None = None,
+    retry_lossy: bool = False,
+    check_source: Callable[[], None] | None = None,
 ) -> dict:
     """Convert `src` into format `fmt` at `dst`: {'path', 'verification', 'trim_db'}.
 
     `trim_db` turns the audio down by that many dB (track cuts get their full file's trim).
     `check` measures the staged file before it gets its name, against `peak_limit(fmt, ceiling_dbtp)` (the
-    master's ceiling). When a lossy file's peaks come out above that limit, it is encoded once more from
-    `src`, turned down by the excess plus TRIM_MARGIN_DB if that is at most TRIM_MAX_DB, and checked again;
-    that version replaces the first before anything is saved. Otherwise the file is kept as encoded.
+    master's ceiling). Full exports enable `retry_lossy`: an over-limit lossy file is encoded once more
+    from `src`, turned down by the excess plus TRIM_MARGIN_DB if the trim stays within TRIM_MAX_DB, and
+    checked again. Tracks keep the same gain as their full export.
     `verification` is the reading of the file as saved, `trim_db` the gain taken off in all (0.0: none).
 
     `cover`: the JPEG to embed (in formats supported by AudioLab). None = no picture: a picture `src`
@@ -643,6 +644,8 @@ def _transcode(
     if dst.suffix.lower() != spec.ext:
         dst = dst.with_name(dst.name + spec.ext)
     dst.parent.mkdir(parents=True, exist_ok=True)
+    if check_source:
+        check_source()
     info = probe_media(src)
     if duration_s is None:
         duration_s = info.get('duration_s')
@@ -708,14 +711,20 @@ def _transcode(
 
     def encode(target: Path, art: bool, gain_db: float, step: Progress) -> bool:
         """Write `target`; False when the cover had to be left out."""
+        if check_source:
+            check_source()
         try:
             run_ffmpeg(build(art, target, gain_db), progress=step, duration_s=duration_s, what=f'{spec.label} export')
         except AudioLabError:
             if not art:
                 raise
             target.unlink(missing_ok=True)  # cover muxing failed: keep the audio, drop the art
+            if check_source:
+                check_source()
             run_ffmpeg(build(False, target, gain_db), progress=step, duration_s=duration_s, what=f'{spec.label} export')
             art = False
+        if check_source:
+            check_source()  # verify the source while this encode is still staged
         if not target.is_file() or target.stat().st_size == 0:
             raise AudioLabError(f'{spec.label} export produced an empty file.')
         return art
@@ -725,18 +734,21 @@ def _transcode(
     try:
         with_art = encode(staging, art, -trim_db, progress.sub(0, 50) if check else progress)
         if check:
-            step = progress.sub(50, 75)
+            can_retry = retry_lossy and spec.kind == 'lossy'
+            step = progress.sub(50, 75 if can_retry else 100)
             step(0, f'Checking the saved {spec.label}…')
             limit = peak_limit(spec.key, ceiling_dbtp)
-            verification = check(staging, step, limit)
+            verification = check(staging, step, limit, duration_s)
             peak = verification.get('true_peak_dbtp')
-            if spec.kind == 'lossy' and verification.get('ceiling_met') is False and peak is not None:
+            if can_retry and verification.get('ceiling_met') is False and peak is not None:
                 excess = round(peak - limit + TRIM_MARGIN_DB, 2)
-                if 0 < excess <= TRIM_MAX_DB:
-                    trim_db = round(trim_db + excess, 2)
+                total_trim = round(trim_db + excess, 2)
+                if excess > 0 and total_trim <= TRIM_MAX_DB:
+                    trim_db = total_trim
                     with_art = encode(retry, with_art, -trim_db, progress.sub(75, 90))
-                    verification = check(retry, progress.sub(90, 100), limit)
+                    verification = check(retry, progress.sub(90, 100), limit, duration_s)
                     os.replace(retry, staging)  # the turned-down version is the one that gets saved
+        progress.check_cancel()
         path = _commit(staging, dst)
         if big_wav:
             progress.note(
@@ -763,6 +775,7 @@ def export(
     sample_rate: int | None = None,
     check: Check | None = None,
     ceiling_dbtp: float | None = None,
+    check_source: Callable[[], None] | None = None,
 ) -> list[dict[str, object]]:
     """Write `master` in every requested format into `out_dir`.
 
@@ -783,6 +796,8 @@ def export(
     for s in specs:
         ext_count[s.ext] = ext_count.get(s.ext, 0) + 1
     base = sanitize_filename(basename, room=40)  # title + ' (Enhanced)', ' - Vocals' etc.
+    if check_source:
+        check_source()
     duration = probe_media(master).get('duration_s')
     outputs = []
     n = len(specs)
@@ -801,6 +816,8 @@ def export(
             sample_rate=sample_rate,
             check=check,
             ceiling_dbtp=ceiling_dbtp,
+            retry_lossy=True,
+            check_source=check_source,
         )
         path = made['path']
         outputs.append(
@@ -828,10 +845,13 @@ def export_tracks(
     progress: Progress | None = None,
     sample_rate: int | None = None,
     trim_db: float = 0.0,
+    check: Check | None = None,
+    ceiling_dbtp: float | None = None,
+    check_source: Callable[[], None] | None = None,
 ) -> list[dict[str, object]]:
     """Cut `src` into `tracks` ([{n, title, start_s, end_s}], see youtube.make_tracks) and
     save each one as 'NN - <title>.<ext>' in format `fmt`, turned down by `trim_db` like the full
-    file of that format (`_transcode`; tracks are not checked themselves).
+    file of that format. When supplied, `check` measures each lossy track at that gain.
 
     `tags` describe the whole set: its title becomes the album, its artist the album
     artist; a track titled 'Artist - Track' gets its own artist. Tracks that start past
@@ -841,7 +861,12 @@ def export_tracks(
     progress = progress or Progress.null()
     src, folder = Path(src), Path(folder)
     spec = resolve_format(fmt)
+    check = check if spec.kind == 'lossy' else None
+    if check_source:
+        check_source()
     dur = probe_media(src).get('duration_s')
+    if check_source:
+        check_source()  # even a probe that finds no playable cuts must describe the chosen file
     todo = [t for t in tracks if dur is None or float(t['start_s']) < dur - 0.05]
     total = len(todo)
     width = max(2, len(str(total)))
@@ -864,7 +889,7 @@ def export_tracks(
         if set_tags.get('artist'):
             track_tags['album_artist'] = set_tags['artist']
         name = f'{n:0{width}d} - {sanitize_filename(title, fallback=f"Track {n}")}{spec.ext}'
-        path = transcode(
+        made = _transcode(
             src,
             folder / name,
             spec.key,
@@ -876,7 +901,12 @@ def export_tracks(
             start_s=start,
             end_s=end,
             trim_db=trim_db,
+            check=check,
+            ceiling_dbtp=ceiling_dbtp,
+            check_source=check_source,
         )
+        path = made['path']
+        verification = made['verification']
         outputs.append(
             {
                 'format': spec.key,
@@ -890,6 +920,7 @@ def export_tracks(
                 'title': title,
                 'start_s': round(start, 3),
                 'end_s': round(end if end is not None else (dur or start), 3),
+                **({'verification': {**verification, 'trim_db': made['trim_db']}} if verification is not None else {}),
             }
         )
     progress(100)

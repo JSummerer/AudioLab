@@ -117,8 +117,8 @@ def test_a_lossy_export_uses_the_headroom_up_to_the_limit_and_is_turned_down_onc
         sf.write(tmp_path / name, limited.astype(np.float32), SR, subtype='PCM_24')
         return tmp_path / name, verification.measure_export(tmp_path / name, ceiling_dbtp=0)['true_peak_dbtp']
 
-    def check(path, progress, limit):
-        return verification.measure_export(path, ceiling_dbtp=limit, progress=progress)
+    def check(path, progress, limit, duration_s):
+        return verification.measure_export(path, ceiling_dbtp=limit, progress=progress, duration_s=duration_s)
 
     limit = export.LOSSY_LIMIT_DBTP
     # Over the master's ceiling, under the limit: the MP3 is saved as encoded; the WAV is held to the ceiling.
@@ -143,16 +143,18 @@ def test_a_lossy_export_uses_the_headroom_up_to_the_limit_and_is_turned_down_onc
     assert over['verification']['ceiling_met'] is False and over['trim_db'] == 0.0
     assert fixed['trim_db'] == round(over['verification']['true_peak_dbtp'] - limit + export.TRIM_MARGIN_DB, 2)
     assert fixed['verification']['status'] == 'verified' and fixed['verification']['true_peak_dbtp'] <= limit
-    assert fixed['verification'] == check(fixed['path'], Progress.null(), limit)  # the reading is of the saved file
+    assert fixed['verification'] == check(
+        fixed['path'], Progress.null(), limit, 4.0
+    )  # the reading is of the saved file
 
     # Cancelled while the turned-down version is checked: nothing is saved and nothing is left behind.
     calls = []
 
-    def cancel_on_recheck(path, progress, limit):
+    def cancel_on_recheck(path, progress, limit, duration_s):
         calls.append(path)
         if len(calls) == 2:
             raise Cancelled()
-        return check(path, progress, limit)
+        return check(path, progress, limit, duration_s)
 
     out = tmp_path / 'cancelled'
     with pytest.raises(Cancelled):

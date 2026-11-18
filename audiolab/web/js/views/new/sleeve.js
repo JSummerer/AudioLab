@@ -3,8 +3,8 @@
 // one line about it, what you get, then the start row (start.js renders into refs.action).
 // It follows the source and the choices: redraw() runs it after 'source' and 'action'.
 import { h, icon, clear, fmtDuration, fmtBytes } from '../../dom.js';
-import { store } from '../../store.js';
-import { state, refs, definePart, isFileLike, RECIPE_LABELS, PROCESSING_LABELS } from './state.js';
+import { RECIPE_LABELS, store } from '../../store.js';
+import { state, refs, definePart, isFileLike, PROCESSING_LABELS, enhanceAIChoice } from './state.js';
 import { shownName } from './names.js';
 import { downloadChoices, enhanceFormatsInOrder, fineTuningChanges } from './options.js';
 import { embeddedCoverNote, coverOptions } from './cover.js';
@@ -67,7 +67,8 @@ function plan() {
       const selected = keys.map((k) => all.find((f) => f.key === k));
       const formats = selected.map((f, i) => f?.label || keys[i]);
       const tuned = fineTuningChanges();
-      return [join(e.recipe === 'auto' ? 'Detect type' : RECIPE_LABELS[e.recipe], PROCESSING_LABELS[e.quality]),
+      const processing = e.quality === 'best' ? enhanceAIChoice(e.recipe, store.health?.recipes)?.label : null;
+      return [join(e.recipe === 'auto' ? 'Auto recipe' : RECIPE_LABELS[e.recipe], processing || PROCESSING_LABELS[e.quality]),
         formats.join(', ') || null, embeddedCoverNote(selected, e.embed_cover),
         tuned ? `Fine-tuning: ${tuned} change${tuned === 1 ? '' : 's'}` : null];
     }
@@ -76,7 +77,7 @@ function plan() {
       const f = (store.health?.formats?.separate || []).find((x) => x.key === s.format);
       return [join(SPLIT_MODE[s.mode], f?.label)];
     }
-    case 'analyze': return ['Loudness, peaks, dynamics and real quality'];
+    case 'analyze': return ['Loudness, peaks, dynamics and frequency range'];
     default: return [];
   }
 }

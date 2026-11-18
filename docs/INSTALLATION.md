@@ -4,7 +4,7 @@
 first opening, optional AI, updates and removal without Terminal commands.
 
 Choose the self-contained **Mac app** for everyday testing on Apple silicon, or install from
-source for development, Windows or Linux. They use the same processing code and normally
+source for development. Windows, Linux and Docker are frozen and unsupported. The instructions below remain available for existing installations. They use the same processing code and normally
 share app data for the same computer user; quit one before opening the other.
 
 **On this page:** [Mac app](#mac-app) · [Source setup](#install-from-source) ·
@@ -29,6 +29,8 @@ The **2.5.1** app includes **Save / Convert**, **Check**, and **Enhance** with *
 plus the Library. Settings offers the [optional managed AI download](#optional-ai) for Split and AI stems Enhance.
 You update the app by replacing it; **Settings → Updates & add-ons** says when a newer version exists and
 updates the downloader inside the app.
+
+For the current source checkout, see the [Settings section guide](USAGE.md#settings). The packaged Mac instructions below use the 2.5.1 menu names.
 
 ## Install from source
 
@@ -61,7 +63,7 @@ For a browser window, open a terminal in the project folder and run:
 bash start.sh --browser
 ```
 
-### Windows source launcher — experimental
+### Windows source launcher — unsupported
 
 Use the browser version first. The complete Windows installation/runtime path still needs native
 qualification; successful Mac checks do not establish Windows compatibility.
@@ -83,7 +85,7 @@ If `start.bat` cannot find uv, run `.\start.bat` in a new PowerShell window in t
 Python 3.14 or newer alone does not meet this release's source requirements; use uv to obtain a
 supported version without removing your other Python.
 
-### Linux source launcher — experimental
+### Linux source launcher — unsupported
 
 Open a terminal in the extracted folder and run:
 
@@ -206,7 +208,7 @@ posting: names, links and tool output may be personal. Never share passwords, co
 
 For the downloaded app, see [Mac uninstall and optional cleanup](MACOS.md#uninstall).
 
-For source installations, quit first and check **Settings → Files** for your output folder. Preserve
+For source installations, quit first and check **Settings → Output defaults** for your output folder. Preserve
 audio/backups inside the project, including Docker's `output/`, before removing the source folder and
 any source shortcut. Keep originals and Library data if you want them after reinstalling.
 

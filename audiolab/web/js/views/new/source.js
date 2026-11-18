@@ -5,8 +5,9 @@
 // A link from another page (a deep link) is only put into the field (offerLink).
 import { h, icon, clear, fmtDuration, fmtBytes, confidenceWords } from '../../dom.js';
 import { api } from '../../api.js';
+import { chooseNative, nativeWindow } from '../../native.js';
 import { appName } from '../../store.js';
-import { toast, callout, meter, setMeter, led } from '../../ui.js';
+import { toast, toastError, callout, meter, setMeter, led } from '../../ui.js';
 import { signInButton } from '../../actions.js';
 import { state, refs, redraw, definePart, isFileLike, focusIn, focusStart, isMediaFile, tooBig, autoTask, MAX_FILES } from './state.js';
 import { shownName, metaPayload } from './names.js';
@@ -68,18 +69,34 @@ export function loadUrl(text) {
  * open that address, so nothing is requested from this computer until the user presses Load.
  */
 export function offerLink(text) {
-  probeCtl?.abort();
-  probeCtl = null;
   const value = String(text || '').trim();
   if (refs.input) refs.input.value = value;
-  state.source = value ? { kind: 'offered', url: value } : null;
+  setPendingLink(value, true);
+}
+
+function currentLinkText() {
+  const src = state.source;
+  return (src?.url || src?.job?.source?.url || src?.text || '').trim();
+}
+
+/** Typing changes the pending source immediately, without moving the caret or issuing a lookup. */
+export function editLink(text) {
+  const value = text.trim();
+  if (value !== currentLinkText()) setPendingLink(value, state.source?.external === true);
+}
+
+function setPendingLink(value, external) {
+  probeCtl?.abort();
+  probeCtl = null;
+  state.source = value ? { kind: 'offered', url: value, external } : null;
   redraw();
 }
 
 /** A paste into the link field: looked up at once, except while a link from another page waits
  *  there — then Load stays the only thing that starts a lookup. */
 export function pasteLink(text) {
-  if (state.source?.kind === 'offered') offerLink(text);
+  if (text.trim() === currentLinkText()) return;
+  if (state.source?.external) offerLink(text);
   else loadUrl(text);
 }
 
@@ -93,6 +110,24 @@ function setFile(file) {
   if (state.download.format === 'original' || state.download.format === 'video') state.download.format = 'mp3';
   redraw();
   focusStart();
+}
+
+export async function chooseFiles(kind = 'files') {
+  if (!nativeWindow()) { document.getElementById('fileInput').click(); return; }
+  if (state.busy) return;
+  try {
+    const choice = await chooseNative(kind);
+    if (!choice) return;
+    if (choice.files.length) setFiles(choice.files);
+    if (choice.capped) {
+      toast(`You can add up to ${MAX_FILES} files at a time. Remaining files were left out.`, { kind: 'warning', timeout: 8000 });
+    } else if (!choice.files.length) {
+      toast(kind === 'batch' ? 'No supported audio or video files were found directly in this folder.'
+        : 'Choose a supported audio or video file.', { kind: 'warning' });
+    } else if (choice.skipped) {
+      toast(`Left out ${choice.skipped} unsupported or unavailable file${choice.skipped === 1 ? '' : 's'}.`, { kind: 'info' });
+    }
+  } catch (e) { toastError(e); }
 }
 
 /** Several files: one job each. Adds to an existing list, otherwise starts one. */
@@ -111,11 +146,11 @@ export function setFiles(list) {
     else toast(`“${picked[0].name}” isn’t an audio or video file ${appName()} can read.`, { kind: 'warning' });
     return;
   }
-  if (adding && state.busy) { toast('Wait until these files are uploaded, then add more.', { kind: 'warning' }); return; }
+  if (adding && state.busy) { toast('Wait until these jobs are added, then add more.', { kind: 'warning' }); return; }
   const media = picked.filter(isMediaFile);
   const skipped = picked.length - media.length;
   const items = adding ? [...state.source.items] : [];
-  const key = (f) => `${f.name}|${f.size}|${f.lastModified}`;
+  const key = (f) => f.selection || `${f.name}|${f.size}|${f.lastModified}`;
   const known = new Set(items.map((it) => key(it.file)));
   let over = 0;
   let big = 0;
@@ -164,7 +199,7 @@ export function useJobSource(job, task, { again = false, file = null } = {}) {
   const o = previous.options || {};
   // The earlier job's own name overrides carry over (its source keeps the original name).
   const carried = o.meta && Object.keys(o.meta).length ? { ...o.meta } : null;
-  const src = { kind: 'job', job: previous, meta: carried, artistCleared: carried?.artist === '' };
+  const src = { kind: 'job', job: previous, meta: carried };
   if (file) src.sourceFile = { id: file.id, name: file.name };
   if (typeof o.split_tracks === 'boolean') src.splitTracks = o.split_tracks;
   state.source = src;
@@ -188,6 +223,7 @@ function applyOptions(task, o) {
     if (Array.isArray(o.formats) && o.formats.length) e.formats = new Set(o.formats);
     if (o.advanced && typeof o.advanced === 'object') {
       e.advanced = { ...o.advanced };
+      if (e.advanced.hf_restore !== 'on') delete e.advanced.hf_restore;
       delete e.eqText; // the custom EQ box and the section list show these
       delete e.sectionRows;
       for (const key of ['eq', 'section_eq']) if (Array.isArray(e.advanced[key]) && !e.advanced[key].length) delete e.advanced[key];
@@ -264,7 +300,7 @@ function renderSource() {
       break;
     case 'offered':
       el.append(callout('info', 'Press Load to look up this link',
-        'Another page sent it here. Nothing is looked up until you press Load.'));
+        src.external ? 'Another page sent it here. Nothing is looked up until you press Load.' : null));
       break;
     case 'probing':
       el.append(sourceCard({ iconName: 'link', title: 'Looking up the link…', meta: src.url, extra: meter(0, { idle: true, label: 'Looking up' }) }));
@@ -335,7 +371,7 @@ function filesList(src) {
         h('div', { class: 'source-meta' }, metaJoin('On this computer', fmtBytes(total), 'one job per file'))),
       h('button', {
         type: 'button', class: 'btn btn-ghost btn-sm', disabled: busy,
-        onclick: () => document.getElementById('fileInput').click(),
+        onclick: () => chooseFiles(),
       }, icon('plus', 14), 'Add more'),
       h('button', { type: 'button', class: 'icon-btn source-remove', 'aria-label': 'Remove all files', disabled: busy, onclick: clearSource }, icon('close', 16))),
     h('ul', { class: 'mf-list', 'aria-label': 'Files' }, items.map((it) => fileItemRow(src, it))));
@@ -369,17 +405,18 @@ export function updateItem(it) {
   const next = led({ uploading: 'on', done: 'ok', error: 'bad' }[it.status] || 'off', { blink: it.status === 'uploading' });
   ui.led.replaceWith(next);
   ui.led = next;
-  ui.status.textContent = it.status === 'uploading' ? `${Math.round(it.pct)} %`
+  ui.status.textContent = it.status === 'uploading' ? (it.file.selection ? 'Adding…' : `${Math.round(it.pct)} %`)
     : it.status === 'done' ? 'Added' : it.status === 'error' ? 'Didn’t work' : fmtBytes(it.file.size);
   ui.error.textContent = it.status === 'error' ? (it.error || '') : '';
-  ui.meter.hidden = it.status !== 'uploading';
-  if (it.status === 'uploading') setMeter(ui.meter, it.pct);
+  ui.meter.hidden = it.status !== 'uploading' || !!it.file.selection;
+  if (!ui.meter.hidden) setMeter(ui.meter, it.pct);
   ui.remove.hidden = state.busy;
 }
 
 function removeItem(src, it) {
   if (state.busy) return;
   const i = src.items.indexOf(it);
+  delete src.submitError;
   src.items = src.items.filter((x) => x !== it);
   if (!src.items.length) { clearSource(); return; }
   if (src.items.length === 1) {

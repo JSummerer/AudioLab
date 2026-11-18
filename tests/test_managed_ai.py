@@ -325,10 +325,10 @@ def test_unsafe_archives_never_activate_or_touch_outside(setup, server, name, ki
 
 
 def test_duplicate_archive_members_are_rejected(setup, server):
-    # A case alias is a duplicate on macOS' default file system, so it covers the exact duplicate too.
     use_archive(setup, server, [('AudioLabAI', b'first', tarfile.REGTYPE), ('audiolabAI', b'second', tarfile.REGTYPE)])
     assert not finish(setup.manager)
     assert not setup.calls
+    assert 'duplicate' in '\n'.join(setup.manager.log)
 
 
 @pytest.mark.parametrize('forward_reference', [False, True])
@@ -397,6 +397,8 @@ def test_hardlinks_reject_unsafe_missing_directory_self_and_case_alias_targets(s
     assert not (setup.manager.root / 'active.json').exists()
     assert not setup.calls
     assert sentinel.read_bytes() == b'never link outside the archive'
+    if target.endswith('/'):
+        assert 'unsafe file' in '\n'.join(setup.manager.log)
 
 
 @pytest.mark.parametrize('forward_reference', [False, True])

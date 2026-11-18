@@ -7,19 +7,46 @@ import { fmtBytes } from '../../dom.js';
 export const MAX_FILES = 50;
 // Volume only sets the level, so only these fine-tuning keys apply to it.
 export const LIGHT_KEYS = ['target_lufs', 'tp_ceiling_db', 'sample_rate'];
-export const RECIPE_LABELS = { club: 'DJ set', live: 'Concert', music: 'Song', voice: 'Podcast / voice' };
-// The labels describe what runs; the API keeps the original quality keys.
-export const PROCESSING_LABELS = { light: 'Volume only', standard: 'Tone and volume', best: 'AI stems' };
+// The API keeps the original quality keys.
+export const PROCESSING_LABELS = { light: 'Volume only', standard: 'Tone and volume', best: 'AI when supported' };
+
+const AI_CHOICES = {
+  auto: {
+    label: PROCESSING_LABELS.best,
+    desc: 'AI use depends on the detected audio type. It may isolate the voice or balance parts separately.',
+  },
+  stem_eq: {
+    label: 'Balance parts separately',
+    desc: 'Uses AI to separate drums, bass, vocals and other sounds, then adjusts their tone individually.',
+  },
+  voice_isolate: {
+    label: 'Isolate voice',
+    desc: 'Keeps the voice estimated by AI, with the backing and background sounds separated out.',
+  },
+};
+
+export function enhanceAIChoice(recipe, recipes) {
+  const stage = recipe === 'auto' ? 'auto' : recipes?.find((r) => r.key === recipe)?.ai_stage;
+  const choice = AI_CHOICES[stage];
+  return choice ? { ...choice, stage } : null;
+}
+
+/** Keep a selected AI option only when the new recipe uses the same AI action. */
+export function qualityAfterRecipeChange(quality, from, to, recipes) {
+  if (quality !== 'best') return quality;
+  const stage = enhanceAIChoice(from, recipes)?.stage;
+  return stage && stage === enhanceAIChoice(to, recipes)?.stage ? quality : 'standard';
+}
 
 export const TASKS = [
   { key: 'download' }, // Save or Convert: see options.js taskText()
-  { key: 'enhance', title: 'Enhance', desc: 'Better sound, automatically' },
+  { key: 'enhance', title: 'Enhance', desc: 'Adjusts tone and volume automatically' },
   { key: 'separate', title: 'Split', desc: 'Vocals and instruments · AI' },
-  { key: 'analyze', title: 'Check', desc: 'Loudness and real quality' },
+  { key: 'analyze', title: 'Check', desc: 'Loudness, peaks and frequency range, measured' },
 ];
 
 /**
- * source: null | { kind: 'invalid' | 'probing' | 'url-error' | 'url' | 'playlist' | 'file' | 'files' | 'job', … }
+ * source: null | { kind: 'invalid' | 'offered' | 'probing' | 'url-error' | 'url' | 'playlist' | 'file' | 'files' | 'job', … }
  * One link or file also carries what the user added to it: `meta` (names.js), `cover`
  * (cover.js), `tracklist` + `splitTracks` (tracks.js).
  * The per-task option objects survive switching tasks and leaving the view.
@@ -31,7 +58,7 @@ export const state = {
   task: 'download',
   taskPicked: false,
   download: { format: 'mp3', embed_cover: true },
-  enhance: { recipe: 'auto', quality: 'standard', formats: new Set(['mp3_320', 'wav16']), embed_cover: true, advanced: {} },
+  enhance: { recipe: 'auto', quality: 'standard', formats: new Set(['mp3_320']), embed_cover: true, advanced: {} },
   separate: { mode: 'karaoke', format: 'wav16', model: 'auto' },
   busy: false,
   uploadPct: null,
@@ -53,30 +80,6 @@ export function redraw(...names) {
   if (names.length && !names.includes('sleeve') && (names.includes('source') || names.includes('action'))) renderers.sleeve?.();
   // A changed choice can change what Start does ("Retry 1 failed file" or all files): its words follow.
   if (names.length && !names.includes('action')) renderers.actionLabel?.();
-}
-
-// The formats last started per task, kept in this browser with the Settings default they were
-// chosen over: once Settings → Defaults change, those apply again.
-const FORMATS_KEY = 'audiolab.formats';
-const DEFAULT_SETTING = { download: 'download_format', enhance: 'enhance_formats', separate: 'separate_format' };
-const settingDefault = (task) => JSON.stringify(store.settings?.[DEFAULT_SETTING[task]] ?? null);
-
-export function rememberFormats(task, options) {
-  const value = task === 'enhance' ? options.formats : options.format;
-  if (!DEFAULT_SETTING[task] || value == null) return;
-  try {
-    const all = JSON.parse(localStorage.getItem(FORMATS_KEY) || '{}') || {};
-    all[task] = { value, base: settingDefault(task) };
-    localStorage.setItem(FORMATS_KEY, JSON.stringify(all));
-  } catch { /* this page only */ }
-}
-
-/** The formats last started for `task` (a key, or keys for Enhance), unless Settings → Defaults changed since. */
-export function rememberedFormats(task) {
-  try {
-    const last = JSON.parse(localStorage.getItem(FORMATS_KEY) || '{}')?.[task];
-    return last && last.base === settingDefault(task) ? last.value : null;
-  } catch { return null; }
 }
 
 /** The fine-tuning values that apply to the chosen processing mode (sent with the job). */
@@ -102,7 +105,7 @@ export function isMediaFile(f) {
 /** Why `file` can't be uploaded because of its size ("larger than the 4 GB limit"), or null. */
 export function tooBig(file) {
   const mb = store.health?.limits?.max_upload_mb;
-  return mb && file?.size > mb * 1024 * 1024 ? `larger than the ${fmtBytes(mb * 1024 * 1024)} limit` : null;
+  return !file?.selection && mb && file?.size > mb * 1024 * 1024 ? `larger than the ${fmtBytes(mb * 1024 * 1024)} limit` : null;
 }
 
 /** The task a new source starts on unless the user picked one: Enhance for files, Save for links. */

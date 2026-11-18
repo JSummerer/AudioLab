@@ -21,7 +21,7 @@ the user's own computer.
   **Library**: finished results with versions and a full-length original-vs-enhanced compare.
 - One Python package `audiolab/`: a FastAPI server, a plain-JS web UI (`audiolab/web/`), a CLI. On macOS it opens in
   its own window (pywebview); elsewhere in the browser. `docker/` runs it as a server.
-- Status: public beta. macOS first; keep Windows/Linux working (all OS code lives in one module). The version
+- Status: public beta. macOS is the supported platform. Windows, Linux and Docker are frozen and unsupported. Their existing paths may work. The version
   is plain MAJOR.MINOR.PATCH in `audiolab/__init__.py`; "beta" is said in the release title, not the number.
   Release notes are in `CHANGELOG.md`, later ideas in `docs/ROADMAP.md`.
 
@@ -67,9 +67,8 @@ bash -n start.sh                                     # when you touched the laun
 ## Conventions
 - Python: ruff config in `pyproject.toml` (single quotes, 120 columns), Python 3.10–3.13, type hints and comment
   density like the surrounding code.
-- **OS-specific code lives only in `audiolab/system.py`** (and `audiolab/trash.py` for the Trash, kept apart because
-  the published AI add-on is pinned to `system.py`'s exact bytes). Other modules call their functions instead of
-  checking `sys.platform`.
+- Put OS behavior in `audiolab/system.py`. Existing exceptions are Trash in `trash.py`, executable naming and
+  link handling in `media/ffmpeg.py`, and platform reporting in `cli.py` and `diagnostics.py`.
 - User-facing failures raise `AudioLabError(message, hints, fix)` in plain language, with `hints` a novice can
   act on.
 - Long work stays cancellable: report through `Progress`/`check_cancel`; run subprocesses via `media.proc.run`.
@@ -83,7 +82,7 @@ bash -n start.sh                                     # when you touched the laun
   - Copy is short and plain; controls are keyboard and screen-reader friendly.
 - **Design ("Sleeve", 2.4):** a white sheet on a grey desk (the sidebar), like a record sleeve's liner notes.
   - Values come from `css/tokens.css` only: colours (light and dark), the type sizes, the spacing scale `--s-1`…
-    `--s-7` (4–48 px) and the radii. No new hex values, font sizes or shadows in view CSS.
+    `--s-7` (4–48 px) and the radii. Use literal geometry for circles and pills, one-pixel hairlines and focus rings where needed. Keep new colours, type sizes and reusable shadows in the tokens.
   - Serif (`--font-serif`) only for page titles, section heads and record titles; everything else in the system
     font. The serif is New York where `ui-serif` exists (Safari, the Mac window), else the bundled Source Serif 4
     (`web/fonts/`, one weight): change fonts only in `tokens.css` + `web/fonts/`, never per view. No monospace except
@@ -99,6 +98,13 @@ bash -n start.sh                                     # when you touched the laun
     `shortFolder()`), and anything below WCAG AA contrast.
 - Keep it simple. It's "a GitHub repo people download and run": no new dependency without a strong reason, and
   no speculative abstractions.
+
+## Changes that need a written design or owner decision
+
+Agree on the intended behavior and how to check it before changing sound thresholds, deletion and
+cancellation, lock order, the AI helper interface or pinned inputs, or packaging and publication.
+For changes spanning long-lived views, describe how pending work, drafts and playback survive
+navigation. New settings, options and views should serve an identified user need.
 
 ## Keep in sync when you change something
 - Endpoint, field or setting: update `docs/API.md` (and tests) in the same change. Settings need the default in

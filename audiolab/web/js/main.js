@@ -2,7 +2,7 @@
 // running-job badge), the router and its views, drag & drop (files and links),
 // paste-anywhere, deep links (?url=…&task=…: the link waits in the field for Load), the
 // notice banner (no ffmpeg, an unavailable output folder) and the live connection.
-import { h, icon, clear, hydrateIcons } from './dom.js';
+import { IS_MAC, h, icon, clear, hydrateIcons } from './dom.js';
 import { onAuthRequired, setToken } from './api.js';
 import { store, on, loadHealth, loadSettings, loadJobs, connectEvents, activeCount, deviceLabel, appName } from './store.js';
 import { toastError, tokenDialog, led } from './ui.js';
@@ -120,7 +120,6 @@ document.getElementById('skipLink').addEventListener('click', (e) => {
 // Narrow windows show the tab bar instead, without a toggle.
 // ---------------------------------------------------------------------------
 const SIDEBAR_KEY = 'audiolab.sidebar';
-const IS_MAC = /Mac/i.test(navigator.platform || navigator.userAgent);
 const sidebarToggle = document.getElementById('sidebarToggle');
 const narrow = matchMedia('(max-width: 759px)');
 const compact = matchMedia('(max-width: 999px)');
@@ -281,7 +280,7 @@ function syncBanner() {
   const ff = hth.ffmpeg;
   let next = null;
   if (ff && ff.ok === false) {
-    next = [ff.error || 'The audio engine (ffmpeg) is missing, so nothing can be processed.', 'Details', () => go(settingsPath('system'))];
+    next = [ff.error || 'The audio engine (ffmpeg) is missing, so nothing can be processed.', 'Details', () => go(settingsPath('ffmpeg'))];
   } else if (hth.output_dir_ok === false) {
     next = [`The output folder isn’t available: ${hth.output_dir || ''}.`, 'Change folder', () => go(settingsPath('output'))];
   }

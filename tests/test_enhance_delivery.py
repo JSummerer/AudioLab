@@ -53,8 +53,18 @@ def delivery(tmp_path, monkeypatch):
     return prepare
 
 
-def test_preview_uses_final_master_and_export_reading_reaches_library(delivery):
+def test_preview_uses_final_master_and_export_reading_reaches_library(delivery, monkeypatch):
+    from audiolab import ai
+    from audiolab.recipes import chain
+
     source, ctx, _notes = delivery()
+    ctx.options['quality'] = 'best'
+    monkeypatch.setattr(ai, 'ai_status', lambda: {'available': True, 'device': 'cpu'})
+
+    def fallback(_ref, params, *_args):
+        return {'x': None, 'report': {'stage': params.ai_stage, 'fallback': True}, 'warning': None}
+
+    monkeypatch.setattr(chain, '_ai_stage', fallback)
     result = enhance.run(ctx, source)
     assert result['processing']['applied']['adaptive_lowmid']['engaged']
     (file,) = result['files']
@@ -86,6 +96,12 @@ def test_preview_uses_final_master_and_export_reading_reaches_library(delivery):
     entry = library.public(library.get(job.id))
     retained = entry['processing']
     assert retained['requested']['advanced']['adaptive_lowmid'] == 'strong'
+    assert retained['requested']['quality'] == 'best'
+    assert retained['applied']['ai'] == {'stage': 'stem_eq', 'fallback': True}
+    assert retained['resolved']['params']['ai_stage'] == 'stem_eq'
+    assert retained['resolved']['calibration']['version'] == 1
+    assert retained['resolved']['auto_compressor'] == 'off'
+    assert entry['has_overview'] and entry['adjust_quality'] == 'standard'
     assert retained['resolved']['params']['adaptive_lowmid_db'] == 3.0
     assert retained['applied']['adaptive_lowmid'] == result['processing']['applied']['adaptive_lowmid']
     assert retained['metrics'] == result['metrics']
@@ -111,13 +127,37 @@ def test_master_reuses_the_analysis_measurement_of_the_reference(delivery, monke
 def test_meter_error_and_ceiling_miss_keep_the_exports(delivery, monkeypatch):
     source, ctx, notes = delivery(('mp3_320', 'wav16', 'wav24', 'aac_256'))
     ctx.options['split_tracks'] = True  # tracks are cut in the first format, the MP3
-    cuts = []
-    monkeypatch.setattr(common, 'split_into_tracks', lambda *a, **kw: (cuts.append(kw), ([], None))[1])
+    ctx.options['tracklist'] = '0:00 Within\n0:02 Over\n0:04 Missing\n0:06 Slightly over'
+    actual_encode = export.run_ffmpeg
+    track_encodes = {i: [] for i in range(1, 5)}
+
+    def encode(args, **kwargs):
+        path = Path(args[-1])
+        if path.parent.name != 'Tracks':
+            return actual_encode(args, **kwargs)
+        track = int(path.name[1:3])
+        track_encodes[track].append(args[args.index('-af') + 1])
+        assert kwargs['duration_s'] == 2.0
+        path.write_bytes(b'encoded track fixture')
+
+    monkeypatch.setattr(export, 'run_ffmpeg', encode)
     private_detail = '/private/work/meter.log'
     lossy_checks = []
 
     def measure(path, *, ceiling_dbtp, progress, duration_s):
         reading = {'integrated_lufs': -14.0, 'ceiling_dbtp': ceiling_dbtp, 'tolerance_db': PEAK_TOLERANCE_DB}
+        if path.parent.name == 'Tracks':
+            assert duration_s == 2.0 and ceiling_dbtp == export.LOSSY_LIMIT_DBTP
+            track = int(path.name[1:3])
+            if track == 3:
+                raise AudioLabError('Meter failed', detail=private_detail)
+            excess = {1: -0.1, 2: 0.6, 4: 0.3}[track]
+            return {
+                **reading,
+                'true_peak_dbtp': ceiling_dbtp + excess,
+                'status': 'warning' if excess > 0 else 'verified',
+                'ceiling_met': excess <= 0,
+            }
         if path.suffix in ('.mp3', '.m4a'):  # over their limit by 0.5 / 0.3 dB as encoded; the AAC stays over
             lossy_checks.append(path)
             over = path.suffix == '.m4a' or len(lossy_checks) == 1
@@ -137,7 +177,7 @@ def test_meter_error_and_ceiling_miss_keep_the_exports(delivery, monkeypatch):
 
     monkeypatch.setattr(enhance, 'measure_export', measure)
     result = enhance.run(ctx, source)
-    files = {f['format']: f for f in result['files']}
+    files = {f['format']: f for f in result['files'] if f.get('group') != 'tracks'}
     assert files.keys() == {'wav16', 'wav24', 'mp3_320', 'aac_256'}
     assert all(Path(f['path']).is_file() for f in files.values())
     unverified = files['wav16']['verification']
@@ -162,10 +202,35 @@ def test_meter_error_and_ceiling_miss_keep_the_exports(delivery, monkeypatch):
     # The MP3 was encoded once more, turned down, before it was saved: no warning, a plain "What we did" line.
     mp3 = files['mp3_320']['verification']
     assert len(lossy_checks) == 4 and mp3['status'] == 'verified' and mp3['ceiling_dbtp'] == export.LOSSY_LIMIT_DBTP
-    assert mp3['message'] is None and len(result['warnings']) == 3
+    assert mp3['message'] is None and len(result['warnings']) == 4
     line = 'Turned the MP3 down slightly so its peaks stay under the limit (-1.0 dB; encoding raises peaks).'
     assert line in result['summary'] and not any('Turned the AAC' in s for s in result['summary'])
-    assert [kw['trim_db'] for kw in cuts] == [1.0]  # its tracks are turned down just like the full MP3
+    tracks = [f for f in result['files'] if f.get('group') == 'tracks']
+    assert [(f['start_s'], f['end_s']) for f in tracks] == [(0, 2), (2, 4), (4, 6), (6, 8)]
+    assert all(Path(f['path']).is_file() for f in tracks)
+    assert len(list(Path(result['tracks_dir']).iterdir())) == 4
+    within, over, missing, slightly_over = [f['verification'] for f in tracks]
+    assert within['status'] == 'verified' and within['message'] is None
+    assert over['status'] == slightly_over['status'] == 'warning'
+    assert over['true_peak_dbtp'] == pytest.approx(0.5) and slightly_over['true_peak_dbtp'] == pytest.approx(0.2)
+    assert missing['status'] == 'unverified' and missing['true_peak_dbtp'] is None
+    assert '03 - Missing.mp3' in missing['message'] and private_detail not in missing['message']
+    group = 'Track checks — 1 within the peak limit, 2 over the peak limit, 1 could not be checked.'
+    assert result['warnings'].count(group) == 1 and group not in result['summary']
+    assert notes.count(('warning', group)) == 1
+    for check in (over, missing, slightly_over):
+        assert check['message'] not in result['warnings'] and ('warning', check['message']) not in notes
+    assert all(f['verification']['trim_db'] == 1.0 for f in tracks)
+    assert all(len(commands) == 1 and 'volume=-1.00dB' in commands[0] for commands in track_encodes.values())
+
+    job = Job(ctx.job_id, 'enhance', source, ctx.options, title='Generated', result=result)
+    assert library.record(job)
+    entry = library.public(library.get(job.id))
+    assert entry['track_check_summary'] == group
+    saved_tracks = [f for f in entry['files'] if f['kind'] == 'track']
+    assert [f['verification'] for f in saved_tracks] == [
+        {k: v for k, v in f['verification'].items() if k != 'message'} for f in tracks
+    ]
 
 
 @pytest.mark.parametrize(('helper', 'stage'), [('make_previews', 'preview'), ('measure_export', 'export')])

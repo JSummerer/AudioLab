@@ -8,6 +8,7 @@ Conventions for task work folders (`ctx.work_dir`):
 import re
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ from .. import APP_NAME, __version__, outputs
 from ..context import Progress, TaskContext
 from ..errors import AudioLabError, storage_error
 from ..media import export, ffmpeg, youtube
+from ..native_inputs import checked_path, source_path
 from ..resources import preflight
 from ..settings import SETTINGS, validate_output_location
 from ..util import PLAYABLE_EXT, human_bytes, human_duration, link_or_copy, sanitize_filename, unique_path
@@ -38,6 +40,12 @@ class Acquired:
     cover: Path | None = None  # the user's own cover image (a prepared JPEG in the job's input/)
     stream: dict[str, Any] | None = None  # a link's: the stream the site delivered (youtube.parse_stream)
     reused_original: bool = False  # a link's: the Library's kept original stood in for the download
+    native_identity: tuple | list | None = None
+
+    def check_source(self) -> None:
+        """Verify a file read in place still matches the window's selection."""
+        if self.native_identity is not None:
+            checked_path(self.path, self.native_identity)
 
 
 def scratch_dir(ctx: TaskContext) -> Path:
@@ -162,7 +170,7 @@ def _acquire(
                 ]
             raise
 
-    path = Path(source.get('path') or '')
+    path = source_path(source)
     if not path.is_file():
         raise AudioLabError(
             'The uploaded file is no longer available.', hints=['Add the file again and start a new job.']
@@ -173,6 +181,8 @@ def _acquire(
         )
     progress(10, 'Reading the file…')
     info = ffmpeg.probe_media(path)
+    if '_native_identity' in source:
+        source_path(source)
     if not info.get('has_audio'):
         if info.get('has_video'):
             raise AudioLabError(
@@ -204,6 +214,7 @@ def _acquire(
     return Acquired(
         path=path,
         title=title,
+        native_identity=source.get('_native_identity'),
         artist=artist,
         duration_s=duration,
         metadata={
@@ -225,6 +236,7 @@ def reference_path(ctx: TaskContext) -> Path:
 def decode(ctx: TaskContext, acq: Acquired, progress: Progress) -> dict[str, Any]:
     """Decode once to the 48 kHz float reference every analysis works from."""
     ref = reference_path(ctx)
+    acq.check_source()
     try:  # what the source really is (the reference is always 48 kHz stereo float)
         src = ffmpeg.probe_media(acq.path)
         acq.metadata['source_audio'] = {
@@ -232,7 +244,9 @@ def decode(ctx: TaskContext, acq: Acquired, progress: Progress) -> dict[str, Any
         }
     except Exception:
         pass
+    acq.check_source()
     info = ffmpeg.decode_reference(acq.path, ref, progress=progress, duration_s=acq.duration_s)
+    acq.check_source()  # the private reference can now be used even if the picked file moves
     if not acq.duration_s:
         # Duration was unknown before decoding: the size/memory check only happens now.
         acq.duration_s = info.get('duration_s')
@@ -283,24 +297,30 @@ def cover_art(ctx: TaskContext, acq: Acquired) -> Path | None:
         return youtube.download_thumbnail(acq.thumbnail, scratch_dir(ctx) / 'cover.jpg', progress=ctx.progress)
     if acq.metadata.get('has_cover'):
         try:
-            return export.cover_jpeg(acq.path, scratch_dir(ctx) / 'cover.jpg')
+            acq.check_source()
+            cover = export.cover_jpeg(acq.path, scratch_dir(ctx) / 'cover.jpg')
+            acq.check_source()
+            return cover
         except AudioLabError as e:  # a broken picture must not cost the audio
             ctx.note('warning', f'Could not take over the cover image: {e}')
     return None
 
 
-def cover_source(source: dict[str, Any]) -> str | None:
+def cover_source(source: dict[str, Any], acq: Acquired | None = None) -> str | None:
     """Where the job's cover comes from (the rule of `cover_art`): 'own' (the user's image), 'link'
     (the link's thumbnail) or 'file' (the picture an uploaded file carries); None when it has none."""
     if _own_cover(source):
         return 'own'
     if _thumbnail(source):
         return 'link'
-    path = Path(source.get('path') or '')
-    if source.get('kind') == 'file' and path.is_file():
-        info = ffmpeg.probe_media(path)
-        if info.get('has_cover') and not info.get('has_video'):
-            return 'file'
+    if source.get('kind') == 'file':
+        if acq is not None:  # describing a finished render: use the file facts read at acquisition
+            return 'file' if acq.metadata.get('has_cover') else None
+        path = source_path(source)
+        if path.is_file():
+            info = ffmpeg.probe_media(path)
+            if info.get('has_cover') and not info.get('has_video'):
+                return 'file'
     return None
 
 
@@ -337,12 +357,13 @@ def save_cover(
             pic = youtube.fetch_thumbnail(_thumbnail(source), Path(tmp) / 'thumbnail.src', progress=progress)
         else:  # the picture as the file carries it; one that isn't a JPEG/PNG/WebP becomes a JPEG
             pic = Path(tmp) / 'embedded.src'
-            media = ['-i', source['path'], '-map', '0:v:0', '-frames:v', '1']
+            media = ['-i', str(source_path(source)), '-map', '0:v:0', '-frames:v', '1']
             ffmpeg.run_ffmpeg(
                 [*media, '-c:v', 'copy', '-f', 'image2', '-update', '1', str(pic)], progress=progress, what='cover copy'
             )
             if export.picture_size(pic) is None:
-                pic = export.cover_jpeg(source['path'], Path(tmp) / 'embedded.jpg', max_px=None)
+                pic = export.cover_jpeg(source_path(source), Path(tmp) / 'embedded.jpg', max_px=None)
+            source_path(source)  # refuse an embedded cover if the picked file changed during extraction
         progress.check_cancel()
         path = export.save_picture(pic, folder, stem)
     entry = file_entries(
@@ -456,7 +477,7 @@ def output_folder(name: str, parent: Path | None = None) -> Path:
         raise storage_error(e) or AudioLabError(
             f'Could not create a folder in {root}: {e.strerror or e}.',
             hints=[
-                'Choose a different output folder in Settings → Files.',
+                'Choose a different output folder in Settings → Output defaults.',
                 'Check that the folder exists and you are allowed to write to it.',
             ],
         ) from e
@@ -472,7 +493,7 @@ def output_root(acq: Acquired) -> Path:
     except OSError as e:
         raise storage_error(e) or AudioLabError(
             f'Could not write to {root}: {e.strerror or e}.',
-            hints=['Choose a different output folder in Settings → Files.'],
+            hints=['Choose a different output folder in Settings → Output defaults.'],
         ) from e
     return root
 
@@ -492,6 +513,7 @@ def file_entries(outputs: list[dict[str, Any]], start: int = 0) -> list[dict[str
                 'size_bytes': path.stat().st_size if path.exists() else o.get('size_bytes', 0),
                 'playable': path.suffix.lower() in PLAYABLE_EXT,
                 'path': str(path),
+                **({'verification': dict(o['verification'])} if o.get('verification') is not None else {}),
             }
         )
     return files
@@ -624,12 +646,15 @@ def split_into_tracks(
     start: int,
     sample_rate: int | None = None,
     trim_db: float = 0.0,
+    check: export.Check | None = None,
+    ceiling_dbtp: float | None = None,
+    check_source: Callable[[], None] | None = None,
 ) -> tuple[list[dict[str, Any]], Path | None]:
     """`split_tracks`: cut `src` into the link's tracks (chapters or the description's
     tracklist) inside a new folder `folder_name` under `parent`. Returns Result.files
     entries (ids from f<start>, with group/track/start_s/end_s) and the folder —
     ([], None) when the source has no usable tracklist. `trim_db`: dB the tracks are turned
-    down by, the same as their format's full file (media.export)."""
+    down by, the same as their format's full file (media.export). A supplied check measures lossy cuts."""
     tracks = acq.metadata.get('tracks') or []
     if not tracks:
         progress(100)
@@ -645,6 +670,9 @@ def split_into_tracks(
         progress=progress,
         sample_rate=sample_rate,
         trim_db=trim_db,
+        check=check,
+        ceiling_dbtp=ceiling_dbtp,
+        check_source=check_source,
     )
     if not outputs:
         folder.rmdir()

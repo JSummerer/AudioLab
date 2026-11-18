@@ -61,7 +61,9 @@ def validate_output_location(target: Path) -> None:
     if resolved.is_relative_to(data_root) or data_root.is_relative_to(resolved):
         raise AudioLabError(
             'Choose an output folder separate from AudioLab’s app data folder (jobs, Library and AI storage).',
-            hints=['Choose a folder such as Music/AudioLab in Settings → Files, outside the app data folder.'],
+            hints=[
+                'Choose a folder such as Music/AudioLab in Settings → Output defaults, outside the app data folder.'
+            ],
         )
 
 
@@ -103,7 +105,7 @@ CHECK_UPDATES_DEFAULT = False
 class UserSettings:
     output_dir: str = ''  # '' = default_output_dir()
     download_format: str = 'mp3'  # see media.export.FORMATS
-    enhance_formats: tuple = ('mp3_320', 'wav16')
+    enhance_formats: tuple = ('mp3_320',)
     separate_format: str = 'wav16'
     ui_mode: str = 'simple'  # simple | advanced
     theme: str = 'auto'  # auto | light | dark

@@ -253,7 +253,7 @@ _CHANNEL_WORDS = {
 }
 
 
-def probe_media(path: Path, progress: Progress | None = None) -> dict[str, object]:
+def probe_media(path: Path, progress: Progress | None = None, *, header_only: bool = False) -> dict[str, object]:
     """Describe a media file by parsing `ffmpeg -i` (works without ffprobe)."""
     info: dict[str, object] = {
         'duration_s': None,
@@ -274,10 +274,26 @@ def probe_media(path: Path, progress: Progress | None = None) -> dict[str, objec
     if not path.is_file():
         return info
     lines: list[str] = []  # collect everything: long chapter/tag lists overflow the stderr tail
+    # The picker needs only the duration of ordinary self-contained media. Exclude
+    # playlist/manifest demuxers and all network protocols from this optional probe.
+    header = (
+        [
+            '-protocol_whitelist',
+            'file',
+            '-format_whitelist',
+            'wav,flac,aiff,mp3,ogg,mov,matroska,webm,aac,asf',
+            '-probesize',
+            '1048576',
+            '-analyzeduration',
+            '1000000',
+        ]
+        if header_only
+        else []
+    )
     proc.run(
-        [ffmpeg_path(), '-hide_banner', '-nostdin', '-i', str(path)],
+        [ffmpeg_path(), '-hide_banner', '-nostdin', *header, '-i', str(path)],
         progress=progress,
-        timeout_s=120,
+        timeout_s=3 if header_only else 120,
         what='media probe',
         capture_stdout=False,
         on_line=lines.append,
@@ -453,6 +469,7 @@ PCM_RATE = 48000
 # full decode and consecutive chunks join without a seam.
 PCM_GRID = 1920
 PCM_PREROLL = 12 * PCM_GRID  # 0.48 s decoded and dropped: decoders and the resampler warm up
+PCM_ALIGNMENT_LIMIT = 25 * PCM_RATE  # longest prefix Compare will decode to establish sample alignment
 PCM_TIMEOUT_S = 60
 _MS_TIMESTAMPS = ('.webm', '.mkv', '.mka')  # Matroska: timestamps in whole milliseconds
 # A seek abandons its chunk in the browser, not here: at most this many decodes run at once, so fast
@@ -480,8 +497,13 @@ def decode_pcm(path: Path, offset: int, frames: int, cancel_event: threading.Eve
         if offset <= PCM_PREROLL:
             return _decode(path, offset, frames, stop)
         shift = _seek_shift(path, cancel_event) if path.suffix.lower() in _MS_TIMESTAMPS else 0
-        if shift is None:  # couldn't be measured (a short file, or silent where it looks): exact from the start
-            return _decode(path, offset, frames, stop)
+        if shift is None:
+            if offset <= PCM_ALIGNMENT_LIMIT:
+                return _decode(path, offset, frames, stop)
+            raise AudioLabError(
+                'AudioLab could not line up these recordings at this position.',
+                hints=['Compare an earlier passage, or use a WAV or FLAC file.'],
+            )
         return _decode(path, offset, frames, stop, seek=True, shift=shift)
     finally:
         _PCM_SLOTS.release()
@@ -550,12 +572,9 @@ def _measured_shift(
     """Frames to trim later after a seek into this file, measured once. Matroska keeps timestamps in whole
     milliseconds, so ffmpeg can place the audio a little off after a seek (YouTube's WebM Opus, whose frames
     start at x.5 ms: 1 ms early). The same passage is decoded from the start and by a seek and lined up.
-    None when the file ends first or is silent at every place tried. Bounded previews only try
-    early positions so that calibration cannot require decoding a long prefix. 0 when a passage
-    with sound lines up with no whole-frame shift (a fractional one stays: under a millisecond)."""
+    Compare and previews only try early positions. Cache None too when those positions are inconclusive."""
     n, stop = 10 * PCM_GRID, Progress.null(cancel_event)
-    positions = (25, 250, 625) if bounded else (25, 250, 1500, 7500, 22500)
-    for at in positions:  # × PCM_GRID: at 1 s and 10 s, then 25 s or longer for full comparison
+    for at in (25, 250, PCM_ALIGNMENT_LIMIT // PCM_GRID):  # at 1 s, 10 s and 25 s
         at *= PCM_GRID
         via = np.frombuffer(_decode(Path(path), at, n, stop, seek=True), np.float32)
         if len(via) < 2 * n:

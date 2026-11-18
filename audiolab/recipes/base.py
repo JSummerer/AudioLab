@@ -159,9 +159,16 @@ class Recipe:
     name: str
     short: str
     description: str
+    ai_stage: str = 'none'
 
     def public(self) -> dict[str, str]:
-        return {'key': self.key, 'name': self.name, 'short': self.short, 'description': self.description}
+        return {
+            'key': self.key,
+            'name': self.name,
+            'short': self.short,
+            'description': self.description,
+            'ai_stage': self.ai_stage,
+        }
 
 
 RECIPES: dict[str, Recipe] = {
@@ -172,6 +179,7 @@ RECIPES: dict[str, Recipe] = {
         'The original ClubReady chain for DJ sets and electronic mixes: loudness matched to the '
         "set's energy, adaptive low-mid control, extra bass weight, bass below "
         '90 Hz folded to mono for club systems, gentle glue compression and a true-peak limiter.',
+        ai_stage='stem_eq',
     ),
     'live': Recipe(
         'live',
@@ -186,6 +194,7 @@ RECIPES: dict[str, Recipe] = {
         'Gentle polish that keeps the original character',
         'For songs and tracks: light tonal clean-up, loudness kept where it is unless it is far '
         'too quiet or too loud, peaks kept safe. Nothing is added that was not there.',
+        ai_stage='stem_eq',
     ),
     'voice': Recipe(
         'voice',
@@ -193,12 +202,11 @@ RECIPES: dict[str, Recipe] = {
         'Clear, even speech at podcast loudness',
         'For podcasts, talks and interviews: rumble removed, voice clarity lifted, loud and quiet '
         'moments evened out, -16 LUFS podcast loudness. Noise reduction is available when you choose it.',
+        ai_stage='voice_isolate',
     ),
 }
 
 _TYPE_TO_RECIPE = {'dj_set': 'club', 'live_concert': 'live', 'song': 'music', 'speech': 'voice', 'unknown': 'music'}
-
-_AI_STAGE = {'club': 'stem_eq', 'music': 'stem_eq', 'voice': 'voice_isolate', 'live': 'none'}
 
 _TP_CEILING = {'club': -1.25, 'live': -1.0, 'music': -1.0, 'voice': -1.5}
 
@@ -443,7 +451,7 @@ def resolve(
         )
 
     # --- quality / AI stage --------------------------------------------------
-    stage = _AI_STAGE[key] if quality == 'best' else 'none'
+    stage = RECIPES[key].ai_stage if quality == 'best' else 'none'
     if quality == 'best':
         if stage == 'none':
             d.set(
@@ -474,7 +482,7 @@ def resolve(
                     'AI stage',
                     'none (fallback)',
                     'auto',
-                    'The AI add-on is unavailable. Used Tone and volume processing instead of AI stems.',
+                    'The AI add-on is unavailable. Used Tone and volume processing.',
                 )
     p.ai_stage = stage
     if stage == 'stem_eq' and p.presence_db:

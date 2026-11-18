@@ -10,17 +10,18 @@ import stat
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from .. import library, processing, tasks
+from .. import adjust_drafts, library, processing, tasks
 from ..errors import AudioLabError
 from ..jobs import new_job_id
 from ..media import export, ffmpeg
+from ..native_inputs import source_path
 from ..settings import SETTINGS
 from ..util import link_or_copy
 from .jobs import _cover_dir, serve_file, serve_pcm
-from .state import State
+from .state import State, native_selection
 
 router = APIRouter()
 
@@ -34,6 +35,37 @@ def list_library(state: State):
 @router.get('/api/library/{entry_id}')
 def get_entry(state: State, entry_id: str):
     entry = _entry(entry_id)
+    result = library.public(entry, state.manager.get(entry.get('job_id') or '') is not None)
+    if entry.get('task') == 'enhance' and result['original']['kept']:
+        result['adjust_draft'] = adjust_drafts.read(entry)
+    return result
+
+
+@router.put('/api/library/{entry_id}/adjust-draft')
+def save_adjust_draft(entry_id: str, body: dict = Body(...)):
+    if (
+        body.keys() != {'basis', 'revision', 'data'}
+        or not isinstance(body['basis'], str)
+        or type(body['revision']) is not int
+        or (body['data'] is not None and not adjust_drafts.valid(body['data']))
+    ):
+        raise HTTPException(400, 'This draft is too large or contains unsupported editor values.')
+    try:
+        result = library.save_adjust_draft(entry_id, body['basis'], body['revision'], body['data'])
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+    if result is None:
+        raise HTTPException(404, 'This result is no longer in the Library.')
+    return result
+
+
+@router.put('/api/library/{entry_id}/version-name')
+def name_version(state: State, entry_id: str, body: Any = Body(None)):
+    if not isinstance(body, dict) or body.keys() != {'version_name'} or not isinstance(body['version_name'], str):
+        raise HTTPException(400, 'Send the version name as text.')
+    entry = library.name_version(entry_id, body['version_name'])
+    if entry is None:
+        raise HTTPException(404, 'This result is no longer in the Library.')
     return library.public(entry, state.manager.get(entry.get('job_id') or '') is not None)
 
 
@@ -68,8 +100,8 @@ def _file(entry: dict, file_id: str) -> Path:
     p = library.file_path(entry, file_id)
     if p is None:
         raise HTTPException(404, 'File not found.')
-    if not p.is_file():
-        raise HTTPException(410, 'This file was moved or deleted.')
+    if not library.file_exists(entry, file_id, p):
+        raise HTTPException(410, 'This file was moved, changed or deleted.')
     return p
 
 
@@ -136,9 +168,9 @@ def _preview_spec(state: State, entry: dict, body: dict, options: dict, override
         not recipe
         or not {'target_lufs', 'tp_ceiling_db', 'volume_only'} <= params.keys()
         or params.get('volume_only') != (options['quality'] == 'light')
-        or params.get('ai_stage', 'none') != 'none'
     ):
         raise HTTPException(400, 'This version has no saved settings for a short preview.')
+    params = {**params, 'ai_stage': 'none'}  # eligibility already checks the actual AI outcome
 
     bandwidth = processing.preview_bandwidth(details.get('bandwidth'))
     if bandwidth is None:
@@ -183,7 +215,7 @@ def _preview_spec(state: State, entry: dict, body: dict, options: dict, override
         files.sort(key=lambda f: export.FORMATS[f['format']].kind != 'lossless')
         for file in files:
             path = library.file_path(entry, file['id'])
-            if path is not None and path.is_file():
+            if path is not None and library.file_exists(entry, file['id'], path):
                 spec['saved_export'] = {'path': str(path), 'format': file['format']}
                 spec['applied'] = entry['processing'].get('applied') or {}
                 break
@@ -198,8 +230,9 @@ def _entry_covers(entry: dict, folder: Path) -> dict[str, str]:
     keys: dict[str, str] = {}
     folder.mkdir(parents=True, exist_ok=True)
     for f in entry.get('files') or []:
-        path = library.file_path(entry, f.get('id') or '')
-        if path is None or not path.is_file():
+        file_id = f.get('id') or ''
+        path = library.file_path(entry, file_id)
+        if path is None or not library.file_exists(entry, file_id, path):
             continue
         spec = export.FORMATS.get(f.get('format') or '')
         try:
@@ -217,15 +250,15 @@ def _enhance_original(state: State, entry_id: str, body: Any, is_preview: bool):
     original = library.file_path(entry, 'original')
     if original is None or not original.is_file():
         raise HTTPException(410, 'The kept original is no longer available.')
-    saved = (entry.get('processing') or {}).get('requested') or {}
+    details = entry.get('processing') or {}
+    saved = details.get('requested') or {}
     if entry.get('task') != 'enhance' or not all(saved.get(k) for k in ('recipe', 'quality', 'formats')):
         raise HTTPException(400, 'This version has no saved Enhance settings.')
     overrides = _overrides(body, is_preview)
-    if is_preview and saved['quality'] == 'best':
-        raise HTTPException(400, 'Short previews are available for "Volume only" and "Tone and volume" processing.')
-    if is_preview and body.get('paired') and saved['quality'] not in ('light', 'standard'):
-        raise HTTPException(400, 'Adjust is available for "Volume only" and "Tone and volume" processing.')
-    if is_preview and body.get('paired') and saved['quality'] == 'light':
+    adjust_quality = processing.adjust_quality(details)
+    if is_preview and adjust_quality is None:
+        raise HTTPException(400, 'A short preview needs a saved version confirmed to have used no AI processing.')
+    if is_preview and body.get('paired') and adjust_quality == 'light':
         if overrides.keys() - {'target_lufs', 'tp_ceiling_db', 'sample_rate'}:
             raise HTTPException(400, 'Volume only adjusts loudness and peak ceiling.')
     source = {
@@ -239,6 +272,7 @@ def _enhance_original(state: State, entry_id: str, body: Any, is_preview: bool):
         'enhance',
         {
             **saved,
+            'quality': adjust_quality or saved['quality'],
             'advanced': {**(saved.get('advanced') or {}), **overrides},
             'meta': {'title': entry['title'], 'artist': entry.get('artist') or ''},
         },
@@ -296,12 +330,31 @@ def library_pcm(state: State, entry_id: str, file_id: str, offset: int = 0, fram
     return serve_pcm(_file(_entry(entry_id), file_id), offset, frames, state.pcm_stop)
 
 
+@router.post('/api/library/{entry_id}/files/{file_id}/locate')
+def locate_file(request: Request, state: State, entry_id: str, file_id: str, body: Any = Body(None)):
+    if not isinstance(body, dict) or body.keys() != {'native_file'}:
+        raise HTTPException(400, 'Choose the missing file in the app window.')
+    picked = native_selection(request, state, body['native_file'], 'locate')
+    entry = library.locate_file(entry_id, file_id, picked)
+    if entry is None:
+        raise HTTPException(404, 'This file is no longer in the Library.')
+    state.forget('storage')
+    return library.public(entry, state.manager.get(entry.get('job_id') or '') is not None)
+
+
+@router.post('/api/library/{entry_id}/files/{file_id}/reveal')
+def reveal_file(state: State, entry_id: str, file_id: str):
+    state.require_local()
+    path = _file(_entry(entry_id), file_id)
+    return state.reveal(path.parent)
+
+
 @router.post('/api/library/{entry_id}/reveal')
 def reveal_entry(state: State, entry_id: str):
     entry = library.get(entry_id)
     if entry is None:
         raise HTTPException(404, 'This result is no longer in the Library.')
-    return state.reveal(library.folder(entry))
+    return state.reveal(library.reveal_folder(entry))
 
 
 @router.delete('/api/library/originals')
@@ -351,30 +404,42 @@ def _no_trash(e: AudioLabError) -> JSONResponse:
 
 
 @router.post('/api/library/import')
-def import_file(state: State, body: Any = Body(None)):
+def import_file(request: Request, state: State, body: Any = Body(None)):
     """Queue an `import` job for an audio file on this computer: it is measured where it is (no copy)
     and becomes a Library entry (tasks/importing.py)."""
     if not state.local:
         raise HTTPException(403, 'Files can only be imported when AudioLab runs on this computer.')
-    if not isinstance(body, dict) or body.keys() - {'path', 'group', 'title'}:
-        raise HTTPException(400, 'Send the path of an audio file to import.')
-    raw, group, title = body.get('path'), body.get('group'), body.get('title')
-    if not isinstance(raw, str) or not raw.strip() or '\0' in raw:
-        raise HTTPException(400, 'Send the path of an audio file to import.')
+    if (
+        not isinstance(body, dict)
+        or body.keys() - {'path', 'native_file', 'group', 'title'}
+        or ('path' in body) == ('native_file' in body)
+    ):
+        raise HTTPException(400, 'Choose an audio file to import.')
+    group, title = body.get('group'), body.get('title')
     if group is not None and (not isinstance(group, str) or not group.strip() or len(group) > 1000):
         raise HTTPException(400, 'The recording to add this version to is not valid.')
     if title is not None and not isinstance(title, str):
         raise HTTPException(400, 'The title must be text.')
-    path = Path(os.path.realpath(Path(raw.strip()).expanduser()))  # resolved: Trash later refuses a changed link
-    _importable(path)
     title = ' '.join((title or '').split())[:200]
-    source: dict[str, Any] = {
-        'kind': 'file',
-        'name': path.name,
-        'path': str(path),
-        'size_bytes': path.stat().st_size,
-        'title': title or path.stem,
-    }
+    if 'native_file' in body:
+        source = native_selection(request, state, body['native_file'], 'import').source()
+        path = source_path(source)
+        _importable(path)
+        source_path(source)  # the synchronous media check ran before the job was queued
+    else:
+        raw = body.get('path')
+        if not isinstance(raw, str) or not raw.strip() or '\0' in raw:
+            raise HTTPException(400, 'Send the path of an audio file to import.')
+        path = Path(os.path.realpath(Path(raw.strip()).expanduser()))  # Trash later refuses a changed link
+        _importable(path)
+        source = {
+            'kind': 'file',
+            'name': path.name,
+            'path': str(path),
+            'size_bytes': path.stat().st_size,
+            'title': path.stem,
+        }
+    source['title'] = title or source['title']
     if group:
         source['_library_group'] = group.strip()
     opts = tasks.validate('import', {'meta': {'title': title}} if title else {}, source)

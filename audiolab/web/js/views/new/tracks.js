@@ -6,6 +6,7 @@
 // tracks and the problems per line show right under it, and it is sent as `tracklist`.
 import { h, icon, append, clear, fmtDuration } from '../../dom.js';
 import { api } from '../../api.js';
+import { nativeDuration } from '../../native.js';
 import { switchControl } from '../../ui.js';
 import { state, redraw } from './state.js';
 
@@ -84,19 +85,29 @@ export function tracksOptions() {
   return o;
 }
 
-/** A local file's length from its header (for "after the end" checks), when the browser can read it. */
+function setDuration(src, duration) {
+  if (state.source !== src || !Number.isFinite(duration) || duration <= 0) return;
+  src.duration_s = duration;
+  if (pasted(src)) check(src);
+  else if (duration > LONG_S) redraw('options');
+}
+
+/** A local file's length from its header (for "after the end" checks), when available. */
 export function measureFile(src) {
+  if (src.file.selection) {
+    // Folder and multi-file selections have no metadata grant. A late reply for an earlier
+    // source is ignored by setDuration, including when a new tracklist is already being edited.
+    if (src.file.can_measure_duration) {
+      nativeDuration(src.file.selection).then((duration) => setDuration(src, duration), () => {});
+    }
+    return;
+  }
   const audio = document.createElement('audio');
   const objectUrl = URL.createObjectURL(src.file);
   const done = () => URL.revokeObjectURL(objectUrl);
   audio.preload = 'metadata';
   audio.addEventListener('loadedmetadata', () => {
-    if (Number.isFinite(audio.duration) && audio.duration > 0) {
-      src.duration_s = audio.duration;
-      if (pasted(src)) check(src);
-      // A long recording brings Tracks out from under More options.
-      else if (state.source === src && audio.duration > LONG_S) redraw('options');
-    }
+    setDuration(src, audio.duration);
     audio.removeAttribute('src');
     done();
   }, { once: true });

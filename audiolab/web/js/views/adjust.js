@@ -1,10 +1,10 @@
-// An optional workspace for a saved Enhance version. Drafts live in this tab.
+// An optional workspace for a saved Enhance version. Drafts save in app data.
 // Auditions are short-lived jobs. Only Apply queues a new full-length export.
 // Back leads where the user came from (the Library); Render audition and Apply stay in a bar
 // along the bottom of the window while the settings scroll.
 import { h, icon, clear, clockText, fmtNum, parseClock } from '../dom.js';
 import { api } from '../api.js';
-import { segmented, switchControl, toast } from '../ui.js';
+import { segmented, switchControl, toast, confirmDialog } from '../ui.js';
 import { adjustPath, back, go, jobPath } from '../router.js';
 import { upsertJob } from '../store.js';
 import { formatEq, sameEq } from '../eq.js';
@@ -14,6 +14,7 @@ import {
   DEFAULT_FADE_S, MAX_SECTIONS,
 } from '../section-eq.js';
 import { toneChart, toneObservation } from '../tone-chart.js';
+import { DRAFT_FIELD_LIMIT, snapshotDraft, restoreDraft, draftWriter } from '../adjust-draft.js';
 import { adjustmentOverview } from '../adjust-overview.js';
 import { auditionRequests, pairedAudition } from '../adjust-audition.js';
 import { PROCESSING_LABELS } from './new/state.js';
@@ -43,7 +44,7 @@ const button = (label, onclick, style = 'key') => h('button', {
 }, label);
 const control = (label, input) => h('label', { class: 'adjust-control small' }, h('span', null, label), input);
 const timeInput = (value, oninput) => h('input', {
-  class: 'field field-sm', type: 'text', autocomplete: 'off', spellcheck: 'false', value, oninput,
+  class: 'field field-sm', type: 'text', maxlength: DRAFT_FIELD_LIMIT, autocomplete: 'off', spellcheck: 'false', value, oninput,
 });
 let viewLoad = null;
 let workspace = null;
@@ -57,14 +58,16 @@ export function adjustUnavailable(entry) {
   const duration = durationOf(entry);
   if (Number.isFinite(duration) && duration > 0 && duration < 1) return 'This original is shorter than one second.';
   const { requested, resolved } = entry.processing || {};
-  if (requested?.quality === 'best') return 'Adjust is unavailable for versions made with AI stems.';
-  if (!resolved?.params || !requested?.formats?.length || !['light', 'standard'].includes(requested?.quality)) {
+  const quality = entry.adjust_quality;
+  if (!quality && requested?.quality === 'best') {
+    return 'Adjust needs a saved version confirmed to have used no AI processing.';
+  }
+  if (!resolved?.params || !requested?.formats?.length || !quality) {
     return 'This version predates the saved settings used by Adjust.';
   }
   const { params } = resolved;
   if (!requested.recipe || !resolved.recipe?.key || !Number.isFinite(params.target_lufs)
-    || !Number.isFinite(params.tp_ceiling_db) || params.volume_only !== (requested.quality === 'light')
-    || (params.ai_stage && params.ai_stage !== 'none')) {
+    || !Number.isFinite(params.tp_ceiling_db) || params.volume_only !== (quality === 'light')) {
     return 'This version is missing the processing details used by Adjust.';
   }
   return '';
@@ -108,12 +111,22 @@ export const adjustView = {
       clear(body).append(h('p', { role: 'alert' }, message), h('a', { href: libraryPath(id) }, 'Back to Library'));
     };
     try {
-      const entry = await api(entryPath(id), { signal: controller.signal });
+      // Navigation flushes edits. Read after that write settles so a late GET cannot restore the older revision.
+      const saving = drafts.get(id)?.writer?.inFlight;
+      if (saving) await saving;
+      if (viewLoad !== controller) return;
+      let entry = await api(entryPath(id), { signal: controller.signal });
       if (viewLoad !== controller) return;
       if (entry?.id !== id) { showError('This version couldn’t be loaded.'); return; }
+      const local = drafts.get(id);
+      if (local?.writer?.unsaved && local.identity !== entry.adjust_draft?.basis) {
+        // Show unsaved edits against the version they belong to until the user chooses to replace them.
+        local.writer.markConflict();
+        entry = local.entry;
+      }
       const reason = adjustUnavailable(entry);
       if (reason) { showError(reason); return; }
-      const mode = PROCESSING_LABELS[entry.processing.requested.quality];
+      const mode = PROCESSING_LABELS[entry.adjust_quality];
       subtitle.textContent = [entry.title, entry.artist, mode].filter(Boolean).join(' · ');
       workspace = createWorkspace(entry, controller.signal);
       clear(body).append(workspace.el);
@@ -140,9 +153,10 @@ function draftFor(entry) {
   const saved = requested.advanced || {};
   const savedBands = resolved.params.eq_bands || saved.eq || [];
   const savedSections = resolved.params.section_eq || saved.section_eq || [];
-  const identity = JSON.stringify([entry.original.key, requested, resolved]);
+  const record = entry.adjust_draft;
+  const identity = record?.basis || JSON.stringify([entry.original.key, requested, resolved]);
   let draft = drafts.get(entry.id);
-  if (draft?.identity === identity) return draft;
+  if (draft?.identity === identity && (!record || draft.writer?.canResume(record.revision))) return draft;
   const repeat = seed?.repeat?.enabled ? seed.repeat : null;
   const length = repeat ? clamp(repeat.end - repeat.start, MIN, MAX) : DEFAULT;
   const startAt = repeat?.start ?? seed?.time ?? entry.excerpt?.start_s ?? 0;
@@ -155,8 +169,19 @@ function draftFor(entry) {
       id: String(i), ...row, bands: savedSections[i].bands, savedBands: savedSections[i].bands,
     })),
   };
+  if (record) {
+    draft.entry = entry;
+    restoreDraft(draft, record.data);
+    draft.writer = draftWriter(record, (json, { keepalive }) => api(`${entryPath(entry.id)}/adjust-draft`, { method: 'PUT', json, keepalive }));
+  }
   drafts.set(entry.id, draft);
   return draft;
+}
+
+// Keep partial numbers as typed, including a decimal comma, until the edit is valid.
+function settingNumber(raw) {
+  const text = String(raw ?? '').trim().replace(',', '.');
+  return /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?$/i.test(text) ? Number(text) : NaN;
 }
 
 function readBounds(section) {
@@ -173,7 +198,7 @@ function createWorkspace(entry, signal) {
   const saved = requested.advanced || {};
   const savedBands = params.eq_bands || saved.eq || [];
   const savedSections = params.section_eq || saved.section_eq || [];
-  const light = requested.quality === 'light';
+  const light = entry.adjust_quality === 'light';
   const missingBandwidth = !light && params.hf_restore && !entry.job_exists
     && (!resolved.bandwidth || (resolved.bandwidth.is_lossy_cutoff && !resolved.bandwidth.cutoff_hz));
   const duration = durationOf(entry);
@@ -187,6 +212,23 @@ function createWorkspace(entry, signal) {
   const listen = h('div', { class: 'adjust-listen', hidden: true });
   const status = h('p', { class: 'small muted adjust-status', role: 'status' });
   const auditionIssue = h('p', { class: 'small adjust-errors adjust-error-text', hidden: true });
+  const writer = draft.writer;
+  const draftStatus = h('span', { class: 'small muted', role: 'status' });
+  const retryDraft = button('Retry draft save', () => writer.flush(), 'ghost');
+  const loadDraft = button('Load saved draft', loadSavedDraft, 'key');
+  const discardDraft = button('Discard draft', discard, 'ghost');
+  let edited = !!entry.adjust_draft?.data || !!draft.edited;
+  const pageLeaving = () => writer?.flush({ keepalive: true });
+  if (writer) {
+    writer.notify = () => {
+      draftStatus.textContent = writer.message;
+      retryDraft.hidden = !writer.failed || writer.conflict;
+      loadDraft.hidden = !writer.conflict;
+      discardDraft.hidden = !edited || writer.conflict;
+      if (writer.conflict) renderBtn.disabled = applyBtn.disabled = true;
+    };
+    window.addEventListener('pagehide', pageLeaving);
+  }
   const applyStatus = h('p', { class: 'small muted', role: 'status' });
   const auditionNote = h('p', { class: 'small muted' });
   const scopeNote = h('p', { class: 'small muted', role: 'status' });
@@ -196,7 +238,7 @@ function createWorkspace(entry, signal) {
   const toneResult = h('p', { class: 'small muted', role: 'status' });
   const tonePlot = h('div', { hidden: true });
   const graphPanel = h('div', { class: 'adjust-graph-panel' });
-  const selector = h('select', { class: 'field field-sm', onchange: (e) => pickScope(e.target.value) });
+  const selector = h('select', { class: 'field field-sm', onchange: (e) => selectScope(e.target.value) });
   const startInput = timeInput(draft.from, () => { draft.from = startInput.value; changed(true); });
   const lengthInput = timeInput(draft.length, () => { draft.length = lengthInput.value; changed(true); });
   const renderBtn = button('Render audition', renderAudition, 'primary');
@@ -212,7 +254,7 @@ function createWorkspace(entry, signal) {
     icon('compare', 14), 'Compare actual export') : null;
 
   const overview = duration > 0 ? adjustmentOverview(duration, {
-    onPassage: dragPassage, onSection: dragSection, onPick: pickScope, sectionControls: !light,
+    onPassage: dragPassage, onSection: dragSection, onPick: selectScope, sectionControls: !light,
   }) : null;
   if (overview && entry.has_overview) {
     api(`${path}/overview`, { signal }).then((data) => { if (!disposed) overview.overview(data); }).catch(() => {});
@@ -255,6 +297,7 @@ function createWorkspace(entry, signal) {
       auditionIssue, status, listen),
     h('section', { class: 'adjust-block', 'aria-labelledby': 'adjustSaveTitle' },
       h('h2', { id: 'adjustSaveTitle' }, 'Save a version'),
+      writer ? h('div', { class: 'adjust-row' }, draftStatus, retryDraft, loadDraft, discardDraft) : null,
       h('p', { class: 'small muted' }, 'Apply to full recording analyzes the full original again and verifies a new export. Automatic decisions may change. Earlier versions stay in the Library.')),
     actions);
 
@@ -277,11 +320,17 @@ function createWorkspace(entry, signal) {
     pickScope(draft.scope);
   }
   update();
+  writer?.notify();
 
   return {
     el, update,
     dispose() {
       disposed = true;
+      if (writer) {
+        window.removeEventListener('pagehide', pageLeaving);
+        writer.notify = null;
+        writer.flush();
+      }
       for (const [id, graph] of graphs) {
         draft.graphs.set(id, { snapshot: graph.snapshot(), invalid: !!graph.read().errors.length });
       }
@@ -290,20 +339,59 @@ function createWorkspace(entry, signal) {
     },
   };
 
+  async function loadSavedDraft() {
+    const confirmed = await confirmDialog({ title: 'Replace this window’s draft?', message: 'Your unsaved edits in this window will be discarded.', confirm: 'Load saved draft' });
+    if (!confirmed || disposed) return;
+    el.inert = true;
+    // Keep the local edits if the fresh read fails or the user navigates away.
+    try {
+      const fresh = await api(path, { signal });
+      if (disposed) return;
+      const reason = fresh?.id === entry.id ? adjustUnavailable(fresh) : 'This version couldn’t be loaded.';
+      if (reason || !fresh.adjust_draft) throw new Error(reason || 'This version has no saved draft information.');
+      workspace.dispose();
+      drafts.delete(entry.id);
+      workspace = createWorkspace(fresh, signal);
+      clear(body).append(workspace.el);
+      adjustView.heading.focus({ preventScroll: true });
+    } catch (error) {
+      if (!disposed) draftStatus.textContent = `Couldn’t load the saved draft. Your edits are still here. ${error.message}`;
+    } finally {
+      el.inert = false;
+    }
+  }
+
+  async function discard() {
+    if (!writer || disposed || !await confirmDialog({ title: 'Discard this draft?', message: 'This restores the saved version’s settings and passage.', confirm: 'Discard draft' }) || disposed || writer.conflict) return;
+    workspace.dispose();
+    drafts.delete(entry.id);
+    entry.adjust_draft = { basis: draft.identity, revision: writer.revision, data: null };
+    // Keep writes in order with any save that was already in flight.
+    draftFor(entry).writer = writer;
+    writer.queue(null);
+    workspace = createWorkspace(entry, signal);
+    clear(body).append(workspace.el);
+    adjustView.heading.focus({ preventScroll: true });
+  }
+
   function makeSettings() {
     const wrap = h('div', { class: 'adjust-settings' });
     for (const [key, label, min, max] of numbers) {
       if (light && key === 'bass_db') continue;
       const input = h('input', {
-        class: 'field field-sm adjust-level', type: 'number', step: 'any', min, max,
+        class: 'field field-sm adjust-level', type: 'text', maxlength: DRAFT_FIELD_LIMIT, inputmode: 'decimal', autocomplete: 'off',
         placeholder: Number.isFinite(params[key]) ? String(params[key]) : 'Saved value',
       });
       const value = draft.values[key];
       input.value = value === undefined ? (Number.isFinite(saved[key]) ? String(saved[key]) : '') : value ?? '';
-      input.setAttribute('aria-invalid', String(draft.values[key] === null || !input.validity.valid));
+      const markInvalid = () => {
+        const value = settingNumber(input.value);
+        input.setAttribute('aria-invalid', String(!!input.value.trim() && !(value >= min && value <= max)));
+      };
+      markInvalid();
       input.addEventListener('input', () => {
-        draft.values[key] = input.validity.badInput ? null : input.value;
-        input.setAttribute('aria-invalid', String(!input.validity.valid));
+        draft.values[key] = input.value;
+        markInvalid();
         changed();
       });
       wrap.append(control(label, input));
@@ -385,6 +473,11 @@ function createWorkspace(entry, signal) {
     return { params, bands: part ? draft.bands : [] };
   }
 
+  function selectScope(id) {
+    pickScope(id);
+    if (draft.edited || entry.adjust_draft?.data) writer?.queue(snapshotDraft(draft, graphs));
+  }
+
   function pickScope(id) {
     const part = draft.sections.find((item) => item.id === id);
     if (id !== 'global' && !part) id = 'global';
@@ -449,6 +542,7 @@ function createWorkspace(entry, signal) {
     pickScope(part.id);
     scopeNote.textContent = message;
     selector.focus();
+    changed();
   }
 
   function settingsSnapshot() {
@@ -459,7 +553,7 @@ function createWorkspace(entry, signal) {
       if (light && key === 'bass_db') continue;
       const raw = draft.values[key];
       if (raw === undefined || (typeof raw === 'string' && raw.trim() === '')) continue;
-      const value = raw == null ? NaN : Number(raw);
+      const value = settingNumber(raw);
       if (!(value >= min && value <= max)) invalidSettings.push(`${label} must be between ${min} and ${max}.`);
       else if (value !== saved[key]) advanced[key] = value;
     }
@@ -513,10 +607,11 @@ function createWorkspace(entry, signal) {
     auditionIssue.hidden = !(missingBandwidth || fullOnly);
     overview?.update(range, draft.sections.map((part) => ({ id: part.id, bounds: readBounds(part) })), draft.scope);
     addSectionBtn.disabled = !(range && duration > 0) || draft.sections.length >= MAX_SECTIONS;
-    renderBtn.disabled = !range || !!errors.length || missingBandwidth || fullOnly || busy || draft.applying;
+    renderBtn.disabled = !range || !!errors.length || missingBandwidth || fullOnly || busy || draft.applying || !!writer?.conflict;
     renderBtn.textContent = audition ? 'Render again' : 'Render audition';
     cancelBtn.hidden = !busy;
-    applyBtn.disabled = !!errors.length || !Object.keys(advanced).length || draft.applying;
+    discardDraft.disabled = !!draft.applying;
+    applyBtn.disabled = !!errors.length || !Object.keys(advanced).length || draft.applying || !!writer?.conflict;
   }
 
   function clearAudition(message = '') {
@@ -528,6 +623,8 @@ function createWorkspace(entry, signal) {
   }
 
   function changed(rangeChanged = false) {
+    edited = draft.edited = true;
+    writer?.queue(snapshotDraft(draft, graphs));
     if (rangeChanged || draft.scope !== 'global') toneResult.textContent = '';
     if (audition || busy) clearAudition('Passage or settings changed. Render a new audition to hear them.');
     else update();
@@ -543,7 +640,7 @@ function createWorkspace(entry, signal) {
 
   async function apply() {
     const { advanced, errors } = settingsSnapshot();
-    if (draft.applying || errors.length || !Object.keys(advanced).length) return;
+    if (draft.applying || writer?.conflict || errors.length || !Object.keys(advanced).length) return;
     draft.applying = true;
     clearAudition();
     applyStatus.textContent = 'Starting the full recording…';

@@ -23,9 +23,7 @@ This helps you try hardware you already own; it is **not a reason to buy or upgr
 Find your installed memory in **Apple menu → About This Mac**.
 
 The packaged app requires no separate graphics card, Python installation or Apple Intelligence setup.
-It has no published CPU-core or clock-speed requirement. Intel Macs, Windows and Linux do not have
-packaged releases; their [source installation](INSTALLATION.md#install-from-source) is a separate,
-experimental route.
+It has no published CPU-core or clock-speed requirement. Intel Macs have an experimental [source installation](INSTALLATION.md#install-from-source). Windows, Linux and Docker are frozen and unsupported. Existing installations may still work.
 
 ## Memory (RAM)
 

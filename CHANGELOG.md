@@ -2,12 +2,62 @@
 
 ## Unreleased
 
+- Give Library versions optional names. Each version has one Compare button for its kept original
+  and available saved versions of the same recording.
+
+- Adjust saves unfinished edits with their Library version, including incomplete EQ and section inputs.
+  Reopening the version restores its draft. The editor enforces the length limits on saved inputs.
+  Discard draft returns to the saved settings.
+- Enhance offers **Balance parts separately** for music and DJ sets, **Isolate voice** for speech, and
+  **AI when supported** for Auto. Concerts have no AI option. Adjust works with saved versions that
+  used the non-AI chain, including those that fell back from a requested AI option.
+
+- Enhance checks the peaks of each MP3, AAC and Opus track. All tracks keep the gain of their
+  format’s full export, so neighboring tracks stay at the same relative level. One line reports
+  how many tracks passed, went over the limit or could not be checked. The job page and Library
+  also identify each track that exceeded the limit or could not be checked.
+
+- Settings groups controls under General, Output defaults, Downloads, AI add-on, Storage and Help.
+  Help keeps maintenance and diagnostics in a disclosure. Details on a missing audio engine opens its diagnostic.
+  Status refreshes keep the current control or row in view, including when opening Settings from a link.
+- New uses the formats in Settings on a fresh load and keeps your choices between jobs. Enhance starts
+  with MP3 alone on new installs. Split shows the full format names.
+- Changing a link in New waits for Load. Extra spaces around the same link keep it loaded. Editing a local file’s name preserves untouched embedded tags.
+  Submission errors stay beside Start until you retry or change the source.
+- Enhance and Check describe their adjustments and measurements. Brighten muffled highs is an on/off
+  switch, and the Library explains how the kept original is used for comparison and Adjust.
+- Compare reports when it cannot align a late WebM passage.
+
+- Saving a track uses the playlist you submitted, even if you looked up the same track in another playlist.
+
+- Use **Locate…** in the app window to reconnect a missing Library file recorded by this version,
+  after moving or renaming it on the same drive. If you retag an imported or located file in place,
+  choose it again to confirm the edit. If an editor replaced the file, Locate explains how to
+  add the replacement. Removing a version tells you when files located outside the
+  output folder stayed in place. Open a located file’s current folder from its row.
+
+- In the app window, choose one or several files or a folder from New, choose the output folder
+  in Settings, and pick files to add to the Library. New reads files chosen in the app where they
+  are, so they need no upload and the browser upload size limit does not apply. A folder adds up
+  to 50 supported files at its top level. Choosing a single file shows Tracks for long recordings
+  when its duration can be read. AudioLab checks for file changes while reading a picked source.
+  After a render finishes, its files stay available in the job even if its source moves or changes.
+  AudioLab reports when it could not save a Library entry or keep the original.
+- If the app window fails to open, AudioLab stops its local server and reports the failure.
+
+- Library lookups reject a damaged record whose ID differs from its filename.
+
+- Command-line batches continue past missing inputs. A failed or cancelled command cleans up its own unfinished exports.
+
 - Enhance keeps MP3, AAC (.m4a) and Opus files as loud as the master unless their peaks really go over:
   encoding may use the master's headroom up to just under full scale (−0.1 dBTP), and only a file over that
   is encoded once more, turned down by the excess plus 0.5 dB. On a test song, MP3 was 0.9 dB, AAC 1.2 dB
   and Opus 1.6 dB quieter than the WAV (measured loudness); now MP3 is as loud, AAC 0.7 dB and Opus 1.1 dB
-  quieter. Check judges a lossy file's peaks by the same limit, and calls only a peak above full scale
-  "Clipping".
+  quieter. Check judges a lossy file's peaks by the same limit.
+- Check reports measurements with consistent words for loudness and loudness range. It flags runs near
+  full scale as possible clipping and reports above-full-scale samples in the decoded audio.
+  Its frequency-range estimate uses the stronger mid or side power at each frequency. This keeps
+  opposite-phase highs visible while retaining sensitivity to cutoffs followed by low-level stereo noise.
 - WMA Lossless sources count as lossless: in Enhance, a dull top end can get the gentle high-end lift, as
   with FLAC or WAV.
 

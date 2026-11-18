@@ -95,6 +95,28 @@ def test_edge_inputs():
     assert classify(audio_features(noise, SR), 30.0, None)['type'] != 'speech'
 
 
+def test_check_describes_decoded_overs_and_even_range_as_measurements(tmp_path):
+    from audiolab.media.ffmpeg import decode_reference
+    from audiolab.tasks.analyze import describe
+
+    rate = 32000
+    t = np.arange(rate * 15) / rate
+    tone = np.clip(1.05 * np.sin(2 * np.pi * 1000 * t), -1, 1)
+    path = tmp_path / 'sine.wav'
+    sf.write(path, np.column_stack([tone, tone]), rate, subtype='PCM_16')
+    reference = tmp_path / 'reference.wav'
+    decode_reference(path, reference)  # resampling the integer source can produce overs in the analysis copy
+    report = analyze_file(reference, source_rate=rate)[0]
+
+    assert report['lra'] < 3 and report['loudness_range_label'] == 'Very even'
+    assert report['loudness_label'] == 'Very loud'
+    findings = {alert['title'] for alert in report['alerts']}
+    assert 'Runs at full scale (possible clipping)' in findings
+    assert 'Measured samples above full scale' in findings
+    assert f'Loudness range is very even ({report["lra"]:.1f} LU).' in describe(report, {})
+    assert 'Overall loudness is very loud' in ' '.join(describe(report, {}))
+
+
 def test_silence_is_confirmed_on_the_whole_file(tmp_path):
     """Long files are profiled on excerpts; sound only outside them must not read as silent."""
     late = np.zeros(SR * 240, np.float32)
@@ -123,6 +145,34 @@ def test_bandwidth_detects_lossy_cutoff():
     t = np.arange(SR * 2) / SR
     tone = detect_bandwidth(np.sin(2 * np.pi * 1000 * t), sr=SR)
     assert tone['judged'] is False and tone['cutoff_hz'] is None and not tone['is_lossy_cutoff'], tone
+
+
+def test_bandwidth_counts_highs_in_opposite_phase():
+    # Both channels contain the highs; averaging the waveforms would erase them.
+    rng = np.random.default_rng(19)
+    freqs = np.fft.rfftfreq(SR, 1 / SR)
+    mids = np.fft.rfft(rng.standard_normal(SR) * 0.05)
+    highs = np.fft.rfft(rng.standard_normal(SR) * 0.05)
+    mid = np.fft.irfft(np.where(freqs <= 16000, mids, 0))
+    high = np.fft.irfft(np.where(freqs > 16000, highs, 0))
+    stereo = np.column_stack([mid + high, mid - high]).astype(np.float32)
+
+    assert 15500 <= detect_bandwidth(mid, SR)['cutoff_hz'] <= 16500
+    expected = detect_bandwidth(stereo, SR)
+    assert expected['full_range'] and not expected['is_lossy_cutoff'], expected
+    assert profile(stereo, SR, 1.0, 'whole file')['bandwidth'] == expected
+
+
+def test_bandwidth_recognizes_cutoff_above_uncorrelated_floor():
+    rng = np.random.default_rng(19)
+    n = 2 * SR
+    below = np.fft.rfftfreq(n, 1 / SR) <= 16000
+    signal = np.fft.rfft(rng.normal(0, 0.045, n))
+    noise = np.fft.rfft(rng.normal(0, 0.0055, (n, 2)), axis=0)
+    stereo = np.fft.irfft(np.where(below[:, None], signal[:, None], noise), axis=0).astype(np.float32)
+    expected = detect_bandwidth(stereo, SR)
+    assert expected['is_lossy_cutoff'] and 15500 <= expected['cutoff_hz'] <= 16500, expected
+    assert profile(stereo, SR, 2.0, 'whole file')['bandwidth'] == expected
 
 
 def test_top_end_bright_dull_normal():
@@ -182,15 +232,15 @@ def test_check_judges_a_lossy_file_by_the_lossy_limit():
     def peaks(rep):
         return next(a['title'] for a in rep['alerts'] if 'Peaks' in a['title'])
 
-    assert peaks(lossy) == 'Peaks are safe' and peaks(lossless) == 'Peaks are too hot'
-    assert 'Peaks stay below the safe limit.' in describe(lossy, {})
-    assert 'Peaks go above the safe limit — it may distort on some speakers.' in describe(lossless, {})
+    assert peaks(lossy) == 'Peaks within the check limit' and peaks(lossless) == 'Peaks above the check limit'
+    assert 'Peaks are within the check limit (-0.30 dBTP).' in describe(lossy, {})
+    assert 'Peaks are above the check limit (-0.30 dBTP).' in describe(lossless, {})
 
     # -0.046 dBTP is reported as -0.05, at the limit: the alert and the summary judge that same value.
     x *= 10 ** ((-0.046 - true_peak_db(x)) / 20)
     edge = profile(x, SR, 8.0, 'whole file', peak_limit_dbtp=limit)
-    assert edge['true_peak_dbtp'] == -0.05 and peaks(edge) == 'Peaks are safe'
-    assert 'Peaks stay below the safe limit.' in describe(edge, {})
+    assert edge['true_peak_dbtp'] == -0.05 and peaks(edge) == 'Peaks within the check limit'
+    assert 'Peaks are within the check limit (-0.05 dBTP).' in describe(edge, {})
 
 
 def test_classifier_music_vs_speech():

@@ -23,7 +23,7 @@ and confirm the version in **Settings → About**. Your Library, settings and au
 separately and carry over. AudioLab tells you when a new version exists; you replace the app yourself.
 [Update guide](docs/MACOS.md#updates)
 
-Intel Macs, Windows and Linux have an [experimental source installation](docs/INSTALLATION.md#install-from-source), with no packaged app yet.
+Intel Macs have an [experimental source installation](docs/INSTALLATION.md#install-from-source). Windows, Linux and Docker are frozen and unsupported. The existing source and server paths may still work.
 
 ## What's new in 2.5.0
 
@@ -38,7 +38,7 @@ Intel Macs, Windows and Linux have an [experimental source installation](docs/IN
 | Tool | Use it to… |
 |---|---|
 | **Save / Convert** | Save audio from a supported link or convert files to useful formats. |
-| **Enhance** | Choose **Volume only**, **Tone and volume** or **AI stems**, then compare with the original. |
+| **Enhance** | Choose **Volume only**, **Tone and volume**, or the AI option for the recording, then compare with the original. |
 | **Split** | Separate vocals and instruments, or create four stems. Optional AI required. |
 | **Check** | Inspect loudness, dynamics and frequency range. |
 
@@ -51,7 +51,7 @@ Compare at the same point with **Match volume**. [See the controls](docs/USAGE.m
 
 ## Optional AI
 
-For **Split** and **Enhance → AI stems**, choose **Settings → Updates & add-ons → Enable AI features** and wait for **Ready**.
+For **Split** and Enhance’s optional AI processing, choose **Settings → Updates & add-ons → Enable AI features** and wait for **Ready**. In the current source checkout this is **Settings → AI add-on**.
 The download is about **570 MB**. 2.5.1 reuses a compatible **AI 1.0.0** installation.
 You can remove it in Settings later. [AI setup and removal](docs/MACOS.md#optional-ai)
 

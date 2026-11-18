@@ -119,7 +119,7 @@ def test_unreachable_output_folder(tmp_path, monkeypatch):
             assert r.status_code == 400 and r.json()['detail'] == f"The output folder isn't available: {gone}."
             with pytest.raises(AudioLabError, match="output folder isn't available") as refused:
                 preflight(60.0, tmp_path, 'enhance', output_dir=SETTINGS.output_dir)
-            assert 'Settings → Files' in refused.value.hints[0]
+            assert 'Settings → Output defaults' in refused.value.hints[0]
             preflight(60.0, tmp_path, 'analyze', output_dir=SETTINGS.output_dir)  # Check writes nothing there
             fixed = c.put('/api/settings', json={'output_dir': str(tmp_path / 'music')})
             assert fixed.status_code == 200 and fixed.json()['output_dir'] == str(tmp_path / 'music')
@@ -466,7 +466,10 @@ def test_output_cleanup_never_takes_a_stranger_for_its_own(tmp_path, monkeypatch
         stems.mkdir()
         outputs.created_folder(stems)
 
+    moved = []
+
     def swap_then_rename(a, b):  # replaced between the identity check and the move aside
+        moved.append(Path(a))
         if Path(a) == mine:
             os.unlink(a)
             Path(a).write_bytes(b'stranger 2')
@@ -477,6 +480,7 @@ def test_output_cleanup_never_takes_a_stranger_for_its_own(tmp_path, monkeypatch
     monkeypatch.setattr(os, 'rename', swap_then_rename)
     created.discard()
     monkeypatch.undo()
+    assert swapped not in moved  # a file already replaced is never even moved aside
     assert swapped.read_bytes() == b'stranger 1' and mine.read_bytes() == b'stranger 2'
     assert sorted(p.name for p in out.iterdir()) == ['Mine.wav', 'Stems', 'Stems moved', 'Swapped.wav']
 
@@ -1000,13 +1004,21 @@ def test_playlist_items_keep_their_titles(tmp_path):
     import json
 
     mgr = new_manager(tmp_path / 'jobs')
-    with TestClient(create_app(local=False, token='t', manager=mgr)) as c:
+    app = create_app(local=False, token='t', manager=mgr)
+    with TestClient(app) as c:
         h = {'X-AudioLab-Token': 't'}
         urls = [
             {'url': 'https://youtu.be/a', 'title': '  First   Song ', 'duration_s': 201},
             'https://youtu.be/b',
             {'url': 'https://youtu.be/c', 'title': 7, 'duration_s': 'long'},  # unusable values are ignored
         ]
+        # The same track was also looked up in another playlist. Only the submission owns its album.
+        shared = urls[0]['url']
+        app.state.audiolab.remember_probe(
+            'https://example.invalid/other', {'kind': 'playlist', 'title': 'Other Mix', 'entries': [{'url': shared}]}
+        )
+        direct = c.post('/api/jobs', headers=h, data={'task': 'analyze', 'url': shared})
+        assert direct.status_code == 200 and 'playlist_title' not in direct.json()['jobs'][0]['source']
         r = c.post(
             '/api/jobs',
             headers=h,

@@ -398,7 +398,7 @@ def ytdlp_cmd(sign_in: bool = False) -> list[str]:
     return cmd
 
 
-_UPDATE_HINT = 'Update the downloader: Settings → Updates & add-ons → "Update downloader".'
+_UPDATE_HINT = 'Update the downloader: Settings → Help → Maintenance and diagnostics → "Update downloader".'
 # The packaged app fetches and runs a new yt-dlp only on a click: with this off, a "site changed" failure there
 # offers the "Update downloader" button instead of updating by itself.
 PACKAGED_AUTO_FIX = False
@@ -421,9 +421,7 @@ def _update_hint() -> str:
     return _UPDATE_HINT if update_supported() else 'Install a newer AudioLab app to update its built-in downloader.'
 
 
-_BUILTIN_HINT = (
-    'If this started after a downloader update, go back: Settings → Updates & add-ons → "Use built-in version".'
-)
+_BUILTIN_HINT = 'If this started after a downloader update, go back: Settings → Help → Maintenance and diagnostics → "Use built-in version".'
 
 
 def _with_way_back(hints: list[str]) -> list[str]:
@@ -441,8 +439,7 @@ def _with_way_back(hints: list[str]) -> list[str]:
 
 
 _SIGN_IN_HINT = (
-    'Settings → Downloads & sign-in → "YouTube sign-in": pick the browser you use YouTube in '
-    '(Firefox works most reliably).'
+    'Settings → Downloads → "YouTube sign-in": pick the browser you use YouTube in (Firefox works most reliably).'
 )
 BROWSERS = {
     'firefox': 'Firefox',
@@ -492,7 +489,7 @@ def _cookie_read_error(browser: str, detail: str, raw: str | None = None) -> Dow
     elif 'keychain' in detail or 'find-generic-password' in detail:
         hints.append('If your Mac asks for keychain access, choose "Always Allow".')
     if browser != 'firefox':
-        hints.append('Firefox works most reliably: Settings → Downloads & sign-in → "YouTube sign-in".')
+        hints.append('Firefox works most reliably: Settings → Downloads → "YouTube sign-in".')
     return DownloadError(
         f'Could not read the YouTube sign-in from {name} — close {name} and try again, or pick another browser.',
         hints=hints,
@@ -692,7 +689,7 @@ def _friendly_error(stderr: str, url: str, signed_in: bool = False) -> DownloadE
             'Check that the link opens in your browser, and try again later.',
             _update_hint()
             if runtime.is_packaged()
-            else 'If it keeps happening, update the downloader: Settings → Updates & add-ons → "Update downloader".',
+            else 'If it keeps happening, update the downloader: Settings → Help → Maintenance and diagnostics → "Update downloader".',
         ],
     )
 

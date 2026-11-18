@@ -35,6 +35,7 @@ line and the Docker image.
 |---|---|
 | `__init__.py` | Brand (`APP_NAME`, `APP_SLUG`) and version — see "Renaming" below |
 | `desktop.py` | Starts the app: picks a free port, runs the server, opens the native window (pywebview; default on macOS) or the browser, one instance per data folder, clean quit |
+| `native_inputs.py` | Native file and folder selection, scoped selection IDs, and file identity checks for direct job inputs |
 | `runtime.py` | Source/frozen-runtime boundary: packaged downloader command, private bundled-tool lookup, certificate trust and app-owned cache/temp setup before helpers start; source mode retains its existing environment |
 | `cli.py` | `audiolab [app\|serve\|download\|enhance\|separate\|analyze\|doctor\|update\|install-ai\|shortcut]` |
 | `api/` | FastAPI app (`app.py`: `create_app`, lifespan, error format, static UI), `security.py` (local-mode Host/Origin checks, token, upload cap), `state.py` (per-app runtime state: manager, live-event hub, caches, health), `jobs.py` (probe + job routes, files, ZIP, excerpt PCM), `status.py` (health, settings, storage, diagnostics, maintenance: downloader update, update check, AI add-on), `events.py` (SSE), `library.py` (Library list and entries, files, PCM chunks for comparing, removal) |
@@ -43,7 +44,7 @@ line and the Docker image.
 | `library.py` | The Library: one JSON record per finished result (Save, Enhance, Split) in `<data>/library/`, independent of job retention; keeps the acquired original of Enhance jobs for comparing (hard link, or a copy where links are impossible or the source file has another name on disk, e.g. a result or imported file used as the source, so editing that file never changes the kept original; named by its content's SHA-1; setting `keep_originals`); groups versions of one recording (video id, link, or an upload's content); picks the result an entry is compared with (`compare_file_id`, lossless first); removing an entry keeps output files unless the user opts in to the Trash |
 | `context.py` | `Progress` (scoped progress, journal notes, cancellation, child-process registry) and `TaskContext` (stages of one job) |
 | `tasks/` | The four user-facing tasks (`validate`, `stages`, `run`) and `importing.py`, the `import` task behind Library "Add a file" (`import` is a Python keyword, so `tasks/__init__.py` maps task names to modules); `common.py` acquires sources (reusing a kept original for a link when allowed) and publishes outputs; `preview.py` runs bounded Library section previews through the existing Enhance queue |
-| `media/` | `proc.py` (cancellable subprocesses), `ffmpeg.py` (system or bundled ffmpeg, probing incl. embedded tags, `decode_pcm`: 48 kHz chunks on a 1/25 s grid that join like one decode; WebM/Matroska's millisecond timestamps get a seek offset measured once per file), `youtube.py` (yt-dlp + deno, the artist/title rule for links, tracks from chapters/tracklists, downloader update and the source install's self-repair, browser sign-in), `export.py` (format matrix, the file types that can be added, tags, cover art, sample-accurate track cutting; WAV/FLAC/AIFF cuts seek near their start; Enhance files are checked before they get their final name against `peak_limit` (the master's ceiling; for a lossy format `LOSSY_LIMIT_DBTP`, just under full scale), and a lossy one over its limit is re-encoded once with a bounded trim; track files take the trim of their format's full file; `lossy_codec`, the one lossless-codec list, also used by Check and the recipes) |
+| `media/` | `proc.py` (cancellable subprocesses), `ffmpeg.py` (system or bundled ffmpeg, probing incl. embedded tags, `decode_pcm`: 48 kHz chunks on a 1/25 s grid that join like one decode; WebM/Matroska's millisecond timestamps get a seek offset measured once per file), `youtube.py` (yt-dlp + deno, the artist/title rule for links, tracks from chapters/tracklists, downloader update and the source install's self-repair, browser sign-in), `export.py` (format matrix, the file types that can be added, tags, cover art, sample-accurate track cutting; WAV/FLAC/AIFF cuts seek near their start; Enhance files are checked before they get their final name against `peak_limit` (the master's ceiling; for a lossy format `LOSSY_LIMIT_DBTP`, just under full scale), and a full-length lossy export over its limit is re-encoded once with a bounded trim; lossy Enhance tracks keep that trim and are checked individually; `lossy_codec`, the one lossless-codec list, also used by Check and the recipes) |
 | `media/ytdlp_update.py` | The packaged app's downloader updates in `<data>/downloader/`: fetches yt-dlp's zipimport build, checks size, checksum and that it starts, and records it; `packaging/macos/entry.py` loads it in downloader mode (`load_downloader`) when it is newer than the built-in copy and imports cleanly, else the built-in copy runs and the failure is recorded |
 | `updates.py` | The update check (newest AudioLab release for this build, yt-dlp's newest stable release; on "Check now" or, with `check_updates`, at most once a day, also when the record can't be saved: the last check time is kept in memory too) cached in `<data>/updates.json`, and the GitHub helpers shared with `media/ytdlp_update.py`: fixed HTTPS hosts (redirects included), size limits, plain-language errors |
 | `analysis/` | `profile.py` (loudness, true peak, LRA, bandwidth, bands, alerts), `levels.py` (bounded whole-reference level and stereo scan), `tone.py` (how the tonal balance moves, chart data from the same scan), `classify.py` (content type + reasons), `key.py` (musical key estimate) |
@@ -73,11 +74,46 @@ Beyond 10 minutes, Enhance with "Volume only" or "Tone and volume" is estimated 
 plus 0.5 GiB per hour: its mapped scratch pages count as reclaimable, and the slope is about three times the growth
 measured on one 48 GB Mac. AI stems Enhance keeps the earlier, conservative RAM estimate.
 
+### Native file selection
+
+The desktop launcher opens the UI with a short-lived window secret, passed in the launch fragment and
+removed by the UI before routing. The native picker bridge checks that secret and the exact app location
+before opening a dialog and checks the location again after selection. The bridge returns names, sizes and
+opaque IDs. Existing HTTP routes redeem the IDs on the local instance, for the matching operation and with
+the same secret. Only desktop-server pages disallow embedding and child frames. Folder selection adds
+immediate supported files by name, up to the same 50-file limit as the New list.
+
+Native New and Library import sources retain a private canonical path and a filesystem fingerprint
+(device, inode, size and nanosecond modification time). The job checks that fingerprint when reading the picked input and during Library publication.
+Convert checks before publishing each staged encode. Enhance and Split continue from their verified
+work reference after decoding. Imports also recheck it after the task because the file itself is the result.
+A completed render stands on its own. If Library publication detects a changed source, the job
+finishes with its output files and a warning that the Library entry could not be added.
+Enhance copies its native original and verifies the staged bytes against the source hash before publishing.
+Library import checks the original file before playback or opt-in Trash. Settings folder selections
+use device and inode so ordinary changes inside the folder don't invalidate the selection.
+
+A direct single-file picker selection grants one optional duration lookup. The bridge uses a bounded
+header probe for supported local containers, and the UI discards results for abandoned drafts. Folder
+and multi-file selections skip that lookup.
+
+Locate records a result file's device, inode, size and nanosecond modification time during Library
+publication. Under the Library lock, it checks that the former path is unoccupied and the picked file
+matches that saved identity, then atomically changes the Library reference. A fresh selection at
+the saved path can confirm an in-place edit to a previously located or natively imported file when
+its device and inode still match. This preserves the existing Trash policy. Files copied to
+another volume need to be added again. This check
+uses filesystem metadata rather than reading or hashing the selected audio. Entries without a saved
+identity cannot be verified because the grouping key can come from a different file. Located files
+outside their recorded output root are omitted from Trash actions, and Library reads check that the
+located path still points to the same file. Library reveal uses the current parent when all available
+results share one relocated folder. Each located file can also open its own folder when results are
+spread out. Job records and output ownership roots stay as recorded.
+
 ### Platform code
-Everything that differs between macOS, Windows and Linux lives in `system.py`; other modules call its
-functions and never branch on the platform themselves. The only exceptions are the Windows ffmpeg shim
-in `media/ffmpeg.py` (the `.exe` suffix and copying instead of symlinking), and `cli.py`, which prints
-the platform in `doctor`. Porting a feature to another OS means filling in its branch in `system.py`.
+OS behavior belongs in `system.py`. Existing exceptions are system Trash in `trash.py`, the executable
+suffix and link/copy shim in `media/ffmpeg.py`, and reporting the platform in `cli.py` and
+`diagnostics.py`. The desktop window calls pywebview for its native dialogs.
 
 ### Self-contained macOS Core build
 
@@ -161,14 +197,15 @@ js/eq-response.js     plots server-equivalent zero-phase filter magnitude; no br
 js/adjust-overview.js original level overview with distinct draggable audition and processing-section bounds/fades
 js/adjust-audition.js identity-owned paired audition jobs, aligned comparison player and bounded spectrum lifecycle
 js/audition-spectrum.js on-demand channel-energy spectrum of exact cropped PCM with declared frequency/gain basis
-js/section-eq.js      section EQ: the same checks as the server, the section editor (Fine-tuning, previews)
+js/section-eq.js      section EQ: the same checks as the server, the section editor in Fine-tuning
 js/tone-chart.js      the tone timeline chart (Check, Enhance, Library previews; a click picks a preview start)
 js/views/new/         the "New" view: source (link/files/playlist), names, cover, task + options, tracks, start, and the
                       sleeve beside them (what is being made + the start row; a bottom bar when narrow)
 js/views/activity.js  the job list (in progress, then finished by day; filters)
 js/views/job/         one job: live progress, failures with fixes, results per task
-js/views/library.js   finished results by recording: versions, files, play/compare, kept originals, remove
-js/views/adjust.js    optional saved-version workspace, in-app drafts, passage/section editing, comparison and full Apply
+js/views/library.js   finished results by recording: version names, files, one picker for original and saved comparisons, remove
+js/adjust-draft.js    editable draft snapshots and serialized saves with revision checks
+js/views/adjust.js    optional saved-version workspace, passage/section editing, comparison and full Apply
 js/views/settings.js  preferences, Updates & add-ons (app, downloader, AI add-on, audio engine), storage, about
 ```
 
@@ -276,9 +313,9 @@ master's headroom up to there. Above it, the file is encoded once more from the 
 the excess plus `TRIM_MARGIN_DB` (0.5 dB: AAC's and Opus's peaks don't follow a small turn-down exactly),
 and checked again, but only when that turn-down is at most `TRIM_MAX_DB` (2 dB, a bound, not a clamp);
 "What we did" names the trim. A remaining miss or failed check retains the output and adds a
-warning; it never re-masters a format. Check (`tasks/common.source_format`) gives a lossy source the same
-limit, so its peak words, alert and summary line agree with Enhance. Split tracks are not
-individually checked. Master and file measurements remain distinct. The compare player uses the
+warning; it never re-masters a format. Check (`tasks/common.source_format`) uses the same
+limit, including the meter's tolerance, for a lossy source. Each lossy Enhance track cut keeps its full export’s gain. Each check decodes the cut once.
+The job and Library group the results in one line and preserve per-track measurements. Master and file measurements remain distinct. The compare player uses the
 selected export's loudness; master excerpts still use master measurements. Its optional repeat range
 uses 40 ms grid points and schedules both sides together, caching at most 8 s for short repeats.
 These checks do not qualify sonic preference or every codec implementation.
@@ -303,8 +340,8 @@ actionable explanation instead of decoding an arbitrarily long prefix or silentl
 It measures the cropped comparison for volume matching. The result distinguishes `saved_export` from
 `section_estimate`: in a new section render, context-dependent gain and dynamics can differ from a full
 render. Reusing the old gain after a tonal/dynamics edit would not establish full-render equivalence.
-AI stems previews are excluded:
-a short reseparation would add latency and different context without establishing faithful results.
+Short previews require a saved render that used no AI processing. A recorded AI fallback retains the
+non-AI preview settings and can be adjusted. A full Apply from that version uses Tone and volume again.
 Preview jobs write no exports or Library versions. Applying settings creates an ordinary full Enhance
 job, reanalyzes the source and checks its actual exports; the preview buffer is never promoted to a master.
 
@@ -320,7 +357,9 @@ edit leaves a saved correction out of both sides, the pair's basis says so.
 Calibration is optional and versioned; old entries remain readable and missing values are not inferred
 from rounded presentation metrics. See [the API contract](API.md#library) for units and compatibility.
 
-Adjust keeps small draft settings across in-app navigation and releases its audition player, spectrum
+Adjust saves small, schema-checked editor snapshots in the version’s Library record under the Library lock.
+`adjust_drafts.py` validates their bounds and ties them to the original and processing record. The list
+omits drafts. Adjust keeps graph undo history across in-app navigation and releases its audition player, spectrum
 buffers and preview job when superseded or left; the job manager discards finished paired auditions at
 startup, since a closed window skips that release. `adjust-audition.js` owns request/cancellation identity
 and paired playback; `audition-spectrum.js` computes an on-demand Hann-windowed spectrum of the exact
@@ -356,6 +395,20 @@ Separate basis fields prevent mistaking these estimates for complete spectral co
 audio array to the chain rather than retaining a second obsolete buffer through the remaining DSP.
 
 ## Decisions and why
+
+- The Mac window and browser share one local HTTP service and the same plain JavaScript views. This
+  keeps one processing path and lets contributors run the UI without a frontend build.
+- A FIFO queue with one worker by default limits concurrent memory and disk use. Job and Library
+  records are individual JSON files. New fields are optional so existing recordings remain readable.
+  A breaking record change needs a migration.
+- The optional AI process keeps models and their runtime out of the core app. The current build
+  verifies a published helper against its archive and source hashes. A future protocol compatibility
+  check could let a core-only edit reuse the same archive while retaining those hashes as provenance.
+- The ad-hoc signed DMG serves a small tester audience through the documented first-open procedure.
+  Windows, Linux and Docker are frozen and unsupported.
+- Generated audio and local HTTP fixtures exercise file preservation, meter behavior and the API.
+  Listening preference, recipe accuracy on real music, fresh Mac installation and small-machine limits
+  each require separate observations.
 
 - **No automatic tone stabiliser.** A validated detector (30 s windows of seven band shares against the
   recording's median, ≥ 2 dB for ≥ 3 minutes) flagged the tilted first part of one DJ set, but also five
@@ -413,7 +466,7 @@ audio array to the chain rather than retaining a second obsolete buffer through 
 
 Output is user-owned and is never deleted automatically: removing jobs or Library records keeps it, unless
 the user opts in to moving a result's files to the system Trash (Remove from Library, Keep only this version). App data also
-contains user audio copies: do not treat the whole folder as a disposable cache. Settings → About
+contains user audio copies: do not treat the whole folder as a disposable cache. Settings → Help → Maintenance and diagnostics
 opens the actual app data/log folders for optional manual cleanup. The app has no recursive uninstall
 endpoint; output folders inside the data folder are refused now, but older versions allowed them, so
 automatic root deletion would be unsafe. The Core app's cache setup does not redirect `HOME` or claim to contain all macOS/WebKit data.

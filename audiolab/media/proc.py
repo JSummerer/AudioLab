@@ -21,7 +21,7 @@ from ..system import own_process_group, register_process_group, terminate_proces
 _STDERR_TAIL_LINES = 60
 _POLL_S = 0.2
 # Shown when a tool is missing; the report lists which tools AudioLab found.
-REPORT_HINT = 'Settings → About → "Copy system report" shows what AudioLab found — include it when you report this.'
+REPORT_HINT = 'Settings → Help → Maintenance and diagnostics → "Copy system report" shows what AudioLab found — include it when you report this.'
 
 
 @dataclass

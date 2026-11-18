@@ -36,6 +36,12 @@ def wait_for(fn, timeout=10.0):
     raise AssertionError('condition not reached in time')
 
 
+def test_direct_lookup_rejects_mismatched_record():
+    entry_id = new_job_id()
+    (SETTINGS.library_dir / f'{entry_id}.json').write_text(json.dumps({'id': new_job_id()}))
+    assert library.get(entry_id) is None
+
+
 def lib_runner(job, ctx):
     """Like Enhance: files in the output folder, the downloaded original in scratch (an upload's is
     the uploaded file; `_content` in a link's source changes what was downloaded)."""
@@ -135,6 +141,40 @@ def test_entry_written_on_finish_and_outlives_the_job(manager):
     assert 'library_id' not in manager.public(check.id)['result']
 
 
+def test_version_name_is_optional_and_preserves_the_record_and_audio_identity(manager):
+    job = run_job(manager, title='Recording')
+    app = create_app(local=False, manager=manager)
+    client = TestClient(app)
+    endpoint = f'/api/library/{job.id}/version-name'
+    try:
+        old = library.get(job.id)
+        revision = library.public(old)['files'][0]['revision']
+        assert revision
+        assert client.put(endpoint, json={'version_name': 12}).status_code == 400
+        assert client.put(endpoint, json={'version_name': 'x' * 121}).status_code == 400
+        assert library.get(job.id) == old
+
+        named = client.put(endpoint, json={'version_name': '  Live\n  mix  '})
+        assert named.status_code == 200, named.text
+        assert named.json()['version_name'] == 'Live mix'
+        assert named.json()['files'][0]['revision'] == revision
+        assert library.get(job.id) == {**old, 'version_name': 'Live mix'}
+        assert library.groups()[0]['title'] == 'Recording'
+        assert job.title == 'Recording'
+
+        assert client.put(endpoint, json={'version_name': '  '}).status_code == 200
+        assert library.get(job.id) == old
+        source = library.file_path(old, 'f0')
+        source.write_bytes(b'changed content')
+        assert library.public(old)['files'][0]['revision'] != revision
+        assert (
+            client.put('/api/library/j_20260101_010101_abcdef/version-name', json={'version_name': 'Old'}).status_code
+            == 404
+        )
+    finally:
+        client.close()
+
+
 def test_enhance_processing_and_export_check_survive_job_removal(manager, monkeypatch):
     secret = '/private/work/model/checkpoint.th'
 
@@ -174,12 +214,20 @@ def test_enhance_processing_and_export_check_survive_job_removal(manager, monkey
             },
         )
         result['files'][0]['verification'] = {
-            'status': 'warning',
+            'status': 'verified',
             'integrated_lufs': -11.9,
-            'true_peak_dbtp': -0.8,
-            'ceiling_dbtp': -1.0,
+            'true_peak_dbtp': -0.4,
+            'ceiling_dbtp': -0.1,
             'tolerance_db': 0.05,
+            'ceiling_met': True,
+            'message': None,
+        }
+        result['files'][1]['verification'] = {
+            **result['files'][0]['verification'],
+            'status': 'warning',
+            'true_peak_dbtp': 0.8,
             'ceiling_met': False,
+            'trim_db': 1.0,
             'message': secret,
         }
         return result
@@ -197,7 +245,7 @@ def test_enhance_processing_and_export_check_survive_job_removal(manager, monkey
             'adaptive_lowmid': 'strong',
             'cache': secret,
         },
-        'split_tracks': False,
+        'split_tracks': True,
         'meta': {'title': secret},
     }
     job = manager.submit('enhance', dict(URL_SOURCE), options, title='Measured song')
@@ -216,7 +264,7 @@ def test_enhance_processing_and_export_check_survive_job_removal(manager, monkey
             'recipe': 'auto',
             'quality': 'best',
             'formats': ['aac_256'],
-            'split_tracks': False,
+            'split_tracks': True,
             'advanced': {'target_lufs': -14.0, 'glue': 'off', 'harmonics': 'on', 'adaptive_lowmid': 'strong'},
         }
         assert details['resolved']['recipe'] == {'key': 'music', 'name': 'Song / music'}
@@ -230,14 +278,22 @@ def test_enhance_processing_and_export_check_survive_job_removal(manager, monkey
         assert len(applied['adaptive_lowmid']['events']) == 12
         assert details['metrics']['after']['lufs'] == entry['loudness']['result_lufs'] == -12.0
         assert entry['files'][0]['verification'] == {
-            'status': 'warning',
+            'status': 'verified',
             'integrated_lufs': -11.9,
-            'true_peak_dbtp': -0.8,
-            'ceiling_dbtp': -1.0,
+            'true_peak_dbtp': -0.4,
+            'ceiling_dbtp': -0.1,
             'tolerance_db': 0.05,
-            'ceiling_met': False,
+            'ceiling_met': True,
         }
-        assert 'verification' not in entry['files'][1]
+        track = entry['files'][1]
+        assert track['kind'] == 'track' and track['name'] == '01 - Intro.m4a'
+        assert track['verification'] == {
+            **entry['files'][0]['verification'],
+            'status': 'warning',
+            'true_peak_dbtp': 0.8,
+            'ceiling_met': False,
+            'trim_db': 1.0,
+        }
 
 
 def test_remove_entry_keeps_files_and_drops_unreferenced_original(manager):
@@ -718,3 +774,44 @@ def test_library_keeps_only_a_clean_excerpt():
     assert library._excerpt({'start_s': 12, 'duration_s': 45.5, 'x': 1}) == {'start_s': 12.0, 'duration_s': 45.5}
     for bad in (None, {'start_s': -1, 'duration_s': 5}, {'start_s': True, 'duration_s': 5}, {'start_s': 1}):
         assert library._excerpt(bad) is None
+
+
+def test_adjust_draft_round_trip_conflicts_and_source_invalidation(manager):
+    job = run_job(manager)
+    path = f'/api/library/{job.id}'
+    data = {
+        'from': '1:',
+        'length': '15',
+        'scope': 'global',
+        'sections': [],
+        'values': {'bass_db': '-'},
+        'graphs': {
+            'global': {
+                'bands': [],
+                'bypassed': False,
+                'text': 'unfinished EQ',
+                'textOpen': True,
+                'numbers': None,
+                'invalid': True,
+            }
+        },
+    }
+    with TestClient(create_app(local=False, manager=manager)) as c:
+        record = c.get(path).json()['adjust_draft']
+        assert record['revision'] == 0 and record['data'] is None
+        edit = {**record, 'data': data}
+        assert c.put(path + '/adjust-draft', json=edit).json() == {'revision': 1}
+        assert c.get(path).json()['adjust_draft']['data'] == data
+        assert 'adjust_draft' not in c.get('/api/library').json()['groups'][0]['entries'][0]
+        assert c.put(path + '/adjust-draft', json=edit).status_code == 409
+        edit['revision'] = 1
+        assert c.put(path + '/adjust-draft', json={**edit, 'data': {**data, 'from': '1' * 129}}).status_code == 400
+        assert c.put(path + '/adjust-draft', json={**edit, 'data': None}).json() == {'revision': 2}
+        edit['revision'] = 2
+        assert c.put(path + '/adjust-draft', json=edit).status_code == 200
+        entry = library.get(job.id)
+        entry['processing'] = {'requested': {'quality': 'light'}}
+        library._write(entry)
+        new = c.get(path).json()['adjust_draft']
+        assert new['data'] is None and new['revision'] == 0 and new['basis'] != record['basis']
+        assert c.put(path + '/adjust-draft', json=edit).status_code == 409

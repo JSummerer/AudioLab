@@ -1,4 +1,4 @@
-"""Analyze ("Check quality"): loudness, peaks, dynamics, real bandwidth, content
+"""Analyze ("Check"): loudness, peaks, dynamics, real bandwidth, content
 type, BPM, musical key and a spectrogram — measured, explained, nothing changed."""
 
 import json
@@ -22,11 +22,6 @@ def stages(options: dict[str, Any], source: dict[str, Any]):
     return STAGES
 
 
-def loudness_word(lufs: float) -> str:
-    """Overall volume in a word a novice understands."""
-    return 'very loud' if lufs > -9 else 'loud' if lufs > -12 else 'normal' if lufs > -17 else 'quiet'
-
-
 def describe(analysis: dict[str, Any], kind: dict[str, Any]) -> list[str]:
     """Plain-language findings for novices."""
     if analysis.get('is_silent'):
@@ -36,21 +31,17 @@ def describe(analysis: dict[str, Any], kind: dict[str, Any]) -> list[str]:
         out.append(f'Sounds like: {kind["label"]} ({kind.get("confidence_label", "medium")} confidence).')
     lufs, tp, lra = analysis.get('integrated_lufs'), analysis.get('true_peak_dbtp'), analysis.get('lra')
     if lufs is not None:
-        out.append(f'Overall volume is {loudness_word(lufs)} ({lufs:.1f} LUFS).')
+        label = analysis.get('loudness_label') or prof.loudness_label(lufs)
+        out.append(f'Overall loudness is {label.lower()} ({lufs:.1f} LUFS).')
     if analysis.get('is_clipping'):
-        out.append('The recording is clipped — some loud peaks are flattened, and that distortion cannot be undone.')
-    elif tp is not None and prof.peaks_too_hot(tp, analysis.get('peak_limit_dbtp')):
-        out.append('Peaks go above the safe limit — it may distort on some speakers.')
-    elif tp is not None:
-        out.append('Peaks stay below the safe limit.')
+        out.append('The peak detector found runs of samples near its reference level.')
+    if tp is not None:
+        limit = analysis.get('peak_limit_dbtp')
+        relationship = 'above' if prof.peaks_too_hot(tp, limit) else 'within'
+        out.append(f'Peaks are {relationship} the check limit ({tp:+.2f} dBTP).')
     if lra is not None and (analysis.get('duration_s') or 0) >= 15:  # LRA needs more than a few seconds
-        out.append(
-            'Very even volume (heavily compressed).'
-            if lra < 3
-            else 'Wide dynamics — quiet and loud parts differ a lot.'
-            if lra > 9
-            else 'Natural, balanced dynamics.'
-        )
+        label = analysis.get('loudness_range_label') or prof.loudness_range_label(lra)
+        out.append(f'Loudness range is {label.lower()} ({lra:.1f} LU).')
     bw = analysis.get('bandwidth') or {}
     if bw.get('verdict'):
         out.append(bw['verdict'])
@@ -80,7 +71,9 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
     spectro = common.previews_dir(ctx) / 'spectrogram.png'
     media = {}
     try:
+        acq.check_source()
         ffmpeg.render_spectrogram(acq.path, spectro, progress=p.sub(70, 100))
+        acq.check_source()
         media['spectrogram'] = str(spectro)
     except Exception as e:  # a missing picture must not fail the analysis
         ctx.note('warning', f'Spectrogram skipped: {e}')

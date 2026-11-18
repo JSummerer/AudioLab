@@ -4,22 +4,23 @@
 // otherwise with their downloads ("Save cover to folder" adds the cover as one more; a file the
 // user moved or deleted is marked, without download or player), then what was done and
 // detected, and "do more with this". Players register their cleanup on the page context `ctx`.
-import { h, icon, clear, fmtBytes, fmtDuration, confidenceWords, shortFolder } from '../../dom.js';
+import { IS_MAC, h, icon, clear, fmtBytes, fmtDuration, confidenceWords, shortFolder } from '../../dom.js';
 import { api, url, fileUrl, zipUrl, mediaUrl } from '../../api.js';
-import { store, emit, showDetails, upsertJob, aiAvailable } from '../../store.js';
+import { RECIPE_LABELS, store, emit, showDetails, upsertJob, aiAvailable } from '../../store.js';
 import { callout, toast, toastError, block } from '../../ui.js';
 import { go, jobPath, settingsPath } from '../../router.js';
 import { stemRows, filePlayer, trackRows } from '../../player.js';
 import { comparePlayer, libraryCompare, sectionPreviewCompare } from '../../compare.js';
+import { PROCESSING_LABELS, qualityAfterRecipeChange } from '../new/state.js';
 import { footer, journalBlock } from './status.js';
 import {
   summaryBlock, musicFacts, metricsBlock, sourceLine, decisionsBlock, spectrogramBlock, analyzeResult, toneBlock, streamNote,
+  plainLine, trackCheckNeedsAttention,
 } from './readings.js';
 
-export const RECIPE_SHORT = { club: 'DJ set', live: 'Concert', music: 'Song', voice: 'Podcast / voice' };
 const isTrack = (f) => f.group === 'tracks';
 const exists = (f) => f.exists !== false;
-const REVEAL_LABEL = /Mac/i.test(navigator.platform || navigator.userAgent) ? 'Show in Finder' : 'Show in folder';
+const REVEAL_LABEL = IS_MAC ? 'Show in Finder' : 'Show in folder';
 
 export function doneView(job, ctx) {
   const r = job.result || {};
@@ -100,7 +101,7 @@ function filesBlocks(job, r, ctx) {
   if (!all.length) out.push(block('Your files', h('p', { class: 'muted' }, 'No files were produced.'), foot));
   else if (files.length) out.push(h('section', { class: 'block job-files' }, h('h2', { class: 'block-title' }, 'Your files'), list, foot));
   if (tracks.length) {
-    const t = trackRows(job.id, tracks.filter(exists), { download: !local });
+    const t = trackRows(job.id, tracks.filter(exists), { download: !local, checkNote: trackCheckNote });
     const gone = tracks.filter((f) => !exists(f));
     ctx.onCleanup(() => t.destroy());
     out.push(h('details', { class: 'block tracks-block job-files', open: true },
@@ -130,11 +131,18 @@ function fileRow(job, f) {
       // Narrow windows show the size after the name instead of in its own column.
       h('span', { class: 'file-name', title: f.name }, f.name,
         there && f.size_bytes ? h('span', { class: 'file-size-inline' }, ` · ${fmtBytes(f.size_bytes)}`) : null),
-      f.verification ? h('span', { class: 'file-name' }, exportCheckText(f.verification)) : null),
+      isTrack(f) ? trackCheckNote(f) : f.verification ? h('span', { class: 'file-name' }, exportCheckText(f.verification)) : null),
     h('span', { class: 'file-size' }, there ? fmtBytes(f.size_bytes) : ''),
     download
       ? h('a', { class: 'btn btn-ghost btn-sm', href: fileUrl(job.id, f.id), download: f.name, 'aria-label': `Download ${f.label || f.name}` }, icon('download', 14), h('span', { class: 'dl-text' }, 'Download'))
       : there ? null : h('span', { class: 'lib-missing' }, icon('alert', 14), 'Moved or deleted'));
+}
+
+function trackCheckNote(file) {
+  if (!trackCheckNeedsAttention(file)) return null;
+  const check = file.verification;
+  const text = check.message ? (showDetails() ? check.message : plainLine(check.message)) : exportCheckText(check);
+  return h('small', { class: 'muted' }, text);
 }
 
 /** The peak check of a saved file (docs/API.md "verification"), in plain words; the loudness and
@@ -142,12 +150,13 @@ function fileRow(job, f) {
  * higher than the master's ceiling). */
 function exportCheckText(v, details = showDetails()) {
   if (v.status === 'unverified') return 'Saved · it couldn’t be checked afterwards';
-  const plain = v.status === 'warning' ? 'Checked after saving: its peaks go over the limit' : 'Checked after saving: peaks stay under the limit';
+  const plain = v.status === 'warning' ? 'Checked before saving: its peaks go over the limit' : 'Checked before saving: peaks stay under the limit';
   if (!details) return plain;
   const values = [
     Number.isFinite(v.integrated_lufs) ? `${v.integrated_lufs.toFixed(1)} LUFS` : 'loudness unavailable',
     Number.isFinite(v.true_peak_dbtp) ? `${v.true_peak_dbtp.toFixed(2)} dBTP` : 'silent',
     Number.isFinite(v.ceiling_dbtp) ? `limit ${v.ceiling_dbtp.toFixed(2)} dBTP` : null,
+    v.trim_db > 0 ? `turned down ${v.trim_db.toFixed(2)} dB` : null,
   ].filter(Boolean).join(' · ');
   return `${plain} · ${values}`;
 }
@@ -352,13 +361,13 @@ function classificationBlock(job, r) {
   const facts = musicFacts(r.analysis, c);
   if (facts) lines.push(facts);
   lines.push(h('p', { class: 'muted small' },
-    picked ? `You chose the ${recipe.name || RECIPE_SHORT[job.options.recipe] || job.options.recipe} settings.`
+    picked ? `You chose the ${recipe.name || RECIPE_LABELS[job.options.recipe] || job.options.recipe} settings.`
       : `Treated with the ${recipe.name || 'automatic'} settings.`));
-  const others = (store.health?.recipes?.length ? store.health.recipes : Object.keys(RECIPE_SHORT).map((key) => ({ key, name: RECIPE_SHORT[key] })))
+  const others = (store.health?.recipes?.length ? store.health.recipes : Object.keys(RECIPE_LABELS).map((key) => ({ key, name: RECIPE_LABELS[key] })))
     .filter((x) => x.key !== recipe.key);
   const redo = h('div', { class: 'redo' },
     h('span', { class: 'muted small' }, picked ? 'Try another:' : 'Wrong? Redo as'),
-    others.map((x) => h('button', { type: 'button', class: 'btn btn-key btn-sm', onclick: (e) => redoAs(job, x, e.currentTarget) }, RECIPE_SHORT[x.key] || x.name)));
+    others.map((x) => h('button', { type: 'button', class: 'btn btn-key btn-sm', onclick: (e) => redoAs(job, x, e.currentTarget) }, RECIPE_LABELS[x.key] || x.name)));
   return block('What it is', ...lines, redo);
 }
 
@@ -367,11 +376,15 @@ async function redoAs(job, recipe, btn) {
   try {
     const form = new FormData();
     form.append('task', 'enhance');
-    form.append('options', JSON.stringify({ ...(job.options || {}), recipe: recipe.key }));
+    const options = job.options || {};
+    const previous = job.result?.recipe?.key || options.recipe;
+    const quality = qualityAfterRecipeChange(options.quality, previous, recipe.key, store.health?.recipes);
+    form.append('options', JSON.stringify({ ...options, recipe: recipe.key, quality }));
     form.append('source_job', job.id);
     const res = await api('/api/jobs', { method: 'POST', form });
     (res?.jobs || []).forEach(upsertJob);
-    toast(`Redoing as ${RECIPE_SHORT[recipe.key] || recipe.name}.`, { kind: 'ok' });
+    const processing = quality !== options.quality ? ` with ${PROCESSING_LABELS[quality]}` : '';
+    toast(`Redoing as ${RECIPE_LABELS[recipe.key] || recipe.name}${processing}.`, { kind: 'ok' });
     if (res?.jobs?.[0]) go(jobPath(res.jobs[0].id));
   } catch (e) {
     btn.disabled = false;

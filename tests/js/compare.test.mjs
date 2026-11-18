@@ -511,16 +511,120 @@ async function librarySetup(t, entries, moreGroups = []) {
   await flush();
   t.after(() => libraryView.hide());
   const card = (id) => stage.querySelector(`#lib-${id}`);
-  const open = (id, trusted = true) => find(card(id), (n) => n.tagName === 'button'
-    && n.textContent.includes('Compare with the original')).click({ isTrusted: trusted });
+  const open = (id, trusted = true) => named(card(id), 'Compare').click({ isTrusted: trusted });
   const seek = (id, seconds) => { const slider = card(id).querySelector('.ab-seek'); slider.value = seconds; slider.fire('change'); };
-  return { ...env, card, open, seek, view: libraryView };
+  const refresh = async () => { libraryView.show(); await flush(); };
+  return { ...env, card, open, seek, refresh, view: libraryView };
 }
 
 const entry = (id, group = 'file:test', duration_s = 20) => ({ id, group, duration_s,
   task: 'enhance', title: 'Generated fixture', source: { kind: 'file', name: 'fixture.wav' },
   original: { kept: true }, loudness: { original_lufs: -20, result_lufs: -14 }, compare_file_id: 'f0',
   files: [{ id: 'f0', name: 'fixture.wav', label: 'WAV', kind: 'enhanced', mime: 'audio/wav', playable: true, exists: true }] });
+
+test('a job and its Library card group track checks and identify each track needing attention', async (t) => {
+  const result = entry('tracks');
+  result.job_exists = false;
+  const passed = { status: 'verified', ceiling_met: true };
+  const over = { status: 'warning', ceiling_met: false, true_peak_dbtp: 0.8, ceiling_dbtp: -0.1 };
+  const unchecked = { status: 'unverified', ceiling_met: null, true_peak_dbtp: null };
+  const group = 'Track checks — 1 within the peak limit, 1 over the peak limit, 1 could not be checked.';
+  result.files[0].verification = passed;
+  result.track_check_summary = group;
+  result.files.push(
+    { id: 'f1', name: '01 - Opening.m4a', label: '01 · Opening', track: 1, kind: 'track', exists: false, verification: unchecked },
+    { id: 'f2', name: '02 - Loud cut.m4a', label: '02 · Loud cut', track: 2, kind: 'track', exists: true, verification: over },
+    { id: 'f3', name: '03 - Quiet.m4a', label: '03 · Quiet', track: 3, kind: 'track', exists: true, verification: passed },
+    { id: 'f4', name: '04 - Older.m4a', label: '04 · Older', track: 4, kind: 'track', exists: true },
+  );
+
+  const { card } = await librarySetup(t, [result]);
+  const details = card(result.id).querySelector('.lib-processing');
+  assert.equal(details.querySelector('summary').textContent, 'Processing details · Export warning');
+  assert.deepEqual(details.querySelectorAll('li').map((row) => row.textContent), [
+    'WAV — Peak within its limit', group,
+    '01 · Opening — Could not check the saved file',
+    '02 · Loud cut — Peak above its limit (0.80 dBTP · limit −0.10 dBTP)',
+  ]);
+
+  // Job files carry their own warning text. Library entries keep the measurements alone.
+  const messages = {
+    f1: 'The AAC track “01 - Opening.m4a” was saved, but its loudness and peaks could not be verified.',
+    f2: 'The AAC track “02 - Loud cut.m4a” goes over the limit for lossy files (+0.80 dBTP after saving; limit -0.10 dBTP).',
+  };
+  const { doneView } = await import('../../audiolab/web/js/views/job/results.js');
+  const job = { id: 'finished', task: 'enhance', status: 'done', source: {}, options: {}, result: {
+    files: result.files.map((f) => f.kind === 'track' ? { ...f, group: 'tracks',
+      verification: f.verification && { ...f.verification, message: messages[f.id] || null } } : f),
+    warnings: [group],
+  } };
+  const page = new FakeNode('main');
+  const cleanups = [];
+  page.append(...doneView(job, { onCleanup: (fn) => cleanups.push(fn) }));
+  cleanups.forEach((fn) => fn());
+  assert.equal(page.textContent.split(group).length, 2);
+  assert.match(page.querySelector('.file-row').textContent, /peaks stay under the limit/);
+  assert.ok(page.querySelector('.is-missing').textContent.includes(messages.f1));
+  const tracks = page.querySelectorAll('.track-row');
+  assert.equal(tracks.length, 3);
+  assert.match(tracks[0].textContent, /02 - Loud cut.m4a” goes over the limit/);
+  for (const row of tracks.slice(1)) assert.equal(row.querySelector('small'), null);
+});
+
+test('Redo as uses the resolved Auto recipe to preserve only the same AI action', async (t) => {
+  setup(t);
+  const { store } = await import('../../audiolab/web/js/store.js');
+  const { doneView } = await import('../../audiolab/web/js/views/job/results.js');
+  const previousHealth = store.health;
+  const animation = Object.getOwnPropertyDescriptor(globalThis, 'requestAnimationFrame');
+  store.health = { recipes: [
+    { key: 'music', ai_stage: 'stem_eq' }, { key: 'club', ai_stage: 'stem_eq' },
+    { key: 'voice', ai_stage: 'voice_isolate' }, { key: 'live', ai_stage: 'none' },
+  ] };
+  globalThis.requestAnimationFrame = (f) => f();
+  t.after(() => {
+    store.health = previousHealth;
+    if (animation) Object.defineProperty(globalThis, 'requestAnimationFrame', animation);
+    else delete globalThis.requestAnimationFrame;
+  });
+  const messages = new FakeNode('div');
+  messages.id = 'toasts';
+  document.body.append(messages);
+  const requests = [];
+  globalThis.fetch = async (path, options) => {
+    if (path === '/api/jobs' && options.method === 'POST') {
+      requests.push({ source: options.body.get('source_job'), opts: JSON.parse(options.body.get('options')) });
+    }
+    return { ok: true, text: async () => '{"jobs":[]}' };
+  };
+  const job = {
+    id: 'finished', task: 'enhance', status: 'done',
+    source: { kind: 'file', name: 'fixture.wav' },
+    options: { recipe: 'auto', quality: 'best', formats: ['aac_256'], advanced: { target_lufs: -16 } },
+    result: { recipe: { key: 'music', name: 'Song / music' } },
+  };
+  const redo = async (label) => {
+    const nodes = doneView(job, { onCleanup() {} });
+    const control = nodes.map((node) => node.querySelector('.redo')).find(Boolean);
+    const btn = find(control, (node) => node.tagName === 'button' && node.textContent === label);
+    btn.click({ currentTarget: btn });
+    await flush();
+  };
+
+  await redo('Podcast / voice');
+  await redo('DJ set');
+  await redo('Concert');
+  delete job.result.recipe;
+  await redo('DJ set');
+  job.options.quality = 'standard';
+  await redo('Podcast / voice');
+
+  assert.deepEqual(requests, [
+    ['voice', 'standard'], ['club', 'best'], ['live', 'standard'],
+    ['club', 'standard'], ['voice', 'standard'],
+  ].map(([recipe, quality]) => ({ source: job.id, opts: { ...job.options, recipe, quality } })));
+  assert.match(messages.textContent, /Redoing as Podcast \/ voice with Tone and volume/);
+});
 
 test('a Library reduction cue keeps the selected side and repeats around the peak, not its time-window boundary', (t) => {
   setup(t);
@@ -657,8 +761,8 @@ test('each Enhance version says what it is: loudness, compression, EQ, rate and 
   ]);
   const line = (id) => env.card(id).querySelector('.lib-version')?.textContent;
   // Plain words by default; the LUFS numbers come with "Show details".
-  assert.equal(line('tuned'), 'Normal volume · compression on · custom EQ · 44.1 kHz · your settings: loudness, EQ');
-  assert.equal(line('auto'), 'Normal volume · compression off · Auto settings');
+  assert.equal(line('tuned'), 'Moderate volume · compression on · custom EQ · 44.1 kHz · your settings: loudness, EQ');
+  assert.equal(line('auto'), 'Moderate volume · compression off · Auto settings');
   assert.equal(line('volume'), 'Loud volume · your settings: loudness', 'Volume only lists only what it uses');
   assert.equal(line('cleared'), 'Auto settings', 'a version without resolved settings still says whose they were');
   assert.equal(line('older'), undefined, 'an entry from before saved settings has no line');
@@ -716,18 +820,20 @@ test('two versions play side by side from their own files, the louder one turned
 });
 
 const enhanced = (id, created_at, lufs) => Object.assign(entry(id), { created_at, loudness: { result_lufs: lufs } });
-const compareVersions = (card) => find(card, (n) => n.tagName === 'button' && n.textContent.includes('Compare versions'));
+const compareButton = (card) => named(card, 'Compare');
 
-test('Library offers Compare versions within a recording and says when the versions differ in loudness', async (t) => {
+test('Library offers Compare within a recording and says when the versions differ in loudness', async (t) => {
   const now = Math.floor(Date.now() / 1000);
   const saved = Object.assign(entry('saved'), { task: 'download', files: [] });
-  const env = await librarySetup(t, [enhanced('new', now - 60, -13.5), enhanced('old', now - 7200, -15.4), saved]);
+  const newVersion = { ...enhanced('new', now - 60, -13.5), original: { kept: false } };
+  const oldVersion = { ...enhanced('old', now - 7200, -15.4), original: { kept: false } };
+  const env = await librarySetup(t, [newVersion, oldVersion, saved]);
   const hint = document.body.querySelector('.lib-hint');
   assert.equal(hint.textContent, 'These versions differ in loudness. ' // the LUFS range with Show details
-    + 'Louder often sounds better at first, so use Compare versions to hear them at matched volume.');
-  assert.ok(compareVersions(env.card('new')));
-  assert.equal(compareVersions(env.card('saved')), undefined, 'only Enhance versions with a result');
-  const open = compareVersions(env.card('old'));
+    + 'Louder often sounds better at first, so use Compare to hear them at matched volume.');
+  assert.ok(compareButton(env.card('new')));
+  assert.equal(compareButton(env.card('saved')), undefined, 'only Enhance versions with a result');
+  const open = compareButton(env.card('old'));
   open.click({ isTrusted: true });
   const stage = env.card('old').querySelector('.lib-stage');
   assert.equal(open.getAttribute('aria-expanded'), 'true');
@@ -749,7 +855,7 @@ test('an unverified Library export disables matching and suppresses the loudness
   const env = await librarySetup(t, [known, unknown]);
   assert.equal(document.body.querySelector('.lib-hint'), null);
   const card = env.card('unknown');
-  compareVersions(card).click({ isTrusted: true });
+  compareButton(card).click({ isTrusted: true });
   const match = toggle(card, 'Match volume');
   assert.equal(match.disabled, true);
   assert.equal(match.checked, false);
@@ -760,18 +866,100 @@ test('with three versions a picker chooses the other one; versions within 1 dB g
   const now = Math.floor(Date.now() / 1000);
   const env = await librarySetup(t, [enhanced('c', now - 60, -14), enhanced('b', now - 120, -14.5), enhanced('a', now - 180, -13.6)]);
   assert.equal(document.body.querySelector('.lib-hint'), null);
-  compareVersions(env.card('b')).click({ isTrusted: true });
+  compareButton(env.card('b')).click({ isTrusted: true });
   const stage = env.card('b').querySelector('.lib-stage');
   const radios = stage.querySelector('.lib-version-pick').querySelectorAll('input');
-  assert.deepEqual(radios.map((r) => [r.value, r.checked]), [['c', true], ['a', false]], 'the newest other one first');
+  assert.deepEqual(radios.map((r) => [r.value, r.checked]), [['original', true], ['c', false], ['a', false]]);
   env.requests.length = 0;
-  radios[1].checked = true;
-  radios[1].fire('change');
+  radios[2].checked = true;
+  radios[2].fire('change');
   const keys = env.card('b').querySelector('.lib-stage').querySelectorAll('.ab-key-label').map((n) => n.textContent);
   assert.deepEqual(keys, ['Older', 'Newer']);
   button(env.card('b').querySelector('.lib-stage'), 'Play').click();
   await flush();
   assert.deepEqual([...new Set(env.requests.map((r) => r.path))].sort(), ['/api/library/a/pcm/f0', '/api/library/b/pcm/f0']);
+});
+
+test('one comparison keeps playing through a peer rename and closes for a changed file', async (t) => {
+  const base = { ...enhanced('base', 1, -15), version_name: 'Studio' };
+  const peer = { ...enhanced('peer', 2, -14), version_name: 'Live' };
+  const missing = enhanced('missing', 3, -13);
+  missing.files[0].exists = false;
+  const different = { ...enhanced('different', 4, -12), group: 'file:another' };
+  const env = await librarySetup(t, [different, missing, peer, base]);
+  const card = env.card('base');
+  const stage = () => card.querySelector('.lib-stage');
+  const picks = () => stage().querySelector('.lib-version-pick').querySelectorAll('input');
+  assert.equal(card.querySelectorAll('button').filter((b) => b.textContent === 'Compare').length, 1);
+  assert.equal(card.querySelector('.lib-entry-title').textContent, 'Enhanced · Studio');
+  env.open('base');
+  assert.deepEqual(picks().map((r) => [r.value, r.checked]), [['original', true], ['peer', false]]);
+  assert.deepEqual(stage().querySelectorAll('.ab-key-label').map((n) => n.textContent), ['Original', 'Studio']);
+
+  env.seek('base', 5);
+  button(stage(), 'Play').click();
+  await flush();
+  picks()[1].checked = true;
+  picks()[1].fire('change');
+  await flush();
+  assert.equal(stage().querySelector('.ab-seek').value, 5);
+  assert.ok(button(stage(), 'Pause'));
+  assert.equal(document.activeElement, picks()[1]);
+  const engine = stage().querySelector('.cmp');
+  const context = env.contexts.at(-1);
+
+  peer.version_name = 'Concert';
+  await env.refresh();
+  assert.equal(stage().querySelector('.cmp'), engine);
+  assert.equal(context.state, 'running');
+  assert.equal(document.activeElement, picks()[1]);
+  assert.deepEqual(stage().querySelectorAll('.ab-key-label').map((n) => n.textContent), ['Studio', 'Concert']);
+  assert.ok(stage().querySelectorAll('.seg-label').some((n) => n.textContent === 'Concert'));
+
+  peer.files[0].revision = 'changed-on-disk';
+  await env.refresh();
+  assert.equal(stage().hidden, true);
+  assert.equal(context.state, 'closed');
+  assert.equal(document.activeElement, compareButton(card));
+});
+
+test('Library can submit and clear an optional version name', async (t) => {
+  const version = entry('named');
+  const env = await librarySetup(t, [version]);
+  Object.assign(document, { addEventListener() {}, removeEventListener() {} });
+  const fetchBefore = globalThis.fetch;
+  const submitted = [];
+  globalThis.fetch = (path, options) => {
+    if (path !== '/api/library/named/version-name') return fetchBefore(path, options);
+    assert.equal(options.method, 'PUT');
+    const body = JSON.parse(options.body);
+    submitted.push(body);
+    version.version_name = body.version_name;
+    return Promise.resolve(jsonResponse(version));
+  };
+  const card = env.card('named');
+  const openEditor = (name) => {
+    button(card, 'More actions').click();
+    named(card, name).click();
+    return find(document.body, (n) => n.tagName === 'dialog' && n.open);
+  };
+  let dlg = openEditor('Name version…');
+  let input = dlg.querySelector('input');
+  assert.equal(document.activeElement, input);
+  input.value = '  Warm mix  ';
+  dlg.querySelector('form').fire('submit');
+  await flush();
+  assert.deepEqual(submitted, [{ version_name: 'Warm mix' }]);
+  assert.match(card.querySelector('.lib-entry-title').textContent, /Warm mix/);
+
+  dlg = openEditor('Rename version…');
+  input = dlg.querySelector('input');
+  assert.equal(input.value, 'Warm mix');
+  input.value = ' ';
+  dlg.querySelector('form').fire('submit');
+  await flush();
+  assert.deepEqual(submitted.at(-1), { version_name: '' });
+  assert.doesNotMatch(card.querySelector('.lib-entry-title').textContent, /Warm mix/);
 });
 
 // --- Round 4: Trash, Keep only and import in the Library ---
@@ -812,7 +1000,7 @@ test('the Library totals its files, searches title and artist, sorts by size; ra
   Object.assign(document, { addEventListener() {}, removeEventListener() {} });
   const page = document.body;
   const titles = () => page.querySelectorAll('.lib-title').map((n) => n.textContent);
-  assert.equal(page.querySelector('.page-sub').textContent, '4 results · 4.0 GB of files · 1.0 GB of originals kept for comparing');
+  assert.equal(page.querySelector('.page-sub').textContent, '4 results · 4.0 GB of files · 1.0 GB of originals kept for comparison and Adjust');
   assert.deepEqual(titles(), ['Generated fixture', 'Big set']);
   const largest = find(page, (n) => n.tagName === 'input' && n.value === 'largest');
   largest.checked = true;
@@ -846,10 +1034,12 @@ test('the Library totals its files, searches title and artist, sorts by size; ra
 });
 
 test('Remove and Keep only ask first; files go to the Trash only when the user opts in', async (t) => {
-  const env = await librarySetup(t, [entry('one'), entry('two')]);
+  const mixed = entry('two');
+  mixed.files.push({ ...mixed.files[0], id: 'f1', name: 'moved.wav', located: true, can_trash: false });
+  const env = await librarySetup(t, [entry('one'), mixed]);
   const toasts = toastRoot(t);
   const calls = libraryWrites((path) => (path.endsWith('/keep-only') ? { kept: 'one', removed: 1, trashed: [], trash_failed: [] }
-    : { deleted: 'x', trashed: ['fixture.wav'], trash_failed: ['cover.jpg'] }));
+    : { deleted: 'x', trashed: ['fixture.wav'], trash_failed: ['cover.jpg'], located_files_kept: 1 }));
   named(env.card('one'), 'Remove from Library').click();
   let dlg = confirmIn('Remove from the Library?');
   const trash = find(dlg, (n) => n.getAttribute('role') === 'switch');
@@ -865,6 +1055,7 @@ test('Remove and Keep only ask first; files go to the Trash only when the user o
   await flush();
   assert.deepEqual(calls.at(-1), ['/api/library/two?trash_files=1', 'DELETE', null]);
   assert.match(toasts.textContent, /Removed from the Library\. 1 file moved to the Trash\./);
+  assert.match(toasts.textContent, /1 located file outside the output folder stayed in place\./);
   assert.match(toasts.textContent, /Couldn’t move this file to the Trash, so it stays where it is: cover\.jpg\./);
   named(env.card('one'), 'Remove from Library').click();
   answerDialog(confirmIn('Remove from the Library?'), 'cancel');
@@ -891,8 +1082,8 @@ test('a file can be added as a version; imported entries say so and can be compa
   const calls = libraryWrites(() => ({ id: 'j_import', task: 'import', status: 'queued' }));
   const card = env.card('master');
   assert.match(card.querySelector('.lib-entry-title').textContent, /^Imported file$/);
-  assert.equal(card.querySelector('.lib-version').textContent, 'Normal volume · peaks safe');
-  assert.ok(find(card, (n) => n.tagName === 'button' && n.textContent.includes('Compare versions')));
+  assert.equal(card.querySelector('.lib-version').textContent, 'Moderate volume · peaks within limit');
+  assert.ok(compareButton(card));
   assert.equal(find(card, (n) => n.tagName === 'button' && n.textContent.includes('Compare with the original')), undefined);
   named(card, 'Remove from Library').click();
   const removal = confirmIn('Remove from the Library?');

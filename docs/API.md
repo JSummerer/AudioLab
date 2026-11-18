@@ -11,13 +11,13 @@ Percent-encode the query value; characters such as `+`, `&` and `#` are part of 
 
 **Errors:** non-2xx responses carry `{"detail": "human readable message"}`. Failures AudioLab explains (`400`)
 also carry `"hints": ["what you can try", …]` and `"fix"` (see Job `error`). Anything unexpected is a `500` with
-`{"detail": "Something went wrong in AudioLab.", "hints": [… Settings → About → "Copy system report" …], "fix": null}`
+`{"detail": "Something went wrong in AudioLab.", "hints": [… Settings → Help → Maintenance and diagnostics → "Copy system report" …], "fix": null}`
 (the traceback goes to the log); a full disk is `500` "The disk is full." and a folder AudioLab may not write to
 (permissions, a read-only drive) `500` "AudioLab can't write there.", both with hints.
 
-**Browser safety:** without a token, requests carrying an `Origin` header from another site, or a `Host`
+**Browser safety:** in local mode without a token, requests carrying an `Origin` header from another site, or a `Host`
 header that is not a loopback name (DNS rebinding), are refused with `403` — other web pages cannot drive a
-local AudioLab. With a token these checks are off (the token already blocks both; reverse proxies work).
+local AudioLab. A network-bound server with authentication disabled makes neither check. With a token these checks are off (the token already blocks both; reverse proxies work).
 
 ---
 
@@ -125,9 +125,14 @@ and they may still list a `difference` preview ("Only the changes", gone in 2.4)
 `alerts` (`[{"level": "ok|info|warning|danger", "title", "message"}]`).
 `peak_limit_dbtp` is present only for a lossy source (its codec is not PCM, FLAC, ALAC or another lossless
 one): its peaks count as too hot only above it, -0.05 (the lossy limit of Enhance files plus the export
-check's 0.05 dB tolerance), as encoding has already used the master's headroom. Without it, the peak
-words and alerts keep the usual 1 dB margin. The UI's peak word "Clipping" means a true peak above full
-scale; flat-topped samples have their own alert ("The recording is clipped").
+check's 0.05 dB tolerance). The corresponding alert threshold for other sources is -0.5 dBTP.
+The peak card already indicates little headroom above -1 dBTP for those sources. "Above full scale"
+means a measured true peak above 0 dBTP. `is_clipping` and `clipped_samples_pct` are legacy field names
+for the near-full-scale run detector. The report describes such runs as possible clipping, using the
+signal's own sample peak as the counting reference above about +3 dBFS. Samples above full scale in the decoded audio have their own finding, including when resampling
+an integer source produces them.
+`loudness_label` and `loudness_range_label` are the descriptive categories displayed for audible material,
+based on the measured LUFS and LU respectively. Older results may lack these fields.
 `tone_timeline` (recordings longer than 3 minutes, from the whole-file level scan; else absent):
 `{"step_s": 60, "bands": [{"key": "deep_bass", "label": "Deep bass", "hz": [30, 80]}, …], "values": [[0.4, -0.2, …], null, …],
 "basis": "…"}` — seven bands (deep bass 30–80 Hz, bass 80–200, low mids 200–500, mids 0.5–2k, upper mids 2–6k,
@@ -135,7 +140,7 @@ highs 6–12k, top end 12–20k). `values[i]` belongs to `i * step_s`: each band
 median share over the recording, in dB (0 = the recording's typical balance; 0.1 dB steps); `null` for stretches
 more than 20 dB below the typical level (pauses, fades). `step_s` grows past 60 s so there are at most 600 points.
 It shows how the balance moves; it does not judge it (a change is often the music).
-Loudness, LRA, true peak, clipping, DC and programme-level percentiles cover the whole reference
+Loudness, LRA, true peak, near-full-scale runs, DC and programme-level percentiles cover the whole reference
 (`level_analysis_basis`). Stereo also covers the whole reference (`stereo_basis`): `stereo.width_db`
 and `is_mono` use complete mid/side energy; `bass_correlation` is the complete-reference bass correlation.
 `lowest_bass_correlation` is the lowest eligible local correlation, or `null` without meaningful bass.
@@ -144,6 +149,8 @@ The bass measurement uses a 90 Hz low-pass matching the mono fold's magnitude, 0
 Any eligible negative window sets `antiphase_bass` and bypasses automatic mono bass; an explicit On
 override still applies it with an explanation. These gates are conservative engineering choices, not
 a diagnosis of the recording's intent. Older results may have excerpt-only stereo measurements.
+Bandwidth uses the stronger of the mid and side spectra at each frequency, including opposite-phase content.
+`is_lossy_cutoff` is a legacy flag for a detected sharp cutoff or a low source sample-rate limit.
 Long recordings still use bounded excerpts for spectrum, key and classifier features (`analysis_basis`
 describes these). If those excerpts are silent, the whole-file
 level scan anchors a new spectral excerpt to detected sound. Older results may have excerpt-only levels.
@@ -164,7 +171,7 @@ inside the half-open bin, not its midpoint; the gain need not be constant across
 mean no reported reduction above that threshold. These highlights exclude static EQ, overall gain
 and other stages. Old entries without a timeline do not imply no processing.
 
-Each full-length Enhance file has `verification: {status, integrated_lufs, true_peak_dbtp,
+Each full-length Enhance file and each lossy Enhance track has `verification: {status, integrated_lufs, true_peak_dbtp,
 ceiling_dbtp, ceiling_met, tolerance_db, message}`. `ceiling_dbtp` is the limit the file was checked
 against: the master's peak ceiling for a lossless file; for a lossy file (MP3, AAC, Opus) the lossy limit,
 -0.1 dBTP, or the ceiling when that is higher. Status is `verified` (peak within that limit), `warning`
@@ -173,7 +180,7 @@ integrated loudness at the file's rate and estimates true peak at 192 kHz; `tole
 Loudness is `null` below the meter's gate or without a complete 400 ms block; a silent peak is `null`.
 For `unverified`, the readings and `ceiling_met` are `null`. Each file is checked before it gets its
 name. Encoding raises a lossy file's peaks: it may use the master's headroom up to its limit and is then
-saved as encoded. A lossy file whose peaks come out above its limit is encoded once more from the same
+saved as encoded. A full-length lossy export whose peaks come out above its limit is encoded once more from the same
 master, turned down by the excess plus 0.5 dB, and checked again, but only when that turn-down (margin
 included) is at most 2 dB. Only that version is saved, `verification` describes it, and `summary` gets a
 line such as "Turned the AAC down slightly so its peaks stay under the limit (-0.6 dB; encoding raises
@@ -183,8 +190,11 @@ encoded, or one still over after its re-encode) and a failed measurement keep th
 lossy files, even after it was turned down. For more room, use a lower peak ceiling or a lossless format
 (+0.20 dBTP after saving, turned down 0.8 dB; limit -0.10 dBTP)." or "The WAV 24-bit file goes over the
 peak ceiling. For more room, use a lower peak ceiling (-0.60 dBTP after saving; ceiling -1.00 dBTP)."
-`message` is null for a verified file. Split tracks are not individually checked; they take the turn-down
-of their format's full file.
+`message` is null for a verified file. Each lossy Enhance track keeps its full export's trim and gets one check.
+`verification.trim_db` on a track records the inherited turn-down from the master. Each track's
+measurements and message remain in `files[].verification`. The job reports one grouped line in
+`summary` if all checked tracks pass, or in `warnings` if any exceed the limit or cannot be measured. Track check
+metadata is absent on lossless Enhance cuts, Save / Convert cuts and older unchecked tracks.
 `metrics.after` still describes the master, before export; the checks are measurements at creation,
 not proof that a file has not been edited later or that every decoder will produce identical peaks.
 
@@ -222,10 +232,11 @@ is valid but has no full-strength plateau. Section bounds and fades stay inside 
 sections are sorted and must not overlap, else the whole option is invalid; sections without bands are dropped;
 `[]` = none, so a Library preview or apply can clear saved sections; applied after `eq`, before compression,
 loudness and peak control; ignored by Volume only).
-`quality: "best"` uses the AI stage of the recipe (stem-aware EQ for music, voice isolation for speech)
-and requires the AI pack.
-The UI calls these modes **Volume only**, **Tone and volume**, and **AI stems**; the API values remain
-`light`, `standard`, `best` for compatibility. AI stems is a different process, not a quality guarantee.
+`quality: "best"` selects the recipe's AI stage when supported (stem-aware EQ for music and DJ sets,
+voice isolation for speech). It normally requires the AI pack. An explicit Concert (`recipe: "live"`)
+request for `best` normalizes to `standard` and needs no AI pack. Auto can resolve to a recipe without an
+AI stage. The UI presents **Volume only** and **Tone and volume**, plus the recipe's AI option when
+available. API values remain `light`, `standard`, and `best`.
 Noise reduction is explicit-only: choose `denoise: "light"` or `"strong"` when wanted.
 The programme-level percentiles cannot reliably distinguish noise from quiet desired content.
 
@@ -245,8 +256,8 @@ an empty title is ignored. Ignored when one request creates several jobs (playli
 lookup said, as the UI sends it; at most
 `limits.max_playlist_items`), each a link string or `{"url": "…", "title": "…", "duration_s": 201}` (`title` and
 `duration_s` optional), plus the optional form field `playlist_title`. A link looked up with `POST /api/probe` in the
-last 15 minutes takes its title, length and playlist from that lookup; after that the server only knows what the
-request says — so send each item's `title` and `duration_s` and the playlist's `title` as `playlist_title` (the
+last 15 minutes can reuse its cached title and length. Playlist membership comes from the submission.
+Send each item's `title` and `duration_s` and the playlist's `title` as `playlist_title` (the
 playlist folder and album tag). A title is one line of at most 200 characters; unusable values are ignored. A link
 job without any known title is named after the link until it has looked the link up (see Job `title`). Anything
 else than such a list → `400` "urls must be a JSON list of links.".
@@ -312,6 +323,16 @@ and framing; exceeding it returns `413`. A declared oversized `Content-Length` i
 The audio and cover limits are also checked separately after parsing; the cover allowance cannot enlarge
 the permitted audio file. Extra or repeated parts count toward the total.
 
+In the native app window, the confirmed system dialog returns selection IDs. The desktop uses
+`native_file` instead of an upload on `POST /api/jobs`, `native_file` instead of `path` on
+`POST /api/library/import`, and `native_output_folder` instead of `output_dir` on
+`PUT /api/settings`. These fields require the exact loopback app origin and a private
+`X-AudioLab-Desktop` header for the current window. IDs are scoped to the operation and held in
+memory; invalid window context returns `403`, a missing selection `410`, and an unavailable
+chosen file or folder `400`. The New job reads its chosen file in place and retains a private
+reference for Retry. When a finished render’s source has changed, the job keeps its output files
+and reports the Library publication failure in its warnings. Existing upload, typed import and settings fields still work in browser mode.
+
 Settings updates publish active values only after the file is saved successfully. A failed write returns
 `500` and keeps the previous active values. Each update merges with the latest saved preferences.
 The UI queues its saves in order and keeps later pending choices visible if an earlier save fails.
@@ -330,7 +351,7 @@ automatically replacing the saved file.
 | `GET /api/jobs` | – | `{"jobs": [Job, …]}` newest first |
 | `GET /api/jobs/{id}` | – | Job |
 | `GET /api/jobs/{id}/journal` | – | `{"events": [{"ts", "kind", "stage", "message", "detail"}]}` |
-| `POST /api/jobs/{id}/cancel` | – | Job. Cancellation includes Library hashing/copying; once final publication begins or the job is done, `400` explains that the result is already being saved or has finished |
+| `POST /api/jobs/{id}/cancel` | – | Job. Cancelling during task execution discards the attempt’s unfinished outputs. Cancelling during Library hashing/copying after export keeps the completed files and finishes the job as `done` with a warning and no `library_id`. Once final publication begins or the job is done, `400` explains that the result is already being saved or has finished |
 | `POST /api/jobs/{id}/retry` | – | Job (same id, back in the queue). A link is looked up again (a live stream or premiere may have ended) |
 | `DELETE /api/jobs/{id}` | – | `{"deleted": id}` — removes the job and its work files, never the output files |
 | `DELETE /api/jobs` | `?scope=finished` | `{"deleted": [ids]}` — clears done/failed/cancelled jobs |
@@ -341,11 +362,14 @@ automatically replacing the saved file.
 | `POST /api/jobs/{id}/cover` | – | "Save cover to folder": writes the finished job's cover into its output folder, exactly as `save_cover` does, adds it to `result.files` (saved, and a `job` event) and to its Library entry; returns that file (a Result.files entry). Idempotent: a cover file that is still there is returned as it is (one that was moved or deleted is written again, same id). `404` unknown job, or no output folder (not finished, or the folder is gone); `409` "This recording has no cover image to save."; fetching the thumbnail failed → `400` with detail |
 | `GET /api/library` | – | `{"groups": [LibraryGroup, …], "count": n}` — see Library below |
 | `GET /api/library/{id}` | – | one LibraryEntry (with `job_exists`). `404` unknown |
+| `PUT /api/library/{id}/version-name` | `{"version_name": "Live mix"}` | Updated LibraryEntry. Whitespace is collapsed to one line, up to 120 characters. An empty name clears the label. `400` invalid name or body, `404` unknown entry |
 | `GET /api/library/{id}/tone-timeline` | – | the entry's `tone_timeline` (as in the Result analysis). `404` unknown entry or none |
 | `GET /api/library/{id}/overview` | – | retained original sample-peak overview `{basis: "original_sample_peak", duration_s, bin_duration_s, peaks}` with at most 512 contiguous bins, maximum absolute sample across both channels; `404` without a saved overview/entry, `410` without the kept original. Library `has_overview` advertises availability; opening Adjust does not rescan old originals |
 | `GET /api/library/{id}/pcm/{file_id}` | `?offset=<frame>&frames=<n>` | PCM chunk (below) of one file of the entry (`original` or a result). `404` unknown entry/file, `410` moved or deleted, `400` off the grid |
 | `GET /api/library/{id}/files/{file_id}` | `?download=1` optional | one file of a Library entry (`file_id` from its `files`, incl. `original`): inline with Range support for the players, or as an attachment with `download=1`. `404` unknown entry/file, `410` moved or deleted |
-| `POST /api/library/{id}/reveal` | – | opens the entry's output folder (only when `health.local`): `{"ok": true}`, or `{"ok": true, "fallback": "output"}` when that folder is gone and the output root was opened instead (say so). Neither there → `400` "This folder isn't there any more: <path>." with hints. Never creates a folder. `404` unknown |
+| `POST /api/library/{id}/files/{file_id}/locate` | `{"native_file": "…"}` (from the Locate picker) | Updated Library entry. Desktop context required (`403` otherwise). `404` if the entry or file is gone from the Library, `410` for an expired selection, `400` when a different file occupies the recorded path, or the selected file cannot be verified |
+| `POST /api/library/{id}/files/{file_id}/reveal` | – | Opens the current parent of an existing Library file. `403` when not local, `404` unknown entry or file, `410` when the file is unavailable |
+| `POST /api/library/{id}/reveal` | – | opens the entry's folder (the current parent when all available files share one relocated folder) (only when `health.local`): `{"ok": true}`, or `{"ok": true, "fallback": "output"}` when that folder is gone and the output root was opened instead (say so). Neither there → `400` "This folder isn't there any more: <path>." with hints. Never creates a folder. `404` unknown |
 | `DELETE /api/library/{id}` | `?trash_files=1` optional | `{"deleted": id, "original_removed": bool, "freed_bytes": b, "trashed": [names], "trash_failed": [names]}` — forgets the entry; its kept original is deleted with it unless another entry still uses that file. Output files stay unless the user opts in with `trash_files=1`: then the entry's files that still exist (results, tracks, saved cover, an imported file; an AudioLab output folder left empty — never an imported file's folder) go to the system Trash — never a permanent delete. `trashed`/`trash_failed` name the files (a file that can't go to the Trash stays where it is; a file another entry still uses stays and is in neither list). If the Trash is unavailable on this system: `409` with a plain message and hints, nothing removed. `404` unknown |
 | `POST /api/library/{id}/keep-only` | `{"trash_files": false}` | `{"kept": id, "removed": n, "trashed": [names], "trash_failed": [names]}` — "Keep only this version": forgets every other entry of the same `group` (their kept originals as for `DELETE`); with `trash_files: true` their files also go to the Trash, as for `DELETE` (results, tracks, saved cover, an imported file; an AudioLab output folder left empty). `409` as above, `404` unknown |
 | `POST /api/library/import` | `{"path": "/Users/me/Music/Master.wav", "group": "youtube:abc" (optional), "title": "…" (optional)}` | one queued Job of task `import` (only when `health.local`): reads the audio file where it is (no copy), measures its loudness and true peak over the whole file, then records a Library entry (task `import`, see Library). `group`: add it as a version of that recording, else its own content key. `400` when the path is not an existing audio file; `403` when not local |
@@ -377,7 +401,7 @@ chunks join exactly as one decode of the whole file would (bit for bit for WAV, 
 noise-filling bands are random by design; a Matroska file with a non-48 kHz codec may keep a sub-millisecond
 offset after a seek). The player plays them back to back, both versions started at the same time on one clock. Fewer frames come back only at the end of the file (none past it). Mono is spread to
 both channels and more channels are mixed down, as for the analysis. A file that can't be decoded → `400` with
-detail.
+detail. For WebM/Matroska, Compare looks for a timing reference in the first 25 seconds. If it cannot align a later chunk, it returns an error with an earlier-passage or WAV/FLAC hint.
 
 ### Health
 ```jsonc
@@ -395,7 +419,8 @@ detail.
   "output_dir": "/Users/me/Music/AudioLab", "output_dir_ok": true, "data_dir": "…", "logs_dir": "…",
   "upload_extensions": [".3gp", ".aac", ".ac3", "…", ".wv"],   // sorted, with the dot: what `file` accepts
   "limits": {"max_upload_mb": 4096, "max_duration_s": 28800, "max_playlist_items": 200},
-  "recipes": [{"key": "club", "name": "Club / DJ set", "short": "Punchy, loud, tight bass", "description": "…"}],
+  "recipes": [{"key": "club", "name": "Club / DJ set", "short": "Punchy, loud, tight bass", "description": "…",
+               "ai_stage": "stem_eq"}], // recipe AI stage: none | stem_eq | voice_isolate
   "formats": {
     "download": [{"key": "mp3", "label": "MP3", "description": "Plays everywhere (320 kbps).", "kind": "lossy",
                   "facts": ["Converted to MP3 at 320 kbps.", "About 2.4 MB per minute.", "…"], "cover": true}],
@@ -416,7 +441,7 @@ for under the format picker.
 `upload_extensions`: the file types `POST /api/jobs` accepts as `file` (audio and video containers ffmpeg reads) —
 the UI's file picker and drop check use this one list.
 `output_dir_ok`: the output folder is there and writable, or can be made. `false` (e.g. on a drive that isn't
-connected): show a notice pointing to Settings → Files. Settings still load and save; jobs that write files fail
+connected): show a notice pointing to Settings → Output defaults. Settings still load and save; jobs that write files fail
 before they start ("The output folder isn't available: …"); Check still works.
 `packaged`: the self-contained core app, with its own Python runtime, FFmpeg, Deno and downloader.
 AI has its own capability: `ai.install_supported`, independent of `packaged`. It is true only when the packaged build
@@ -553,6 +578,18 @@ the file is named `"NN - <the line's title>.ext"`. A job only starts when `error
 characters → `400`.
 
 ### Library
+
+For a saved Enhance version with a kept original, the individual `GET /api/library/{entry_id}` response
+includes `adjust_draft: {basis, revision, data}`. A fresh draft has revision 0 and null data. Grouped
+Library results omit it. The opaque basis identifies the version, original, processing and editor schema.
+`PUT /api/library/{entry_id}/adjust-draft` takes the same three fields. Send null data to discard.
+Success returns the new revision. A changed basis or revision returns `409` and preserves the stored
+draft. A missing entry returns `404`, an unsupported or oversized editor value returns `400`.
+
+Draft data contains passage `from` and `length`, a selected `scope`, raw setting `values`, up to eight
+`sections` (id, from, to, fade), and `graphs` by scope. Each graph holds up to eight editable EQ bands,
+bypass and validation flags, its EQ text (up to 4,096 characters), disclosure state and any incomplete
+numeric rows. Timing and numeric input strings allow up to 128 characters. A draft never queues work.
 Every job that finishes with files (Save, Enhance, Split — not Check) is recorded in the Library, which outlives
 the job (jobs expire after `AUDIOLAB_RETENTION_DAYS`, "Clear finished" removes them; the Library keeps its
 entries until they are removed with `DELETE /api/library/{id}`). Runs from the command line are not recorded.
@@ -561,13 +598,23 @@ whose `path` is absolute (the file stays where it is), `loudness: {"original_luf
 `measured: {"integrated_lufs", "true_peak_dbtp", "duration_s"}`, no kept original, and the title from its tags or
 file name (or the request's `title`).
 They can be played, compared with other versions of their group and removed like any entry.
+For Library result files, `locatable` reflects whether the record has a saved file identity.
+The desktop can relink a missing file after a same-drive move or rename, including imported files recorded
+with an identity. A new selection can confirm an edit in place to a located or natively imported
+file at its recorded path if its device and inode still match. Historical job measurements stay as recorded.
+A located file has `located: true`. An external relocation sets `can_trash: false`. When Remove
+or Keep only sends files to the Trash, its optional `located_files_kept` counts distinct
+externally located files that stayed. A separately imported version can also reference the same file. The file's original job record is unaffected.
 New Enhance entries retain `processing: {requested, resolved, applied, metrics}` after job removal.
 `requested` holds validated recipe, quality, formats, advanced settings and cover/split switches;
 `resolved` holds `{recipe, params, decisions}` and, when available, `bandwidth`
 (`is_lossy_cutoff` and optional `cutoff_hz`) for repeating HF treatment in a short preview.
-New versions made with "Tone and volume" also retain `resolved.auto_compressor` (`off`, `glue` or `leveler`).
-This is the automatic decision before an explicit Glue override. New versions made with "Tone and volume"
-or "Volume only" may retain `resolved.calibration`, a versioned, finite, path-free object.
+For a new Enhance version that used tone processing without AI, `resolved.auto_compressor` holds the
+automatic compressor decision before a Glue override (`off`, `glue` or `leveler`). Versions rendered
+without AI can retain `resolved.calibration`, a versioned, finite, path-free object. The public
+Enhance entry's `adjust_quality` is `standard` for tone processing without AI, `light` for Volume only,
+and `null` when AI was applied or the report cannot establish the mode. The original requested quality
+is still in `processing.requested.quality`.
 Missing fields mean unavailable, not zero:
 
 | Calibration field | Meaning and dependency |
@@ -588,15 +635,17 @@ calibration: it analyzes and renders the complete original again.
 `applied` and `metrics` use the Result fields above.
 The projection omits source paths, tracklists and raw tool errors, bounds strings/lists and rejects
 non-finite numbers. Older entries omit `processing`; no historical settings are invented.
-Enhanced `files[].verification` keeps the Result export checks except `message`. Library
-`loudness.result_lufs` remains the master measurement; the compare player uses the selected export's
+Enhance `files[].verification` keeps the Result export checks, including those for lossy tracks, except `message`.
+When tracks have recorded verification, the Library entry includes `track_check_summary`, one line
+with the counts for the recorded outcomes. Library `loudness.result_lufs` remains the master measurement; the compare player uses the selected export's
 measured loudness when available. An explicitly unverified/unmeasurable export disables volume matching;
 legacy entries with no check use their original master-based estimate.
 
 `POST /api/library/{id}/preview` accepts JSON `{start_s, duration_s, advanced: {...}}` and returns a
 single queued Enhance Job. Start must be finite and nonnegative; duration is 5–30 seconds, clipped at
 the actual end only if at least one second remains. It requires a kept original and retained resolved
-settings, and supports "Volume only" and "Tone and volume", not "AI stems". Unknown/invalid fields return
+settings and a saved record confirming that no AI processing was used. This includes a `best` request
+with a recorded fallback or a resolved stage of `none`. Unknown/invalid fields return
 `400`; missing entries return `404`, missing originals `410`. Advanced options have the Enhance meanings and numeric
 limits; preview excludes the AI model option. Retained HF restoration needs its original bandwidth
 facts (or the still-existing source job's analysis); unavailable provenance returns `400`.
@@ -649,7 +698,8 @@ tone/dynamics controls are rejected rather than changing modes. Audition process
 
 `POST /api/library/{id}/enhance` accepts `{advanced: {...}}` and returns one ordinary queued Enhance Job.
 Both routes clone the retained original into the new job input, merge overrides with saved requested
-options and preserve the earlier version. The full job reanalyzes the complete original, exports and
+options and preserve the earlier version. If the saved `best` version used no AI processing, the new
+job uses `standard`. The full job reanalyzes the complete original, exports and
 verifies new files, and retains its source grouping and track markers. Neither route accepts paths or
 raw chain parameters. They work after the original job expires if the required Library data survives.
 Apply reuses artwork embedded in an available saved export and a separately saved cover image when
@@ -676,6 +726,7 @@ A kept file is named by its content, so results with the same original share one
  "task": "enhance",                 // download | enhance | separate | import
  "created_at": 1759740000.0,
  "title": "Song", "artist": "Artist",                        // as used for names and tags
+ "version_name": "Live mix",                                 // optional Library and comparison display name
  "source": {"kind": "url", "url": "…", "title": "…", "thumbnail": "…", "duration_s": 213.0},  // as Job.source
  "group": "youtube:dQw4w9WgXcQ",
  "duration_s": 213.0, "headline": "Enhanced as Club / DJ set",
@@ -696,7 +747,7 @@ A kept file is named by its content, so results with the same original share one
  "files": [
    {"id": "f0", "name": "Song (Enhanced).mp3", "path": "Song (Enhanced)/Song (Enhanced).mp3",  // relative to the
     "kind": "enhanced", "format": "mp3_320", "label": "MP3 · 320 kbps", "size_bytes": 8123456,  // output folder
-    "exists": true, "playable": true, "mime": "audio/mpeg"},
+    "exists": true, "playable": true, "mime": "audio/mpeg", "revision": "ab12…"},
    {"id": "f2", "kind": "track", "track": 1, "start_s": 0.0, "end_s": 312.4, …},
    {"id": "f0", "kind": "stem", "stem": "vocals", …},                 // Split results
    {"id": "original", "name": "Song.webm", "kind": "original", "format": "webm", "codec": "opus",
@@ -712,7 +763,9 @@ moved or deleted stays listed with `exists: false` (its file route answers `410`
 can usually play (for the plain players; comparing decodes on the server, so any format compares) — WebM/Opus
 needs macOS 14 / Safari 17 in the app window, so probe with `canPlayType(mime + '; codecs=' + codec)` and handle
 playback errors. `path` is relative to the output folder of
-that time (absolute for a file outside it).
+that time (absolute for a file outside it). `revision` is an opaque file change indicator, or `null`
+when no regular file is available. It derives from filesystem metadata and is checked when refreshing
+a Library comparison.
 
 ### Events (`GET /api/events`)
 ```

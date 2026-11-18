@@ -76,7 +76,7 @@ def test_report_uses_whole_file_levels_when_spectral_excerpts_miss_the_loud_pass
     assert report['true_peak_dbtp'] == round(true_peak_db(stereo), 2)
     assert report['dynamics_style'] == profile.dynamics_style(programme_loudness(stereo), lra(stereo))
     assert report['is_clipping']
-    assert 'Peaks are too hot' in {alert['title'] for alert in report['alerts']}
+    assert 'Peaks above the check limit' in {alert['title'] for alert in report['alerts']}
 
 
 @pytest.mark.parametrize('side_gain', [0.0, 0.02], ids=['mono-excerpts', 'stereo-excerpts'])

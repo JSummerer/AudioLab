@@ -426,9 +426,52 @@ def test_invalid_missing_and_unsupported_preview_requests(app, tmp_path):
     assert client.post(url + '/enhance', json={}).status_code == 410
 
     best, _ = retained(tmp_path, quality='best')
-    rejected = client.post(f'/api/library/{best["id"]}/preview', json={'start_s': 0, 'duration_s': 5})
-    assert rejected.status_code == 400 and '"Volume only" and "Tone and volume"' in rejected.json()['detail']
+    params = best['processing']['resolved']['params']
+    params['ai_stage'] = 'stem_eq'
+    best['processing']['applied']['ai'] = {'stage': 'stem_eq', 'fallback': False}
+    library._write(best)
+    url = f'/api/library/{best["id"]}/preview'
+    audition = {'start_s': 0, 'duration_s': 5}
+    rejected = client.post(url, json=audition)
+    assert rejected.status_code == 400 and 'no AI processing' in rejected.json()['detail']
+
+    del params['ai_stage']
+    del best['processing']['applied']['ai']  # a legacy best record with no evidence either way
+    library._write(best)
+    assert client.post(url, json=audition).status_code == 400
     assert manager.list() == []
+
+
+@pytest.mark.parametrize('fallback', [False, True])
+def test_saved_best_without_applied_ai_uses_classic_preview_and_apply(app, tmp_path, monkeypatch, fallback):
+    client, manager = app
+    entry, _ = retained(tmp_path, quality='best')
+    details = entry['processing']
+    params = details['resolved']['params']
+    if fallback:
+        params['ai_stage'] = 'stem_eq'
+        details['applied']['ai'] = {'stage': 'stem_eq', 'fallback': True}
+    else:
+        assert params['ai_stage'] == 'none'
+    library._write(entry)
+    monkeypatch.setattr(manager, '_runner', lambda *_args: {})
+    address = f'/api/library/{entry["id"]}'
+    assert client.get(address).json()['adjust_quality'] == 'standard'
+
+    changes = {'advanced': {'bass_db': 1.0}}
+    audition = client.post(address + '/preview', json={**changes, 'start_s': 0, 'duration_s': 5, 'paired': True})
+    assert audition.status_code == 200, audition.text
+    queued = manager.get(audition.json()['id'])
+    assert queued.options['quality'] == 'standard'
+    preview_spec = queued.options['_preview']
+    assert preview_spec['params']['ai_stage'] == preview_spec['draft_params']['ai_stage'] == 'none'
+    assert preview_spec['draft_params']['bass_db'] == 1.0
+
+    apply = client.post(address + '/enhance', json=changes)
+    assert apply.status_code == 200, apply.text
+    assert apply.json()['options']['quality'] == 'standard'
+    assert apply.json()['options']['advanced']['bass_db'] == 1.0
+    assert library.get(entry['id'])['processing'] == details
 
 
 def test_preview_clips_to_actual_eof_and_rejects_too_little_audio(app, tmp_path):

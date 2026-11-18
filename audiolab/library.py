@@ -37,14 +37,16 @@ from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
-from . import processing, trash
+from . import adjust_drafts, processing, trash
 from .errors import AudioLabError
 from .media.export import FORMATS
+from .media.verification import track_check_summary
+from .native_inputs import Selection, source_path
 from .settings import SETTINGS
 from .system import replace_file
 from .util import FOLDER_JUNK, PLAYABLE_EXT, link_or_copy, media_type, sanitize_filename
+from .util import JOB_ID_RE as ENTRY_ID_RE
 
-ENTRY_ID_RE = re.compile(r'^j_\d{8}_\d{6}_[0-9a-f]{6}$')  # an entry is named after its job
 ORIGINAL = 'original'  # file id of the kept original
 # originals/ only ever holds these: 16 hex digits of the content's SHA-1 (of the group key before 2.4)
 ORIGINAL_NAME_RE = re.compile(r'^[0-9a-f]{16}\.[a-z0-9]{1,5}$')
@@ -61,6 +63,7 @@ def originals_dir() -> Path:
     return p
 
 
+MAX_VERSION_NAME = 120
 STAGING_PREFIX = '.original-'  # record()'s temporary folder in originals/; a kept original never starts with '.'
 
 
@@ -155,9 +158,16 @@ def record(job, check_cancel: Callable[[], None] | None = None, begin_commit: Ca
     hints = result.get('_library') or {}
     keep = job.task in KEEPS_ORIGINAL and hints.get('original') and SETTINGS.get().keep_originals
     original = Path(hints['original']) if keep else None
+    external = '_native_identity' in job.source
+    if external:
+        selected = source_path(job.source)
+        if original is not None and original != selected:
+            raise _unverified_original()
     check = check_cancel or (lambda: None)
     digests: dict = {}  # reuse an upload's digest only within this record; never retain its callbacks
     digest = file_sha1(original, check, digests) if original else None
+    if external and original and not digest:
+        raise _unverified_original()
     root = SETTINGS.output_dir
     stems = {
         p['file_id']: p['key'][5:]
@@ -165,6 +175,9 @@ def record(job, check_cancel: Callable[[], None] | None = None, begin_commit: Ca
         if p.get('file_id') and str(p.get('key', '')).startswith('stem:')
     }
     files = [_file_item(f, root, job.task, stems.get(f['id'])) for f in outputs]
+    if external and job.task == 'import':
+        for f in files:
+            f.update(_native_import=True, _identity=list(job.source['_native_identity']))
     metrics = result.get('metrics') or {}
     out_dir = result.get('output_dir')
     entry = {
@@ -207,7 +220,10 @@ def record(job, check_cancel: Callable[[], None] | None = None, begin_commit: Ca
         entry['measured'] = {k: _rounded(measured.get(k)) for k in ('integrated_lufs', 'true_peak_dbtp', 'duration_s')}
     with ExitStack() as cleanup:
         item = _original_item(original, digest, entry, hints) if original and digest else None
+        if external and original is not None and item is None:
+            raise _unverified_original()
         staged = None
+        staged_identity = existing_identity = None
         if item:
             item['stream'] = stream if item['downloaded'] else None  # the stream this download is
         if item and not item['downloaded']:
@@ -229,18 +245,39 @@ def record(job, check_cancel: Callable[[], None] | None = None, begin_commit: Ca
             folder = cleanup.enter_context(tempfile.TemporaryDirectory(prefix=STAGING_PREFIX, dir=originals_dir()))
             dst = originals_dir() / item['file']
             candidate = dst if _size(dst) == item['size_bytes'] else original
+            if external:
+                source_path(job.source)
+                if candidate == dst:
+                    existing_identity = _file_identity(candidate)
+            stage = Path(folder) / item['file']
             try:
-                staged = link_or_copy(candidate, Path(folder) / item['file'], check, link=_linkable(candidate, dst))
+                can_link = (candidate == dst or not external) and _linkable(candidate, dst)
+                staged = link_or_copy(candidate, stage, check, link=can_link)
             except FileNotFoundError:
                 if candidate == original:
                     raise
-                staged = link_or_copy(original, Path(folder) / item['file'], check, link=_linkable(original, dst))
+                existing_identity = None
+                staged = link_or_copy(original, stage, check, link=not external and _linkable(original, dst))
+            if external:
+                source_path(job.source)
+                staged_identity = _file_identity(staged)
+                if staged_identity is None or file_sha1(staged, check) != digest:
+                    raise _unverified_original()
         check()
         with _lock:  # Library -> manager is the only nested lock order
             if begin_commit:
                 begin_commit()
             else:
                 check()
+            if external:
+                source_path(job.source)
+                if item:
+                    dst = originals_dir() / item['file']
+                    if _file_identity(staged) != staged_identity:
+                        raise _unverified_original()
+                    # A concurrent operation may have installed a different file of this size.
+                    if os.path.lexists(dst) and (existing_identity is None or _file_identity(dst) != existing_identity):
+                        raise _unverified_original()
             created = None
             try:
                 if item:
@@ -257,6 +294,13 @@ def record(job, check_cancel: Callable[[], None] | None = None, begin_commit: Ca
                     created.unlink(missing_ok=True)
                 raise
     return True
+
+
+def _unverified_original() -> AudioLabError:
+    return AudioLabError(
+        'AudioLab could not verify the kept original.',
+        hints=['Check that the source is unchanged, then choose it again.'],
+    )
 
 
 def _stream(value: Any) -> dict[str, Any] | None:
@@ -358,9 +402,105 @@ def _file_item(f: dict[str, Any], root: Path, task: str, stem: str | None = None
     item.update({k: f[k] for k in ('track', 'start_s', 'end_s') if f.get(k) is not None})
     if stem:
         item['stem'] = stem
-    if kind == 'enhanced' and (verification := processing.verification(f.get('verification'))) is not None:
-        item['verification'] = verification
+    if identity := _file_identity(Path(f['path'])):
+        item['_identity'] = identity
+    if task == 'enhance' and kind in ('enhanced', 'track'):
+        if (verification := processing.verification(f.get('verification'))) is not None:
+            item['verification'] = verification
     return item
+
+
+def _file_identity(path: Path) -> list[int] | None:
+    try:
+        st = path.stat()
+        if stat.S_ISREG(st.st_mode) and st.st_ino:
+            return [st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns]
+    except OSError:
+        pass
+    return None
+
+
+def _stored_identity(item: dict[str, Any]) -> list[int] | None:
+    identity = item.get('_identity')
+    if isinstance(identity, list) and len(identity) == 4 and all(type(n) is int for n in identity) and identity[1] > 0:
+        return identity
+    return None
+
+
+def locate_file(entry_id: str, file_id: str, picked: Selection) -> dict[str, Any] | None:
+    """Relink a moved file or confirm an in-place edit to a previously selected file."""
+    with _lock:
+        entry = get(entry_id)
+        if entry is None:
+            return None
+        item = next((f for f in entry.get('files') or [] if f.get('id') == file_id), None)
+        if item is None or file_id == ORIGINAL:
+            return None
+        identity = _stored_identity(item)
+        if identity is None:
+            raise AudioLabError(
+                'AudioLab has no saved identity for this file.',
+                hints=['Add the file to the Library again.'],
+            )
+        previous = _resolve(entry, item.get('path'))
+        candidate = picked.checked_path()
+        selected = list(picked.identity)
+        reconfirm = (
+            candidate == previous
+            and (item.get('_located') or item.get('_native_import'))
+            and selected[:2] == identity[:2]  # same device and inode; the user picked the edited file again
+            and selected != identity
+        )
+        if previous is None or (not reconfirm and os.path.lexists(previous)):
+            if candidate == previous and selected[:2] != identity[:2]:
+                raise AudioLabError(
+                    'A different file has replaced the one saved here.',
+                    hints=['Remove this entry from the Library, keep its files, then add the replacement file.'],
+                )
+            raise AudioLabError(
+                'There is already a file or folder at the saved location.', hints=['Refresh the Library.']
+            )
+        if (
+            candidate.suffix.lower() != previous.suffix.lower()
+            or not _no_link(candidate)
+            or _inside(_real(candidate), _real(SETTINGS.data_dir), strict=False)
+            or (not reconfirm and selected != identity)
+        ):
+            raise AudioLabError(
+                'That isn’t the same file AudioLab saved here.',
+                hints=['Choose the original file, moved or renamed on the same drive.'],
+            )
+        if _file_identity(candidate) != selected or (not reconfirm and os.path.lexists(previous)):
+            raise AudioLabError('The file changed while it was being located.', hints=['Choose it again.'])
+        if reconfirm:
+            item.update(_identity=selected, size_bytes=selected[2])
+        else:
+            root = Path(entry['root'])
+            item.update(
+                path=_relative(str(candidate), root),
+                name=candidate.name,
+                _located=True,
+                _keep_in_place=not _plain_inside(candidate, root),
+            )
+        _write(entry)
+        return entry
+
+
+def name_version(entry_id: str, name: str) -> dict[str, Any] | None:
+    """Set or clear a display name on the current Library record under the write lock."""
+    name = ' '.join(name.split())
+    if len(name) > MAX_VERSION_NAME or any(unicodedata.category(c) in ('Cc', 'Cs') for c in name):
+        raise AudioLabError(f'Use up to {MAX_VERSION_NAME} characters for the version name.')
+    with _lock:
+        entry = get(entry_id)
+        if entry is None:
+            return None
+        if name:
+            entry['version_name'] = name
+        else:
+            entry.pop('version_name', None)
+        _write(entry)
+        return entry
 
 
 def add_file(entry_id: str, f: dict[str, Any]) -> bool:
@@ -430,7 +570,7 @@ def get(entry_id: str) -> dict[str, Any] | None:
         entry = json.loads((SETTINGS.library_dir / f'{entry_id}.json').read_text(encoding='utf-8'))
     except (OSError, json.JSONDecodeError):
         return None
-    return entry if isinstance(entry, dict) else None
+    return entry if isinstance(entry, dict) and entry.get('id') == entry_id else None
 
 
 def file_path(entry: dict[str, Any], file_id: str) -> Path | None:
@@ -442,6 +582,20 @@ def file_path(entry: dict[str, Any], file_id: str) -> Path | None:
         if f.get('id') == file_id:
             return _resolve(entry, f.get('path'))
     return None
+
+
+def _file_current(item: dict[str, Any], path: Path) -> bool:
+    """Once located, a replacement at the new path cannot inherit the reference or Trash permission."""
+    if not (item.get('_located') or item.get('_native_import')):
+        return path.is_file()
+    identity = _stored_identity(item)
+    return identity is not None and _no_link(path) and _file_identity(path) == identity
+
+
+def file_exists(entry: dict[str, Any], file_id: str, path: Path) -> bool:
+    if file_id == ORIGINAL:
+        return path.is_file()
+    return any(f.get('id') == file_id and _file_current(f, path) for f in entry.get('files') or [])
 
 
 def known_paths() -> list[Path]:
@@ -462,6 +616,17 @@ def folder(entry: dict[str, Any]) -> Path | None:
     return _resolve(entry, entry.get('output_dir'))
 
 
+def reveal_folder(entry: dict[str, Any]) -> Path | None:
+    """Use the current parent when all available result files share a relocated folder."""
+    parents = set()
+    relocated = False
+    for f in entry.get('files') or []:
+        if (p := _resolve(entry, f.get('path'))) and _file_current(f, p):
+            parents.add(p.parent)
+            relocated |= bool(f.get('_located'))
+    return parents.pop() if relocated and len(parents) == 1 else folder(entry)
+
+
 def _resolve(entry: dict[str, Any], stored: str | None) -> Path | None:
     p = Path(stored or '')
     if not stored or '..' in p.parts:
@@ -474,7 +639,15 @@ def public(entry: dict[str, Any], job_exists: bool = False) -> dict[str, Any]:
     files = []
     for f in entry.get('files') or []:
         p = file_path(entry, f['id'])
-        files.append({**f, **_file_state(p)})
+        state = _file_state(p)
+        if f.get('_located') or f.get('_native_import'):
+            state['exists'] = bool(p and _file_current(f, p))
+        public_file = {k: v for k, v in f.items() if not k.startswith('_')}
+        if f.get('_located'):
+            public_file['located'] = True
+        if f.get('_keep_in_place'):
+            public_file['can_trash'] = False
+        files.append({**public_file, **state, 'locatable': _stored_identity(f) is not None})
     orig = entry.get('original') or {}
     p = file_path(entry, ORIGINAL)
     size = _size(p)  # one look: it may be deleted at any moment
@@ -493,7 +666,16 @@ def public(entry: dict[str, Any], job_exists: bool = False) -> dict[str, Any]:
                 'exists': True,
             }
         )
-    out = {k: v for k, v in entry.items() if k not in ('files', 'original', 'root', 'tone_timeline', 'overview')}
+    out = {
+        k: v
+        for k, v in entry.items()
+        if k not in ('files', 'original', 'root', 'tone_timeline', 'overview', 'adjust_draft')
+    }
+    if entry.get('task') == 'enhance':
+        out['adjust_quality'] = processing.adjust_quality(entry.get('processing'))
+        track_note, _ = track_check_summary(f for f in files if f.get('kind') == 'track')
+        if track_note:
+            out['track_check_summary'] = track_note
     if entry.get('tone_timeline'):
         out['has_tone_timeline'] = True  # the data: GET /api/library/{id}/tone-timeline (keeps the list small)
     if entry.get('overview') and kept:
@@ -512,6 +694,23 @@ def public(entry: dict[str, Any], job_exists: bool = False) -> dict[str, Any]:
     out['compare_file_id'] = _compare_file(files) if kept else None
     out['job_exists'] = job_exists
     return out
+
+
+def save_adjust_draft(entry_id: str, basis: str, revision: int, data: dict | None) -> dict | None:
+    """Replace only the editor document, under the same lock as entry removal and other edits."""
+    with _lock:
+        entry = get(entry_id)
+        if entry is None or entry.get('id') != entry_id:
+            return None
+        original = file_path(entry, ORIGINAL)
+        current = adjust_drafts.read(entry)
+        if entry.get('task') != 'enhance' or original is None or not original.is_file():
+            raise ValueError('The kept original is no longer available for Adjust.')
+        if current['basis'] != basis or current['revision'] != revision:
+            raise ValueError('This version or its draft changed elsewhere. Reload before editing again.')
+        entry['adjust_draft'] = {'basis': basis, 'revision': revision + 1, 'data': data}
+        _write(entry)
+        return {'revision': revision + 1}
 
 
 def _compare_file(files: list[dict[str, Any]]) -> str | None:
@@ -543,8 +742,19 @@ def _unlink(p: Path) -> int:
 
 
 def _file_state(p: Path | None) -> dict[str, Any]:
+    revision = None
+    try:
+        st = p.stat() if p is not None else None
+        if st is not None and stat.S_ISREG(st.st_mode):
+            # A cheap change indicator for open players. Raw filesystem identity
+            # stays server-side; the UI only needs to compare the opaque value.
+            fields = (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+            revision = hashlib.blake2s(repr(fields).encode('ascii'), digest_size=12).hexdigest()
+    except OSError:
+        pass
     return {
-        'exists': bool(p and p.is_file()),
+        'exists': revision is not None,
+        'revision': revision,
         'playable': bool(p and p.suffix.lower() in PLAYABLE_EXT),
         'mime': media_type(p) if p else None,
     }
@@ -613,15 +823,14 @@ def remove(entry_id: str, trash_files: bool = False) -> dict[str, Any] | None:
         if entry is None:
             return None
         others = [e for e in _all() if e.get('id') != entry_id]
-        trashed, failed = _trash_files([entry], others) if trash_files else ([], [])
+        outcome = _trash_files([entry], others) if trash_files else {'trashed': [], 'trash_failed': []}
         (SETTINGS.library_dir / f'{entry_id}.json').unlink(missing_ok=True)
         freed = _drop_unused_original(entry)
     return {
         'deleted': entry_id,
         'original_removed': freed is not None,
         'freed_bytes': freed or 0,
-        'trashed': trashed,
-        'trash_failed': failed,
+        **outcome,
     }
 
 
@@ -637,15 +846,15 @@ def keep_only(entry_id: str, trash_files: bool = False) -> dict[str, Any] | None
         dropped = [e for e in entries if e.get('group') == entry.get('group') and e.get('id') != entry_id]
         ids = {e.get('id') for e in dropped}
         remaining = [e for e in entries if e.get('id') not in ids]
-        trashed, failed = _trash_files(dropped, remaining) if trash_files else ([], [])
+        outcome = _trash_files(dropped, remaining) if trash_files else {'trashed': [], 'trash_failed': []}
         for e in dropped:
             (SETTINGS.library_dir / f'{e["id"]}.json').unlink(missing_ok=True)
         for e in dropped:  # after all of them are gone: a file they shared goes once
             _drop_unused_original(e)
-    return {'kept': entry_id, 'removed': len(dropped), 'trashed': trashed, 'trash_failed': failed}
+    return {'kept': entry_id, 'removed': len(dropped), **outcome}
 
 
-def _trash_files(entries: list[dict[str, Any]], remaining: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
+def _trash_files(entries: list[dict[str, Any]], remaining: list[dict[str, Any]]) -> dict[str, Any]:
     """Move the files of `entries` that are still there (results, tracks, saved cover, an imported
     file) to the system Trash, then their folders that are left empty. Returns the names of the
     files trashed and of those that couldn't be (they stay). Never touched: a file an entry in
@@ -660,6 +869,7 @@ def _trash_files(entries: list[dict[str, Any]], remaining: list[dict[str, Any]])
     used_folders = {_real(p) for e in remaining if (p := folder(e))} | {_real(SETTINGS.output_dir)}
     trashed: list[str] = []
     failed: list[str] = []
+    protected: set[Path] = set()  # an external location another removed entry might also reference
     folders: dict[Path, Path] = {}  # a folder that may go when empty -> its entry's output root
 
     def move(p: Path) -> bool:
@@ -679,16 +889,21 @@ def _trash_files(entries: list[dict[str, Any]], remaining: list[dict[str, Any]])
         own = folder(e) if not imported and root is not None else None
         for f in e.get('files') or []:
             p = file_path(e, f.get('id') or '')
+            if f.get('_keep_in_place'):
+                if p is not None and _file_current(f, p):
+                    protected.add(p)
+                continue
             if p is None or not os.path.lexists(p) or _real(p) in in_use or _inside(_real(p), data, strict=False):
                 continue
             # Never through or of a link: no link anywhere on an imported file's path (it was stored
             # resolved), and an AudioLab output lies in its root with no link on the way (a folder or the
             # output folder replaced by a link to another music folder).
             safe = _no_link(p) if imported else root is not None and _plain_inside(p, root)
-            if not safe or not p.is_file() or not move(p):
+            if not safe or not _file_current(f, p) or not move(p):
                 failed.append(p.name)
                 continue
             trashed.append(p.name)
+            protected.discard(p)
             if own is not None and p.parent.is_relative_to(own):
                 folders[p.parent] = root  # its folder, or Tracks/ inside it
         if own is not None:
@@ -698,7 +913,8 @@ def _trash_files(entries: list[dict[str, Any]], remaining: list[dict[str, Any]])
             continue
         if _empty_folder(d):
             move(d)  # a folder that stays is not worth a message: its files are what the user asked about
-    return trashed, failed
+    kept = sum(p.is_file() for p in protected)
+    return {'trashed': trashed, 'trash_failed': failed, **({'located_files_kept': kept} if kept else {})}
 
 
 def _plain_inside(p: Path, root: Path) -> bool:

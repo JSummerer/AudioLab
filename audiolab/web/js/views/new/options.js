@@ -3,10 +3,10 @@
 // tools and fine-tuning sit under each task's "More options"; whatever is set there is sent.
 // Every option reads like a sleeve's credits: its label left, its control right.
 import { h, icon, clear } from '../../dom.js';
-import { store, aiAvailable, isShown, setShown, formatInfo, ENHANCE_PRESETS } from '../../store.js';
+import { RECIPE_LABELS, store, aiAvailable, isShown, setShown, formatInfo, ENHANCE_PRESETS } from '../../store.js';
 import { segmented, chips, switchControl, autoRange, toast, callout } from '../../ui.js';
 import { settingsPath } from '../../router.js';
-import { state, refs, redraw, definePart, isFileLike, isLinkSource, appliedAdvanced, TASKS, LIGHT_KEYS, RECIPE_LABELS, PROCESSING_LABELS } from './state.js';
+import { state, refs, redraw, definePart, isFileLike, isLinkSource, appliedAdvanced, TASKS, LIGHT_KEYS, PROCESSING_LABELS, enhanceAIChoice, qualityAfterRecipeChange } from './state.js';
 import { tracksBlock, tracksUpFront } from './tracks.js';
 import { hasOwnCover, takesCover, coverTools } from './cover.js';
 import { nameTools } from './names.js';
@@ -20,8 +20,8 @@ const PRESETS = ENHANCE_PRESETS;
 
 // Rarely used choices: under "More options" (unless already picked).
 const RARE_DOWNLOAD = new Set(['opus']);
-// Split file types shown up front, with short labels; the others are rare.
-const SPLIT_SHORT = { wav16: 'WAV', flac24: 'FLAC', mp3_320: 'MP3' };
+// Split file types shown up front; the others are under More options.
+const USUAL_SPLIT = new Set(['wav16', 'flac24', 'mp3_320']);
 
 definePart('tiles', renderTiles);
 definePart('options', renderOptions);
@@ -191,7 +191,7 @@ function defaults() {
   return {
     download_format: s.download_format || 'mp3',
     embed_cover: s.embed_cover !== false,
-    enhance_formats: s.enhance_formats?.length ? s.enhance_formats : ['mp3_320', 'wav16'],
+    enhance_formats: s.enhance_formats?.length ? s.enhance_formats : ['mp3_320'],
     separate_format: s.separate_format || 'wav16',
   };
 }
@@ -319,7 +319,7 @@ function recipeOptions() {
   const guess = state.source?.kind === 'url' ? state.source.probe?.guess
     : state.source?.kind === 'job' ? state.source.job?.result?.classification : null;
   const autoDesc = guess && guess.type && guess.type !== 'unknown'
-    ? `Looks like: ${guess.label}` : 'Detects what it is';
+    ? `Looks like: ${guess.label}` : 'Picks a recipe from what it measures';
   return [
     { value: 'auto', label: 'Auto', desc: autoDesc },
     ...recipes.map((r) => ({ value: r.key, label: RECIPE_LABELS[r.key] || r.name, desc: r.short })),
@@ -363,25 +363,25 @@ function renderEnhanceOptions(el) {
   const e = state.enhance;
   const dflt = defaults();
   const ai = aiAvailable();
-  if (!ai && e.quality === 'best') e.quality = 'standard';
+  const choiceFor = (recipe) => enhanceAIChoice(recipe, store.health?.recipes);
+  if (e.quality === 'best' && (!ai || !choiceFor(e.recipe))) e.quality = 'standard';
   const all = store.health?.formats?.enhance || [];
   const fmts = enhanceFormatGroups();
   const formatsChanged = () => [...fmts.moreKeys].filter((k) => state.enhance.formats.has(k) && !dflt.enhance_formats.includes(k));
   const tracks = placeTracks();
-  el.append(
-    optionBlock('Type of audio',
-      segmented({ label: 'Type of audio', value: e.recipe, options: recipeOptions(), onChange: (v) => { e.recipe = v; redraw('sleeve'); } })),
-    optionBlock('Processing',
+  const processingBlock = () => {
+    const choice = choiceFor(e.recipe);
+    return optionBlock('Processing',
       segmented({
         label: 'Processing', value: e.quality,
         options: [
           { value: 'light', label: PROCESSING_LABELS.light, desc: 'Sets the loudness and keeps peaks in check' },
           { value: 'standard', label: PROCESSING_LABELS.standard, desc: 'Adjusts tone and level to suit the recording' },
-          {
-            value: 'best', label: PROCESSING_LABELS.best, disabled: !ai,
-            desc: ai ? 'Treats parts separately where the recipe supports it. Slower and can change the tone.' : null,
+          ...(choice ? [{
+            value: 'best', label: choice.label, disabled: !ai,
+            desc: ai ? choice.desc : null,
             reason: store.health?.ai?.install_supported === false ? 'AI is unavailable in this build' : 'Needs the AI add-on',
-          },
+          }] : []),
         ],
         onChange: (v) => {
           const wasLight = e.quality === 'light';
@@ -391,7 +391,20 @@ function renderEnhanceOptions(el) {
           redraw('action');
           syncMore?.();
         },
-      })),
+      }));
+  };
+  let processing = processingBlock();
+  el.append(
+    optionBlock('Type of audio',
+      segmented({ label: 'Type of audio', value: e.recipe, options: recipeOptions(), onChange: (v) => {
+        e.quality = qualityAfterRecipeChange(e.quality, e.recipe, v, store.health?.recipes);
+        e.recipe = v;
+        const next = processingBlock();
+        processing.replaceWith(next);
+        processing = next;
+        redraw('sleeve');
+      } })),
+    processing,
     optionBlock('Save for', all.length ? fmts.main : loadingNote(), sourceNote()),
   );
   if (tracks.front) el.append(tracks.front);
@@ -443,10 +456,10 @@ function fineTuning() {
       switchControl({ label: 'Bass harmonics', checked: a.harmonics === 'on', onChange: (on) => set('harmonics')(on ? 'on' : null) })],
     ['adaptive_lowmid', 'Adaptive low-mids', 'Tames brief buildup in the low-mids while keeping steady warmth. Strong allows a deeper cut. Skipped when AI shapes the stems.',
       pills('adaptive_lowmid', 'Adaptive low-mids', [['auto', 'Auto'], ['strong', 'Strong'], ['off', 'Off']])],
-    ['glue', 'Glue compression', 'Gently evens out loud and quiet moments in a mix.',
-      pills('glue', 'Glue compression', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']])],
+    ['glue', 'Compression', 'Gently evens out loud and quiet moments in a mix.',
+      pills('glue', 'Compression', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']])],
     ['hf_restore', 'Brighten muffled highs', 'Only for files whose highs are cut off, like old MP3s. Adds new high harmonics; it can’t bring back lost detail.',
-      pills('hf_restore', 'Brighten muffled highs', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']])],
+      switchControl({ label: 'Brighten muffled highs', checked: a.hf_restore === 'on', onChange: (on) => set('hf_restore')(on ? 'on' : null) })],
     ['denoise', 'Noise reduction', 'Choose Light or Strong only if you hear steady hiss or hum.',
       pills('denoise', 'Noise reduction', [['off', 'Off'], ['light', 'Light'], ['strong', 'Strong']], 'off')],
     ['mono_bass', 'Mono bass', 'Makes deep bass mono, as club systems expect.',
@@ -556,7 +569,7 @@ export function eqProblem() {
 // --- Split ---------------------------------------------------------------------
 function separateFormatOptions() {
   return (store.health?.formats?.separate || []).map((f) => ({
-    value: f.key, label: SPLIT_SHORT[f.key] || f.label, desc: f.description || f.label, info: () => formatInfo(f),
+    value: f.key, label: f.label, desc: f.description || f.label, info: () => formatInfo(f),
   }));
 }
 
@@ -567,7 +580,7 @@ function renderSeparateOptions(el) {
   if (options.length && !options.some((f) => f.value === s.format)) s.format = options[0].value;
   const fmt = splitChoice({
     label: 'File type', moreLabel: 'Other file types', value: s.format, options,
-    rare: new Set(options.filter((o) => !SPLIT_SHORT[o.value]).map((o) => o.value)),
+    rare: new Set(options.filter((o) => !USUAL_SPLIT.has(o.value)).map((o) => o.value)),
     onChange: (v) => { s.format = v; redraw('sleeve'); },
   });
   const formatChanged = () => fmt.moreKeys.has(s.format) && s.format !== dflt.separate_format;

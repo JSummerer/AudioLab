@@ -40,6 +40,7 @@ from .errors import AudioLabError, Cancelled, storage_error
 from .media.export import UPLOAD_EXT
 from .settings import LIMITS, SETTINGS
 from .system import InstanceLock, replace_file
+from .util import JOB_ID_RE
 
 QUEUED, RUNNING, DONE, FAILED, CANCELLED = 'queued', 'running', 'done', 'failed', 'cancelled'
 FINISHED = (DONE, FAILED, CANCELLED)
@@ -50,7 +51,6 @@ CLOSING = 'AudioLab is closing.'
 # Long enough for system.terminate_process to reach its forced kill: SIGKILL after 5 s on
 # POSIX; on Windows taskkill (up to 10 s), then kill() after another 5 s.
 KILL_WAIT_S = 16.0
-JOB_ID_RE = re.compile(r'^j_\d{8}_\d{6}_[0-9a-f]{6}$')
 ORPHAN_AGE_S = 3600  # an unfinished job folder (or Library staging) untouched this long is left over
 PRUNE_EVERY_S = 6 * 3600
 
@@ -877,6 +877,7 @@ class JobManager:
         task's files are in the output folder (_run): they are complete, and the job still finishes as done.
         Cancelled escapes otherwise, and whenever the job can't be published at all (removed, or settled by a
         shutdown that stopped waiting)."""
+        warning = NOT_IN_LIBRARY
         try:
             if library.record(job, check_cancel, begin_commit):
                 job.result['library_id'] = job.id
@@ -887,6 +888,10 @@ class JobManager:
                     raise
             reason = 'it was stopped while being added'
         except Exception as e:
+            if '_native_identity' in job.source and isinstance(e, AudioLabError):
+                if job.task == 'import':
+                    raise  # an import has no finished export worth keeping when its source changed
+                warning = f'{NOT_IN_LIBRARY} {e}'
             log.exception('job %s: could not add the result to the library', job.id)
             reason = str(e)
         with self._lock:
@@ -894,4 +899,4 @@ class JobManager:
                 raise Cancelled()
             self._journal(job.id, 'warning', f'Could not add this result to the Library: {reason}')
             if isinstance(job.result, dict):
-                job.result.setdefault('warnings', []).append(NOT_IN_LIBRARY)
+                job.result.setdefault('warnings', []).append(warning)

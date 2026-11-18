@@ -1,4 +1,4 @@
-// Settings → Updates & add-ons: the AudioLab update row, the downloader row and the automatic
+// Settings → Help: the AudioLab update row, the downloader row and the automatic
 // check switch, rendered from the production module (see settings-harness.mjs).
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -241,4 +241,97 @@ test('yt-dlp versions compare part by part as numbers', () => {
   assert.equal(s.run('isNewer("2026.10.26.1", "2026.10.26")'), true);
   assert.equal(s.run('isNewer("2026.10.26", "2026.10.26")'), false);
   assert.equal(s.run('isNewer("2026.09.01", "2026.10.26")'), false);
+});
+
+test('Settings groups, legacy links, focused controls and diagnostic disclosure survive redraws', () => {
+  const s = setup({
+    local: true, ai: { install_supported: true }, ffmpeg: { ok: false, error: 'Executable missing' },
+    updates: { app: {} }, downloader: { can_update: true }, formats: { download: [] },
+  }, { settings: { cookies_browser: '', output_dir: '/example', check_updates: false } });
+  s.run('body.children = []; settingsView.mount(body); renderAll()');
+  assert.deepEqual([...s.run('SECTIONS.map(([, name]) => name)')],
+    ['General', 'Output defaults', 'Downloads', 'AI add-on', 'Storage', 'Help']);
+  const disclosure = () => s.find('settingsMaintenance');
+  assert.ok(!disclosure().open);
+  assert.ok(s.run('reveal("ffmpeg", {smooth: false, flash: false})'));
+  assert.equal(disclosure().open, true);
+  assert.equal(s.context.document.activeElement, s.find('ffmpegSpot'));
+  assert.match(text(s.context.document.activeElement), /Executable missing/);
+  disclosure().open = false;
+  for (const id of ['keepWorkFiles', 'copyReport', 'downloaderSpot']) assert.ok(disclosure().contains(s.find(id)), id);
+  assert.ok(s.find('settings-storage').contains(s.find('keepOriginals')));
+  for (const [link, section, focus] of [
+    ['output', 'defaults', 'outputDir'], ['cookies', 'downloads', 'cookiesBrowser'], ['ai', 'ai-addon', 'enableAi'],
+    ['updates', 'help', 'checkUpdates'], ['downloader', 'help', 'updateDownloader'],
+    ['files', 'defaults', 'outputDir'], ['look', 'general', 'settings-general'],
+  ]) {
+    assert.ok(s.run(`reveal("${link}", {smooth: false, flash: false})`), link);
+    assert.equal(s.run(`refs.links["${section}"]["aria-current"]`), 'true', link);
+    assert.equal(s.context.document.activeElement.id, focus, link);
+  }
+  assert.equal(disclosure().open, true);
+  s.find('keepWorkFiles').focus();
+  s.run('renderHelp()');
+  assert.equal(disclosure().open, true);
+  assert.equal(s.context.document.activeElement, s.find('keepWorkFiles'));
+  s.context.store.health.local = false;
+  s.run('renderDownloads()');
+  assert.equal(s.find('settings-downloads').hidden, true);
+  assert.equal(s.run('reveal("cookies", {})'), false);
+});
+
+test('the first Settings link and a later manual scroll keep their place across asynchronous redraws', async () => {
+  const s = setup(packaged());
+  const events = {};
+  const health = Promise.withResolvers();
+  const storage = Promise.withResolvers();
+  const check = Promise.withResolvers();
+  s.context.on = (name, handler) => { events[name] = handler; };
+  s.context.loadHealth = async () => { await health.promise; events.health(); };
+  s.context.api = (path) => path === '/api/storage' ? storage.promise : check.promise;
+
+  // Model the two real changes in document order: storage totals appear above Help,
+  // and an available-update note appears above the engine. Coordinates are CSS fixtures.
+  const viewport = {
+    scrollTop: 0, clientHeight: 500, scrollHeight: 4000, addEventListener() {},
+    getBoundingClientRect: () => ({ top: 0, bottom: 500, left: 0, width: 800 }),
+  };
+  s.body.closest = () => viewport;
+  const make = s.context.h;
+  s.context.h = (...args) => {
+    const el = make(...args);
+    const pageTop = () => {
+      const helpTop = 1400 + (s.run('refs.storageInfo.hidden') ? 0 : 150);
+      return el.id === 'ffmpegSpot' ? helpTop + 900 + (s.find('getUpdate') ? 80 : 0) : helpTop;
+    };
+    el.getBoundingClientRect = () => {
+      const top = el.tag === 'nav' ? 0 : pageTop() - viewport.scrollTop;
+      return { top, bottom: top + 40 };
+    };
+    el.scrollIntoView = () => { viewport.scrollTop = pageTop() - 200; };
+    return el;
+  };
+  s.context.document.elementFromPoint = () => s.find('ffmpegSpot');
+  s.run('body.children = []; settingsView.mount(body); settingsView.show("ffmpeg")');
+  const top = (id) => s.find(id).getBoundingClientRect().top;
+  assert.equal(top('ffmpegSpot'), 200);
+  assert.equal(s.find('settingsMaintenance').open, true);
+
+  health.resolve();
+  storage.resolve({ jobs_bytes: 20 });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(top('ffmpegSpot'), 200, 'the first load populated Storage above the open engine row');
+  assert.equal(s.context.document.activeElement, s.find('ffmpegSpot'));
+
+  s.run('settingsView.show("updates", { same: true })');
+  const pending = s.find('checkUpdates').onclick();
+  assert.equal(top('checkUpdates'), 200);
+  viewport.scrollTop += top('ffmpegSpot') - 40; // read the engine row while the check is in flight
+  assert.ok(top('checkUpdates') < 0);
+  check.resolve(updates({}, { latest: '2.5.0', available: true, url: 'https://github.com/owner/AudioLab/releases/latest' }));
+  await pending;
+  assert.ok(s.find('getUpdate'));
+  assert.equal(top('ffmpegSpot'), 40, 'the visible row stayed below the tabs as the new update note appeared');
+  assert.equal(s.find('settingsMaintenance').open, true);
+  assert.equal(s.context.document.activeElement, s.find('checkUpdates'), 'manual scrolling leaves keyboard focus alone');
 });

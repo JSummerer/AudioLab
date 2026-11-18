@@ -12,10 +12,10 @@ from typing import Any
 from .. import recipes
 from ..analysis import classify
 from ..analysis import profile as prof
-from ..context import TaskContext
+from ..context import Progress, TaskContext
 from ..errors import AudioLabError, Cancelled
 from ..media import export
-from ..media.verification import PEAK_TOLERANCE_DB, measure_export
+from ..media.verification import PEAK_TOLERANCE_DB, measure_export, track_check_summary
 from ..previews import make_previews
 from ..processing import report_details
 from ..recipes.base import ADVANCED_CHOICES, QUALITIES, automatic_compressor, eq_bands, section_eq
@@ -44,9 +44,11 @@ def validate(options: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
     quality = str(options.get('quality') or 'standard').lower()
     if quality not in QUALITIES:
         quality = 'standard'
+    if quality == 'best' and recipe != 'auto' and recipes.RECIPES[recipe].ai_stage == 'none':
+        quality = 'standard'
     if quality == 'best' and not common.ai_device():
         raise AudioLabError(
-            'AI stems processing needs the AI add-on, which is not installed yet.',
+            'This processing option needs the AI add-on, which is not installed yet.',
             hints=['Enable AI features in Settings (one-time download), or use Tone and volume processing.'],
             fix='install_ai',
         )
@@ -125,9 +127,10 @@ def _check_message(file: dict[str, Any], check: dict[str, Any], trim_db: float) 
     """The warning for a saved file whose check failed or found its peaks over its limit (the peak ceiling, or
     for a lossy file the limit just under full scale: export.peak_limit), in the shape of the summary lines
     (a plain sentence; the figures in one trailing bracket)."""
-    name = _short(file)
+    track = file.get('group') == 'tracks'
+    name = f'{_short(file)} track “{file["name"]}”' if track else f'{_short(file)} file'
     if check['status'] == 'unverified':
-        return f'The {name} file was saved, but its loudness and peaks could not be verified.'
+        return f'The {name} was saved, but its loudness and peaks could not be verified.'
     if check['status'] != 'warning':
         return None
     spec = export.FORMATS.get(file.get('format') or '')
@@ -137,9 +140,10 @@ def _check_message(file: dict[str, Any], check: dict[str, Any], trim_db: float) 
         if lossy
         else ('the peak ceiling', 'ceiling', 'a lower peak ceiling')
     )
-    still, trimmed = (', even after it was turned down', f', turned down {trim_db:.1f} dB') if trim_db else ('', '')
+    still = ', even after it was turned down' if trim_db and not track else ''
+    trimmed = f', turned down {trim_db:.1f} dB' if trim_db else ''
     return (
-        f'The {name} file goes over {limit}{still}. For more room, use {room} '
+        f'The {name} goes over {limit}{still}. For more room, use {room} '
         f'({check["true_peak_dbtp"]:+.2f} dBTP after saving{trimmed}; {word} {check["ceiling_dbtp"]:+.2f} dBTP).'
     )
 
@@ -210,9 +214,7 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
 
     # --- listen: measure + classify ------------------------------------------
     p = ctx.stage('analyze', 'Listening to the recording…')
-    analysis, x, sr = prof.analyze_file(
-        ref, progress=p.sub(0, 70), include_overview=quality != 'best', **common.source_format(acq)
-    )
+    analysis, x, sr = prof.analyze_file(ref, progress=p.sub(0, 70), include_overview=True, **common.source_format(acq))
     overview = analysis.pop('overview', None)
     features = classify.audio_features(x, sr, check_cancel=p.check_cancel, known_lra=analysis.get('lra'))
     kind = classify.classify(features, acq.duration_s or 0, acq.metadata)
@@ -248,6 +250,8 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
     levels = {k: analysis.get(k) for k in ('integrated_lufs', 'true_peak_dbtp', 'lra')}
     measured = None if analysis.get('is_silent') or None in levels.values() else levels
     report = render(ref, master, params, analysis, common.scratch_dir(ctx), progress=p, input_metrics=measured)
+    # A failed attempt can leave AI in the resolved parameters, even though the master used the mix.
+    ai_applied = params.ai_stage != 'none' and (report.get('ai') or {}).get('fallback') is not True
     for w in report.get('warnings') or []:
         ctx.note('warning', w)
     ctx.note(
@@ -287,11 +291,11 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
     rate = params.sample_rate if params.sample_rate != 48000 else None
     split = bool(opts.get('split_tracks'))
 
-    def check(path: Path, progress, limit: float) -> dict:
+    def check(path: Path, progress: Progress, limit: float, duration_s: float | None) -> dict:
         """The decoded export's loudness and peaks, measured before the file gets its name, against `limit`
         (export.peak_limit: the master's ceiling, or a lossy format's limit)."""
         try:
-            return measure_export(path, ceiling_dbtp=limit, progress=progress, duration_s=report.get('duration_s'))
+            return measure_export(path, ceiling_dbtp=limit, progress=progress, duration_s=duration_s)
         except Cancelled:
             raise
         except AudioLabError:
@@ -304,6 +308,10 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
                 'tolerance_db': PEAK_TOLERANCE_DB,
                 'message': None,
             }
+
+    def warn(message: str) -> None:
+        report.setdefault('warnings', []).append(message)
+        ctx.note('warning', message)
 
     outputs = export.export(
         master,
@@ -320,16 +328,15 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
     files = common.file_entries(outputs)
     trimmed = []
     for file, out in zip(files, outputs):
-        measurement = dict(out['verification'])
+        measurement = file['verification']
         measurement['message'] = _check_message(file, measurement, out['trim_db'])
-        file['verification'] = measurement
-        if out['trim_db'] and measurement['status'] == 'verified':
-            trimmed.append((_short(file), out['trim_db']))
         if measurement['message']:
-            report.setdefault('warnings', []).append(measurement['message'])
-            ctx.note('warning', measurement['message'])
+            warn(measurement['message'])
+        if out['trim_db'] and file['verification']['status'] == 'verified':
+            trimmed.append((_short(file), out['trim_db']))
     track_files, tracks_dir, tracks_lines = [], None, []
     if split:  # cut the finished master, in the first selected format, into "<folder>/Tracks"
+        inherited_trim_db = outputs[0]['trim_db']
         track_files, tracks_dir = common.split_into_tracks(
             acq,
             master,
@@ -341,9 +348,20 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
             p.sub(65, 100),
             start=len(files),
             sample_rate=rate,
-            trim_db=outputs[0]['trim_db'],  # the tracks match their format's full file
+            trim_db=inherited_trim_db,
+            check=check,
+            ceiling_dbtp=params.tp_ceiling_db,
         )
         tracks_lines = [common.tracks_summary(acq, track_files, tracks_dir)]
+        for file in track_files:
+            if measurement := file.get('verification'):
+                measurement['message'] = _check_message(file, measurement, inherited_trim_db)
+        track_note, needs_attention = track_check_summary(track_files)
+        if track_note:
+            if needs_attention:
+                warn(track_note)
+            else:
+                tracks_lines.append(track_note)
     track_files += common.cover_file(ctx, source, acq, folder, start=len(files) + len(track_files))
 
     before = report.get('input') or {k: analysis.get(k) for k in ('integrated_lufs', 'true_peak_dbtp', 'lra')}
@@ -364,7 +382,7 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
         'headline': ('Volume evened out' if opts.get('quality') == 'light' else f'Enhanced as {recipe.name}'),
         'output_dir': str(folder),
         'files': files + track_files,
-        'cover_source': common.cover_source(source),
+        'cover_source': common.cover_source(source, acq),
         **({'tracks_dir': str(tracks_dir)} if tracks_dir else {}),
         'previews': previews,
         **({'excerpt': excerpt} if excerpt else {}),
@@ -374,8 +392,12 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
         'decisions': decisions,
         'metrics': metrics,
         'processing': {
-            **report_details(report, keep_calibration=quality != 'best'),
-            **({'auto_compressor': automatic_compressor(recipe_key, analysis)} if quality == 'standard' else {}),
+            **report_details(report, keep_calibration=not ai_applied),
+            **(
+                {'auto_compressor': automatic_compressor(recipe_key, analysis)}
+                if not ai_applied and quality != 'light'
+                else {}
+            ),
         },
         'analysis': analysis,
         'spectrogram': None,
@@ -383,6 +405,6 @@ def run(ctx: TaskContext, source: dict[str, Any]) -> dict[str, Any]:
         'markers': common.chapters(acq),
         **common.link_result(acq),
         '_media': media,
-        **({'_overview': overview} if overview is not None else {}),
+        **({'_overview': overview} if overview is not None and not ai_applied else {}),
         '_library': {**common.library_hints(acq, keep_original=True), **({'version': version} if version else {})},
     }

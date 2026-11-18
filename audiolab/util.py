@@ -11,6 +11,8 @@ from pathlib import Path
 
 from .system import MAX_NAME_LEN
 
+JOB_ID_RE = re.compile(r'^j_\d{8}_\d{6}_[0-9a-f]{6}$')
+
 # Characters Windows/macOS/Linux reject or that break path construction.
 _UNSAFE_CHARS = re.compile(r'[\x00-\x1f/:\\*?"<>|]')
 _MULTI_SPACE = re.compile(r'\s+')

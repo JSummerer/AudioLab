@@ -1,8 +1,8 @@
 // Library (#/library[/<entry id>]): finished results grouped by recording, newest first or
 // largest first, searchable by title and artist. Each recording is a sleeve row (cover, title,
 // credits, and a ⋯ menu: Add a version from a file, Delete the kept original), then its versions
-// (Saved, Enhanced, Stems…): a head line with the full-length comparison with the kept original,
-// Adjust, Compare versions and — in the app on this computer — Show in Finder, the rest (Open job,
+// (Saved, Enhanced, Stems…): a head line with Compare, Adjust and — on this computer —
+// Show in Finder, the rest (Open job, Name version,
 // Keep only, Remove — files stay unless the user opts in to the Trash) in a ⋯ menu, then the files —
 // play, download (not in the local app: they are in the output folder), or "Moved or deleted" when
 // a file is gone. A kept original is AudioLab's own copy, shared by the versions of one recording,
@@ -10,25 +10,27 @@
 // One player is open at a time. The list is fetched on show and when a job finishes;
 // cards are kept and only rebuilt when their data changes, so a player keeps going
 // through a reload. #/library/<id> scrolls to that version and opens its comparison.
-import { h, icon, clear, append, fmtBytes, fmtDuration, fmtAgo, fmtNum, fmtSigned, shortFolder } from '../dom.js';
+import { IS_MAC, h, icon, clear, append, fmtBytes, fmtDuration, fmtAgo, fmtNum, fmtSigned, shortFolder } from '../dom.js';
 import { api } from '../api.js';
+import { chooseNative, nativeWindow } from '../native.js';
 import { store, on, upsertJob, showDetails } from '../store.js';
-import { toast, toastError, callout, confirmDialog, segmented, switchControl, menuButton, closeMenu } from '../ui.js';
+import { toast, toastError, callout, closeInfo, confirmDialog, segmented, switchControl, menuButton, closeMenu } from '../ui.js';
 import { go, jobPath, currentRoute } from '../router.js';
 import {
   libraryCompare, plainPlayer, libraryFileUrl, codecName, versionCompare, versionFile, versionLoudness, loudnessSpread,
   streamLine,
 } from '../compare.js';
 import { adjustLink, adjustUnavailable } from './adjust.js';
-import { PROCESSING_LABELS, LIGHT_KEYS } from './new/state.js';
-import { loudnessWord, peakVerdict } from './job/readings.js';
+import { PROCESSING_LABELS, LIGHT_KEYS, enhanceAIChoice } from './new/state.js';
+import { loudnessWord, peakVerdict, trackCheckNeedsAttention } from './job/readings.js';
 import { eqSummary } from '../eq.js';
 import { sectionSummary } from '../section-eq.js';
 
 const TASK_ICON = { download: 'download', enhance: 'sparkle', separate: 'layers', import: 'file' };
-const IS_MAC = /Mac/i.test(navigator.platform || navigator.userAgent);
 const REVEAL_LABEL = IS_MAC ? 'Show in Finder' : 'Show in folder';
 const FLASH_MS = 1800;
+const ORIGINAL = 'original';
+const MAX_VERSION_NAME = 120;
 const CLOCK_MS = 30000; // "5 min ago" is refreshed this often while the Library shows
 const libPath = (id, what = '') => `/api/library/${encodeURIComponent(id)}${what ? `/${what}` : ''}`;
 const SORT_KEY = 'audiolab.librarySort';
@@ -42,7 +44,7 @@ let loadSeq = 0;
 let reloadTimer = 0;
 let doneKey = '';    // finished jobs with a Library entry: the list reloads when this changes
 let target = null;   // #/library/<id> still to scroll to
-let player = null;   // the open player: { entryId, what: 'compare' | 'versions' | file id, fileId, title, el, stage, pause, destroy }
+let player = null;   // the open player: { entryId, what: 'compare' | file id, choice, title, el, stage, pause, destroy }
 let clock = 0;       // the timer that refreshes relative times
 let uid = 0;
 let query = '';      // the search text (title or artist)
@@ -62,7 +64,7 @@ export const libraryView = {
       title: h('h1', { class: 'page-title', id: 'libraryTitle', tabindex: '-1' }, 'Library'),
       sub: h('p', { class: 'page-sub' }),
       search: h('input', {
-        type: 'search', class: 'field field-sm lib-search', placeholder: 'Search title or artist', 'aria-label': 'Search the Library',
+        type: 'search', class: 'field field-sm lib-search', placeholder: 'Search title, artist or version', 'aria-label': 'Search the Library',
         autocomplete: 'off', spellcheck: 'false',
       }),
       noMatch: h('p', { class: 'filter-empty', hidden: true }),
@@ -197,17 +199,18 @@ function originalsSize(list) {
   return [...seen.values()].reduce((n, b) => n + b, 0);
 }
 
-/** "14 results · 9.2 GB of files · 1.1 GB of originals kept for comparing" for the whole Library. */
+/** "14 results · 9.2 GB of files · 1.1 GB of originals kept for comparison and Adjust" for the whole Library. */
 function totalsText(all, count) {
   const [files, originals] = [filesSize(all), originalsSize(all)];
   return [`${count} result${count === 1 ? '' : 's'}`, files ? `${fmtBytes(files)} of files` : null,
-    originals ? `${fmtBytes(originals)} of originals kept for comparing` : null].filter(Boolean).join(' · ');
+    originals ? `${fmtBytes(originals)} of originals kept for comparison and Adjust` : null].filter(Boolean).join(' · ');
 }
 
 /** The recordings to show: those matching the search (title or artist), newest first or largest first. */
 function shownGroups(all) {
   const q = query.trim().toLowerCase();
-  const list = q ? all.filter((g) => [g.title, g.artist].some((t) => String(t || '').toLowerCase().includes(q))) : [...all];
+  const list = q ? all.filter((g) => [g.title, g.artist, ...g.entries.map((e) => e.version_name)]
+    .some((t) => String(t || '').toLowerCase().includes(q))) : [...all];
   if (sort === 'largest') {
     const size = new Map(list.map((g) => [g, filesSize([g]) + originalsSize([g])]));
     list.sort((a, b) => size.get(b) - size.get(a)); // stable: equal sizes keep newest first
@@ -242,7 +245,8 @@ function groupFor(g) {
   const kept = g.entries.find((e) => e.original?.kept) || null;
   const cover = coverOf(g);
   // Enhance versions with a result to play can be compared with each other (two or more).
-  const versions = g.entries.filter((e) => ['enhance', 'import'].includes(e.task) && versionFile(e, enhanceFormats()));
+  const versions = g.entries.filter((e) => e.group === g.key && ['enhance', 'import'].includes(e.task)
+    && versionFile(e, enhanceFormats()));
   const peers = versions.length >= 2 ? versions : null;
   const hint = peers ? loudnessHint(peers) : '';
   // The date ("Today") is part of it, so the head is redrawn when the day changes.
@@ -261,7 +265,13 @@ function groupFor(g) {
     if (focusIndex >= 0) (controls()[focusIndex] || grp.head.querySelector('.lib-title'))?.focus({ preventScroll: true });
   }
   const several = g.entries.length >= 2; // "Keep only this version"
-  syncChildren(grp.list, g.entries.map((e) => cardFor(e, peers?.includes(e) ? peers : null, several).el));
+  const peerSig = peers ? JSON.stringify(peers.map((e) => {
+    const file = versionFile(e, enhanceFormats());
+    return [fileIdentity(e, file), e.version_name, e.created_at, e.task, e.duration_s, e.source?.duration_s,
+      e.excerpt?.start_s, e.markers, versionLoudness(e, file), versionFacts(e)];
+  })) : null;
+  syncChildren(grp.list, g.entries.map((e) => peers?.includes(e)
+    ? cardFor(e, peers, several, peerSig).el : cardFor(e, null, several).el));
   return grp;
 }
 
@@ -273,7 +283,7 @@ function loudnessHint(versions) {
   if (!spread) return '';
   const range = showDetails() ? ` (${fmtNum(spread.low)} to ${fmtNum(spread.high)} LUFS)` : '';
   return `These versions differ in loudness${range}. `
-    + 'Louder often sounds better at first, so use Compare versions to hear them at matched volume.';
+    + 'Louder often sounds better at first, so use Compare to hear them at matched volume.';
 }
 
 /** The recording's cover: AudioLab's own saved copy when a version has one, else the link's thumbnail. */
@@ -323,7 +333,7 @@ function originalRow(entry) {
   const file = (entry.files || []).find((f) => f.id === 'original');
   const facts = [codecName(o.codec, o.format) || (o.format || '').toUpperCase(), fmtBytes(o.size_bytes)]
     .filter(Boolean).map((t) => t.replace(/ /g, '\u00a0')); // "29.3 MB" never breaks
-  const what = ['Original kept for comparing', ...facts].join(' · ');
+  const what = ['Original kept for comparison and Adjust', ...facts].join(' · ');
   return h('div', { class: 'lib-original' },
     h('p', { class: 'lib-original-text' },
       h('strong', null, what), ' — in app data, not your output folder.'), // Settings → About calls it "App data"
@@ -341,17 +351,18 @@ function originalRow(entry) {
  * A version's card; `peers`: the versions of its recording it can be compared with (itself included),
  * or null; `several`: its recording has other versions too (for "Keep only this version").
  */
-function cardFor(entry, peers = null, several = false) {
-  // Show details (plain words or LUFS in the version line) is part of what a card shows.
-  const sig = JSON.stringify([entry, peers?.map((e) => e.id), several, showDetails(), !!store.health?.local]);
+function cardFor(entry, peers, several, peerSig = null) {
+  // The peer signature is shared by the cards in a recording and ignores fields the picker never uses.
+  const sig = JSON.stringify([entry, several, showDetails(), !!store.health?.local]);
   let c = cards.get(entry.id);
   if (c) Object.assign(c, { peers, several }); // the latest copies, for the picker
-  if (c && c.sig === sig) return c;
+  if (c && c.sig === sig && c.peerSig === peerSig) return c;
   if (!c) {
     c = { el: h('li', { class: 'lib-entry', id: `lib-${entry.id}`, tabindex: '-1' }), toggles: new Map(), peers, several };
     cards.set(entry.id, c);
   }
   c.sig = sig;
+  c.peerSig = peerSig;
   c.entry = entry;
   fillCard(c, entry);
   return c;
@@ -360,19 +371,24 @@ function cardFor(entry, peers = null, several = false) {
 function fillCard(c, entry) {
   // The open player stays when its files are still there (it is moved, not rebuilt).
   const keep = player?.entryId === entry.id && playerStillFits(c, entry);
-  if (player?.entryId === entry.id && !keep) closePlayer();
   // Focus comes back to the same control; an item of the ⋯ menu counts as its button (the new menu is closed).
   const controls = () => [...c.el.querySelectorAll('a, button, summary')].filter((n) => !n.closest('.menu'));
   const focused = c.el.contains(document.activeElement) ? document.activeElement : null;
+  const pickerFocused = focused && c.stage?.querySelector('.lib-version-pick')?.contains(focused);
+  const playerFocused = focused && c.stage?.contains(focused);
+  const focusedKey = playerFocused && focused.closest('.ab-key');
+  const keyIndex = focusedKey ? [...player.el.querySelectorAll('.ab-key')].indexOf(focusedKey) : -1;
   const inMenu = !!focused?.closest('.menu');
   if (inMenu) closeMenu();
   const focusIndex = focused ? controls().indexOf(inMenu ? focused.closest('.menu-wrap').querySelector('button') : focused) : -1;
+  if (player?.entryId === entry.id && !keep) closePlayer();
 
   const titleId = `${c.el.id}-title`;
   c.el.setAttribute('aria-labelledby', titleId);
   c.toggles = new Map();
   const files = (entry.files || []).filter((f) => f.kind !== 'original' && f.kind !== 'track');
   const tracks = (entry.files || []).filter((f) => f.kind === 'track').sort((a, b) => (a.track ?? 0) - (b.track ?? 0));
+  const tracksOpen = c.el.querySelector('.lib-tracks')?.open;
   c.processing = processingDetails(entry, files, c.processing?.open);
   c.stage = h('div', { class: 'lib-stage', id: `${c.el.id}-player`, hidden: true });
   const when = dateText(entry.created_at, true);
@@ -390,12 +406,26 @@ function fillCard(c, entry) {
     files.length ? h('ul', { class: 'files' }, files.map((f) => fileRow(c, entry, f))) : null,
     c.processing,
     tracks.length ? h('details', {
-      class: 'disclosure lib-tracks', open: keep && tracks.some((t) => t.id === player.what),
+      class: 'disclosure lib-tracks', open: tracksOpen || keep && tracks.some((t) => t.id === player.what),
     }, h('summary', null, `Tracks (${tracks.length})`), h('ul', { class: 'files' }, tracks.map((f) => fileRow(c, entry, f)))) : null,
     c.stage]);
-  if (keep) attachPlayer(c);
+  if (keep) {
+    if (player.choice === ORIGINAL) player.relabel?.(entry);
+    else if (player.what === 'compare') {
+      const sides = savedSides(c, player.choice);
+      player.relabel?.(...sides, savedNote(sides));
+    }
+    attachPlayer(c);
+  }
   updateToggles();
-  if (focusIndex >= 0) {
+  if (pickerFocused || (playerFocused && !keep)) {
+    const next = checkedComparison(c) || c.toggles.get('compare') || c.el;
+    next.focus({ preventScroll: true });
+  } else if (keep && keyIndex >= 0) {
+    player.el.querySelectorAll('.ab-key')[keyIndex]?.focus({ preventScroll: true });
+  } else if (keep && focused && player.el.contains(focused)) {
+    focused.focus({ preventScroll: true });
+  } else if (focusIndex >= 0) {
     (controls()[focusIndex] || c.el).focus({ preventScroll: true });
   }
 }
@@ -409,14 +439,15 @@ const OVERRIDES = {
 };
 
 function processingDetails(entry, files, open) {
-  const checked = files.filter((f) => f.verification);
+  const checked = (entry.files || []).filter((f) => f.verification);
   const p = entry.processing;
   if (!p && !checked.length) return null;
   const requested = p?.requested || {};
   const resolved = p?.resolved || {};
   const applied = p?.applied || {};
   const recipe = requested.recipe === 'auto' ? 'Automatic' : resolved.recipe?.name;
-  const mode = PROCESSING_LABELS[requested.quality];
+  const aiChoice = requested.quality === 'best' ? enhanceAIChoice(requested.recipe, store.health?.recipes) : null;
+  const mode = aiChoice?.label || PROCESSING_LABELS[requested.quality];
   const formats = (requested.formats || []).map((key) =>
     store.health?.formats?.enhance?.find((f) => f.key === key)?.label || files.find((f) => f.format === key)?.label || key);
   const selected = [recipe, mode, ...formats].filter(Boolean).join(' · ');
@@ -452,7 +483,9 @@ function processingDetails(entry, files, open) {
           [h('dt', null, label), h('dd', { class: 'num' }, `${fmt(v, 2)}${unit}`)])) : null) : null,
       processingMeasurements(p?.metrics, section),
       checked.length ? section('Export checks',
-        h('ul', { class: 'plain-list' }, checked.map((f) => exportCheck(f)))) : null,
+        h('ul', { class: 'plain-list' }, checked.filter((f) => f.kind !== 'track').map(exportCheck),
+          entry.track_check_summary ? h('li', null, entry.track_check_summary) : null,
+          checked.filter((f) => f.kind === 'track' && trackCheckNeedsAttention(f)).map(exportCheck))) : null,
       selected || overrides.length ? section('Requested settings',
         selected ? h('p', null, selected) : null,
         overrides.length ? h('dl', { class: 'facts' }, overrides.map(([label, value]) =>
@@ -488,6 +521,7 @@ function exportCheck(file) {
     Number.isFinite(check.integrated_lufs) ? `${fmtNum(check.integrated_lufs, 2)} LUFS` : null,
     Number.isFinite(check.true_peak_dbtp) ? `${fmtNum(check.true_peak_dbtp, 2)} dBTP` : null,
     Number.isFinite(check.ceiling_dbtp) ? `limit ${fmtNum(check.ceiling_dbtp, 2)} dBTP` : null,
+    check.trim_db > 0 ? `turned down ${fmtNum(check.trim_db, 2)} dB` : null,
   ].filter(Boolean);
   return h('li', null, h('strong', null, file.label || file.name || 'Export'), ` — ${status}`,
     measurements.length ? ` (${measurements.join(' · ')})` : null);
@@ -500,6 +534,7 @@ function taskLabel(entry) {
 
 /** "Enhanced as Song / music" with the task's word marked; a headline without one ("Volume evened out") gets it in front. */
 function versionTitle(entry) {
+  if (entry.version_name) return [h('span', { class: 'lib-task' }, taskLabel(entry)), ' · ', entry.version_name];
   if (entry.task === 'import') return [h('span', { class: 'lib-task' }, 'Imported'), ' file'];
   const text = entry.headline || entry.title || '';
   const verb = /^(Saved|Converted|Enhanced|Split)\b/.exec(text)?.[0];
@@ -519,7 +554,7 @@ const OWN_SETTINGS = {
 const shortNum = (v) => String(Number(Number(v).toFixed(1))).replace('-', '−');
 // Loudness in words ("Normal volume"); the number in LUFS with "Show details" (Settings).
 const volumeText = (lufs) => (showDetails() ? `${shortNum(lufs)} LUFS` : `${loudnessWord(lufs)} volume`);
-const PEAK_WORDS = { Safe: 'peaks safe', 'Little headroom': 'little headroom', 'No headroom': 'no headroom', Clipping: 'clipping' };
+const PEAK_WORDS = { 'Within limit': 'peaks within limit', 'Little headroom': 'little headroom', 'No headroom': 'no headroom', 'Above full scale': 'above full scale' };
 
 function versionFacts(entry) {
   if (entry.task === 'import') {
@@ -555,7 +590,15 @@ function fileRow(c, entry, f) {
   const label = f.label || f.stem || f.name;
   let actions;
   if (!f.exists) {
-    actions = h('span', { class: 'lib-missing' }, icon('alert', 14), 'Moved or deleted');
+    const canLocate = store.health?.local && nativeWindow();
+    actions = [
+      h('span', { class: 'lib-missing', title: canLocate && f.locatable === false ? 'This entry has no saved file identity.' : null },
+        icon('alert', 14), canLocate && f.locatable === false ? 'Moved or deleted. Add it again.' : 'Moved, changed or deleted'),
+      canLocate && f.locatable ? h('button', {
+        type: 'button', class: 'btn btn-ghost btn-sm', 'aria-label': `Locate ${f.name}`,
+        onclick: (e) => locateFile(entry, f, e.currentTarget),
+      }, 'Locate…') : null,
+    ];
   } else {
     const play = f.playable ? h('button', {
       type: 'button', class: 'btn btn-ghost btn-sm lib-play', 'aria-controls': c.stage.id,
@@ -565,8 +608,12 @@ function fileRow(c, entry, f) {
       c.toggles.set(f.id, play);
       playLabel(play, false);
     }
-    // In the app on this computer the file is already in the output folder: Show in Finder (above).
-    actions = [play, store.health?.local ? null : h('a', {
+    const local = store.health?.local;
+    const reveal = local && f.located ? h('button', {
+      type: 'button', class: 'btn btn-ghost btn-sm', 'aria-label': `Show the folder for ${f.name}`,
+      onclick: () => revealEntry(entry, f.id),
+    }, icon('folder', 14), 'Show folder') : null;
+    actions = [play, reveal, local ? null : h('a', {
       class: 'btn btn-ghost btn-sm', href: libraryFileUrl(entry.id, f.id, { download: true }), download: f.name,
       'aria-label': `Download ${label}`,
     }, icon('download', 14), h('span', { class: 'dl-text' }, 'Download'))];
@@ -583,6 +630,24 @@ function fileRow(c, entry, f) {
     h('div', { class: 'lib-file-actions' }, actions));
 }
 
+async function locateFile(entry, file, button) {
+  button.disabled = true;
+  try {
+    const choice = await chooseNative('locate');
+    if (!choice) return;
+    if (!choice.files[0]) throw new Error('Choose the moved file.');
+    await api(libPath(entry.id, `files/${encodeURIComponent(file.id)}/locate`), {
+      method: 'POST', desktop: true, json: { native_file: choice.files[0].selection },
+    });
+    toast('File location updated.', { kind: 'ok' });
+    await load();
+  } catch (e) {
+    toastError(e);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 /** A saved cover's picture in place of the icon (the icon when it won't load). */
 function coverThumb(src) {
   const box = h('span', { class: 'file-thumb' });
@@ -594,24 +659,16 @@ function coverThumb(src) {
 
 function entryActions(c, entry) {
   const btns = [];
-  if (compareFile(entry)) {
+  if (compareChoices(c).length) {
     const b = h('button', {
       type: 'button', class: 'btn btn-key btn-sm', 'aria-expanded': 'false', 'aria-controls': c.stage.id,
       onclick: (e) => togglePlayer(c, 'compare', e),
-    }, icon('compare', 15), 'Compare with the original');
+    }, icon('compare', 15), 'Compare');
     c.toggles.set('compare', b);
     btns.push(b);
   }
   if (!adjustUnavailable(entry)) {
-    btns.push(adjustLink(entry, () => player?.entryId === entry.id && player.what === 'compare' ? player.snapshot?.() : null));
-  }
-  if (c.peers) {
-    const b = h('button', {
-      type: 'button', class: 'btn btn-ghost btn-sm', 'aria-expanded': 'false', 'aria-controls': c.stage.id,
-      onclick: (e) => togglePlayer(c, 'versions', e),
-    }, icon('compare', 15), 'Compare versions');
-    c.toggles.set('versions', b);
-    btns.push(b);
+    btns.push(adjustLink(entry, () => player?.entryId === entry.id && player.choice === ORIGINAL ? player.snapshot?.() : null));
   }
   // On this computer: the way to the files (there are no per-file downloads).
   if (store.health?.local && (entry.files || []).some((f) => f.exists && f.kind !== 'original')) {
@@ -621,101 +678,148 @@ function entryActions(c, entry) {
   btns.push(menuButton({ label: 'More actions', items: [
     entry.job_exists ? { label: 'Open job', icon: 'arrow', onSelect: () => go(jobPath(entry.job_id)) } : null,
     c.several ? { label: 'Keep only this version', icon: 'check', onSelect: () => keepOnly(entry) } : null,
+    { label: entry.version_name ? 'Rename version…' : 'Name version…', icon: 'pencil', onSelect: () => nameVersion(entry) },
     { label: 'Remove from Library', icon: 'trash', onSelect: () => removeEntry(entry) },
   ] }));
   return h('div', { class: 'lib-actions' }, btns);
 }
 
-/** The result the kept original is compared with: the server's pick (lossless first). */
+// ---------------------------------------------------------------------------
+// One comparison per card, with a choice of the kept original and saved versions.
+// ---------------------------------------------------------------------------
 function compareFile(entry) {
   if (!entry.original?.kept || !entry.compare_file_id) return null;
-  return (entry.files || []).find((f) => f.id === entry.compare_file_id) || null;
+  if (entry.files?.some((f) => f.id === ORIGINAL && !f.exists)) return null;
+  return entry.files?.find((f) => f.id === entry.compare_file_id && f.exists) || null;
 }
 
-// ---------------------------------------------------------------------------
-// The player (one at a time)
-// ---------------------------------------------------------------------------
+function compareChoices(c) {
+  const choices = [];
+  if (compareFile(c.entry)) choices.push({ value: ORIGINAL, label: 'Original' });
+  for (const entry of c.peers || []) {
+    if (entry.id === c.entry.id) continue;
+    const date = dateText(entry.created_at, true) || 'Undated';
+    const label = entry.version_name || date;
+    const desc = [entry.version_name ? date : null, versionFacts(entry)].filter(Boolean).join(' · ');
+    choices.push({ value: entry.id, label, desc });
+  }
+  return choices;
+}
+
+function fileIdentity(entry, file) {
+  return file ? [entry.id, file.id, file.revision ?? file.path ?? file.name, file.size_bytes] : null;
+}
+
+/** Ordered identities matter: every entry can have an f0, and older/newer can swap. */
+function comparisonIdentity(c, choice, sides) {
+  if (choice === ORIGINAL) {
+    const result = compareFile(c.entry);
+    if (!result) return null;
+    const original = c.entry.files.find((f) => f.id === ORIGINAL);
+    return [c.entry.group, fileIdentity(c.entry, result), original ? fileIdentity(c.entry, original) : c.entry.original.key,
+      c.entry.loudness?.original_lufs, versionLoudness(c.entry, result)];
+  }
+  return sides && [c.entry.group, ...sides.map(({ entry, file }) =>
+    [fileIdentity(entry, file), versionLoudness(entry, file), entry.duration_s || entry.source?.duration_s, entry.markers])];
+}
+
 function togglePlayer(c, what, event) {
   const same = player?.entryId === c.entry.id && player.what === what;
-  // Only full-length comparisons share a transport, and only inside the server's
-  // recording group. Plain files may be stems/tracks with a different timeline.
+  const choice = what === 'compare' ? compareChoices(c)[0]?.value : null;
+  // Only full-length original comparisons of the same recording share the complete state.
   const group = c.entry.group;
-  const state = !same && what === 'compare' && player?.what === 'compare'
+  const state = !same && choice === ORIGINAL && player?.choice === ORIGINAL
     && typeof group === 'string' && group && player.group === group ? player.snapshot?.() : null;
   closePlayer();
   if (same) return;
   const entry = c.entry;
   if (what === 'compare') {
-    const result = compareFile(entry);
-    if (!result) return;
-    const start = entry.excerpt?.start_s;  // the loud passage the job page starts at, kept with the entry
-    const p = libraryCompare(entry, {
-      startAt: start || 0,
-      note: start ? `Starts at a loud passage (${fmtDuration(start)}) — the whole recording is here.` : null,
-    });
-    player = { ...p, entryId: entry.id, what, group, fileId: result.id, title: 'Comparing with the original' };
-    attachPlayer(c);
-    // Route reveals also open players; they retain the position but never start sound.
-    p.restore?.(state, { resume: event?.isTrusted === true });
-  } else if (what === 'versions') {
-    if (!openVersions(c)) return;
+    if (!openComparison(c, choice)) return;
+    // Route reveals retain the position but never start sound.
+    player.restore?.(state, { resume: event?.isTrusted === true });
   } else {
-    const file = (entry.files || []).find((f) => f.id === what);
+    const file = (entry.files || []).find((f) => f.id === what && f.exists);
     if (!file) return;
     const p = plainPlayer(entry, file);
-    player = { ...p, entryId: entry.id, what, fileId: file.id, title: file.label || file.name };
+    player = { ...p, entryId: entry.id, what, identity: JSON.stringify(fileIdentity(entry, file)), title: file.label || file.name };
     attachPlayer(c);
     p.play(); // still inside the click: Safari only lets a user gesture start sound
   }
-  // Opened by a click: bring the player into view (it opens under the version's files).
-  if (event && player?.stage) player.stage.scrollIntoView?.({ block: 'nearest' });
+  if (event) player.stage.scrollIntoView?.({ block: 'nearest' });
   updateToggles();
 }
 
-// ---------------------------------------------------------------------------
-// Two versions of one recording, at matched volume: the older one first. The version the
-// row belongs to is compared with the newest other one, or the one picked above the player.
-// ---------------------------------------------------------------------------
-function openVersions(c, otherId = null) {
-  const others = (c.peers || []).filter((e) => e.id !== c.entry.id); // newest first, like the list
-  const other = others.find((e) => e.id === otherId) || others[0];
-  if (!other) return false;
-  // Older first; at the same time, the one listed lower (the list is newest first) counts as older.
+function savedSides(c, otherId) {
+  const other = c.peers?.find((e) => e.id === otherId);
+  if (!other || other.id === c.entry.id || other.group !== c.entry.group) return null;
+  // Older first; at the same time, the one listed lower counts as older.
+  const order = (entry) => c.peers.findIndex((e) => e.id === entry.id);
   const [older, newer] = [c.entry, other].sort((x, y) =>
-    (x.created_at || 0) - (y.created_at || 0) || c.peers.indexOf(y) - c.peers.indexOf(x));
-  const side = (entry, label, name = `The ${label.toLowerCase()} version`) => ({ entry, file: versionFile(entry, enhanceFormats()), label, name });
-  // An Enhance version against a file the user added: AudioLab's first, "Your file" second, whatever their dates.
+    (x.created_at || 0) - (y.created_at || 0) || order(y) - order(x));
+  const side = (entry, label, name = `The ${label.toLowerCase()} version`) => ({
+    entry, file: versionFile(entry, enhanceFormats()), label: entry.version_name || label,
+    name: entry.version_name ? `“${entry.version_name}”` : name,
+  });
+  // An Enhance version against a file the user added: AudioLab's first, whatever their dates.
   const mine = [c.entry, other].filter((e) => e.task === 'import');
-  const [a, b] = mine.length === 1
+  const sides = mine.length === 1
     ? [side([c.entry, other].find((e) => e.task !== 'import'), 'Enhanced'), side(mine[0], 'Your file', 'Your file')]
     : [side(older, 'Older'), side(newer, 'Newer')];
-  if (!a.file || !b.file) return false;
-  const start = b.entry.excerpt?.start_s ?? a.entry.excerpt?.start_s; // an imported file has no loud passage of its own
-  const legend = (s) => [`${s.label} (${dateText(s.entry.created_at, true) || 'no date'}): `, versionFacts(s.entry) || s.file.label || s.file.name];
-  const p = versionCompare(a, b, {
-    startAt: start || 0,
-    note: [...legend(a), h('br'), ...legend(b), start ? ` · Starts at a loud passage (${fmtDuration(start)}).` : ''],
-  });
-  player = { ...p, entryId: c.entry.id, what: 'versions', otherId: other.id, fileIds: [a.file.id, b.file.id], title: 'Comparing two versions' };
+  return sides.every((s) => s.file) ? sides : null;
+}
+
+const savedStart = ([a, b]) => b.entry.excerpt?.start_s ?? a.entry.excerpt?.start_s;
+
+function savedNote(sides) {
+  const legend = (s) => [`${s.label} (${dateText(s.entry.created_at, true) || 'no date'}): `,
+    versionFacts(s.entry) || s.file.label || s.file.name];
+  const start = savedStart(sides);
+  return [...legend(sides[0]), h('br'), ...legend(sides[1]), start ? ` · Starts at a loud passage (${fmtDuration(start)}).` : ''];
+}
+
+function openComparison(c, choice) {
+  const entry = c.entry;
+  const original = choice === ORIGINAL;
+  const sides = original ? null : savedSides(c, choice);
+  const identity = comparisonIdentity(c, choice, sides);
+  if (!identity) return false;
+  let p;
+  if (original) {
+    const start = entry.excerpt?.start_s;
+    p = libraryCompare(entry, {
+      startAt: start || 0,
+      note: start ? `Starts at a loud passage (${fmtDuration(start)}) — the whole recording is here.` : null,
+    });
+  } else {
+    p = versionCompare(...sides, { startAt: savedStart(sides) || 0, note: savedNote(sides) });
+  }
+  player = {
+    ...p, entryId: entry.id, what: 'compare', choice, group: entry.group, identity: JSON.stringify(identity),
+    title: original ? 'Comparing with the original' : 'Comparing two versions',
+  };
   attachPlayer(c);
   return true;
 }
 
-/** "Compare with" above the player, once there is more than one other version to pick. */
-function versionPicker(c) {
-  const others = (c.peers || []).filter((e) => e.id !== c.entry.id);
-  if (others.length < 2) return null;
+function checkedComparison(c) {
+  const picker = c.stage.querySelector('.lib-version-pick');
+  return picker && [...picker.querySelectorAll('input')].find((input) => input.checked);
+}
+
+function comparisonPicker(c) {
+  const options = compareChoices(c);
+  if (options.length < 2) return null;
   const pick = segmented({
-    label: 'Compare with', size: 'sm', value: player.otherId,
-    options: others.map((e) => ({ value: e.id, label: dateText(e.created_at, true) || 'Undated', desc: versionFacts(e) || null })),
-    onChange: (id) => {
-      const state = player?.snapshot?.();
+    label: 'Compare with', size: 'sm', value: player.choice, options,
+    onChange: (choice) => {
+      if (player?.entryId !== c.entry.id || player.choice === choice) return;
+      const state = player.snapshot?.();
       closePlayer();
-      if (!openVersions(c, id)) { updateToggles(); return; }
-      // A new pick in the same place: keep the position, and keep playing (this is a click).
+      if (!openComparison(c, choice)) return;
+      // The selected sides can change order, so carry the position and volume preference.
       player.restore?.(state && { time: state.time, playing: state.playing, matchVolume: state.matchVolume }, { resume: true });
       updateToggles();
-      c.stage.querySelector('.lib-version-pick input:checked')?.focus({ preventScroll: true });
+      checkedComparison(c)?.focus({ preventScroll: true });
     },
   });
   return h('div', { class: 'lib-version-pick small' }, h('span', null, 'Compare with'), pick);
@@ -731,7 +835,7 @@ function attachPlayer(c) {
     },
   }, icon('close', 15));
   append(clear(c.stage), [h('div', { class: 'lib-stage-head' }, h('strong', null, player.title), close),
-    player.what === 'versions' ? versionPicker(c) : null, player.el]);
+    player.what === 'compare' ? comparisonPicker(c) : null, player.el]);
   c.stage.hidden = false;
   player.stage = c.stage;
 }
@@ -746,20 +850,19 @@ function closePlayer() {
 }
 
 function playerStillFits(c, entry) {
-  if (player.what === 'compare') return compareFile(entry)?.id === player.fileId;
-  if (player.what === 'versions') {
-    const other = c.peers?.find((e) => e.id === player.otherId);
-    const ids = other ? [entry, other].map((e) => versionFile(e, enhanceFormats())?.id) : [];
-    return ids.every(Boolean) && ids.every((id) => player.fileIds.includes(id));
+  if (player.what === 'compare') {
+    const sides = player.choice === ORIGINAL ? null : savedSides(c, player.choice);
+    return JSON.stringify(comparisonIdentity(c, player.choice, sides)) === player.identity;
   }
-  return (entry.files || []).some((f) => f.id === player.what && f.exists);
+  const file = entry.files?.find((f) => f.id === player.what && f.exists);
+  return JSON.stringify(fileIdentity(entry, file)) === player.identity;
 }
 
 function updateToggles() {
   for (const c of cards.values()) {
     for (const [what, b] of c.toggles) {
       const on = !!player && player.entryId === c.entry.id && player.what === what;
-      if (what === 'compare' || what === 'versions') b.setAttribute('aria-expanded', String(on));
+      if (what === 'compare') b.setAttribute('aria-expanded', String(on));
       else if (b.classList.contains('is-on') !== on) playLabel(b, on);
     }
   }
@@ -795,16 +898,59 @@ function revealTarget(final = false) {
   void c.el.offsetWidth; // restart the highlight
   c.el.classList.add('is-flash');
   setTimeout(() => c.el.classList.remove('is-flash'), FLASH_MS);
-  if (compareFile(c.entry) && !(player?.entryId === id && player.what === 'compare')) togglePlayer(c, 'compare');
+  if (compareChoices(c).length && !(player?.entryId === id && player.what === 'compare')) togglePlayer(c, 'compare');
   return true;
 }
 
 // ---------------------------------------------------------------------------
 // Actions
 // ---------------------------------------------------------------------------
-async function revealEntry(entry) {
+function nameVersion(entry) {
+  closeInfo();
+  const id = `lib-name-${++uid}`;
+  const input = h('input', {
+    id: `${id}-input`, class: 'field', type: 'text', maxlength: MAX_VERSION_NAME,
+    value: entry.version_name || '', 'aria-describedby': `${id}-help ${id}-error`,
+  });
+  const error = h('p', { id: `${id}-error`, class: 'lib-import-error small', role: 'alert' });
+  const save = h('button', { type: 'submit', class: 'btn btn-primary' }, 'Save');
+  const form = h('form', { class: 'dialog-form', method: 'dialog' },
+    h('h2', { id }, 'Name this version'),
+    h('label', { class: 'field-label', for: input.id }, 'Version name'),
+    input, h('p', { id: `${id}-help`, class: 'muted small' }, 'Leave blank to use the default name.'), error,
+    h('div', { class: 'dialog-actions' },
+      h('button', { type: 'button', class: 'btn btn-ghost', onclick: () => dialog.close() }, 'Cancel'), save));
+  const dialog = h('dialog', { class: 'dialog', 'aria-labelledby': id }, form);
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (save.disabled) return;
+    const version_name = input.value.trim();
+    save.disabled = true;
+    error.textContent = '';
+    try {
+      await api(libPath(entry.id, 'version-name'), { method: 'PUT', json: { version_name } });
+      dialog.close();
+      await load();
+    } catch (e) {
+      save.disabled = false;
+      error.textContent = e.message;
+      input.focus();
+    }
+  });
+  dialog.addEventListener('close', () => {
+    dialog.remove();
+    const card = cards.get(entry.id)?.el;
+    (card?.querySelector('.menu-wrap button') || card)?.focus({ preventScroll: true });
+  });
+  document.body.append(dialog);
+  dialog.showModal();
+  input.focus();
+}
+
+async function revealEntry(entry, fileId) {
   try {
-    const res = await api(libPath(entry.id, 'reveal'), { method: 'POST' });
+    const action = fileId ? `files/${encodeURIComponent(fileId)}/reveal` : 'reveal';
+    const res = await api(libPath(entry.id, action), { method: 'POST' });
     if (res?.fallback === 'output') toast('That folder was moved or deleted — opened the output folder instead.', { kind: 'info', timeout: 7000 });
   } catch (e) {
     toastError(e);
@@ -816,7 +962,7 @@ async function revealEntry(entry) {
 // (off by default, and never a permanent delete). An imported file can go too: the switch names its folder.
 // ---------------------------------------------------------------------------
 /** An entry's files that are still there and could go to the Trash (the kept original is AudioLab's own). */
-const trashable = (entry) => (entry.files || []).filter((f) => f.exists && f.kind !== 'original');
+const trashable = (entry) => (entry.files || []).filter((f) => f.exists && f.kind !== 'original' && f.can_trash !== false);
 
 /** Where an imported file is, for reading: "~/Music/Masters" (no raw path). */
 const importFolder = (entry) => shortFolder(String(trashable(entry)[0]?.path || '').replace(/[\\/][^\\/]*$/, ''));
@@ -837,7 +983,9 @@ function trashSwitch(label, help) {
 function trashResult(res, done) {
   const moved = res?.trashed?.length || 0;
   const failed = res?.trash_failed || [];
-  toast(`${done}${moved ? ` ${moved} file${moved === 1 ? '' : 's'} moved to the Trash.` : ''}`, { kind: 'ok' });
+  const kept = res?.located_files_kept || 0;
+  const keptNote = kept ? ` ${kept} located file${kept === 1 ? '' : 's'} outside the output folder stayed in place.` : '';
+  toast(`${done}${moved ? ` ${moved} file${moved === 1 ? '' : 's'} moved to the Trash.` : ''}${keptNote}`, { kind: 'ok' });
   if (failed.length) {
     const names = failed.slice(0, 3).join(', ') + (failed.length > 3 ? ` and ${failed.length - 3} more` : '');
     toast(`Couldn’t move ${failed.length === 1 ? 'this file' : `${failed.length} files`} to the Trash, so ${failed.length === 1 ? 'it stays' : 'they stay'} where ${failed.length === 1 ? 'it is' : 'they are'}: ${names}.`,
@@ -906,22 +1054,42 @@ async function keepOnly(entry) {
  */
 function importDialog(group = null) {
   const id = `lib-import-${++uid}`;
-  const path = h('input', {
+  const native = nativeWindow();
+  let file = null;
+  const pickedName = h('span', { class: 'muted small', 'aria-live': 'polite' }, 'No file chosen');
+  const pick = native ? h('button', {
+    type: 'button', class: 'btn btn-key', 'aria-describedby': `${id}-error`, onclick: async () => {
+      try {
+        const choice = await chooseNative('import');
+        if (!choice || !dialog.open) return;
+        if (!choice.files[0]) throw new Error('Choose a supported audio or video file.');
+        file = choice.files[0];
+        pickedName.textContent = file.name;
+        error.textContent = '';
+        addBtn.disabled = false;
+      } catch (err) {
+        error.textContent = err.message;
+      }
+    },
+  }, 'Choose file') : null;
+  const path = native ? null : h('input', {
     class: 'field', id: `${id}-path`, type: 'text', required: true, autocomplete: 'off', spellcheck: 'false',
     placeholder: IS_MAC ? '/Users/you/Music/Master.wav' : 'C:\\Users\\you\\Music\\Master.wav', 'aria-describedby': `${id}-help ${id}-error`,
   });
   const title = h('input', { class: 'field', id: `${id}-title`, type: 'text', autocomplete: 'off', placeholder: 'From its tags or file name' });
   const error = h('p', { class: 'lib-import-error small', id: `${id}-error` });
-  const addBtn = h('button', { type: 'submit', class: 'btn btn-primary', value: 'ok' }, 'Add to Library');
+  const addBtn = h('button', { type: 'submit', class: 'btn btn-primary', value: 'ok', disabled: native }, 'Add to Library');
   const form = h('form', { class: 'dialog-form', method: 'dialog' },
     h('h2', { id }, group ? 'Add a version from a file' : 'Add a file'),
     h('p', { class: 'muted' }, group
       ? `Adds an audio file you already have to “${group.title || 'this recording'}”, so you can play it and compare it with the other versions. The file stays where it is.`
       : 'Adds an audio file you already have, such as a master from your DAW, so you can play it and compare it. The file stays where it is.'),
-    h('label', { class: 'field-label', for: path.id }, 'File path'), path,
-    h('p', { class: 'muted small', id: `${id}-help` }, IS_MAC
-      ? 'Paste the file’s path. In Finder: right-click the file with ⌥ held → Copy as Pathname.'
-      : 'Paste the file’s full path.'),
+    native ? [pick, pickedName] : [
+      h('label', { class: 'field-label', for: path.id }, 'File path'), path,
+      h('p', { class: 'muted small', id: `${id}-help` }, IS_MAC
+        ? 'Paste the file’s path. In Finder: right-click the file with ⌥ held → Copy as Pathname.'
+        : 'Paste the file’s full path.'),
+    ],
     h('label', { class: 'field-label', for: title.id }, 'Title (optional)'), title,
     error,
     h('div', { class: 'dialog-actions' },
@@ -929,31 +1097,34 @@ function importDialog(group = null) {
   const dialog = h('dialog', { class: 'dialog lib-import', 'aria-labelledby': id }, form);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const filePath = path.value.trim().replace(/^(["'])(.*)\1$/, '$2'); // "Copy as path" on Windows adds quotes
-    if (!filePath) { path.focus(); return; }
-    const body = { path: filePath };
+    if (addBtn.disabled) return;
+    const filePath = path?.value.trim().replace(/^(["'])(.*)\1$/, '$2'); // "Copy as path" on Windows adds quotes
+    if (!file && !filePath) { (pick || path).focus(); return; }
+    const body = native ? { native_file: file.selection } : { path: filePath };
     if (title.value.trim()) body.title = title.value.trim();
     if (group) body.group = group.key;
     addBtn.disabled = true;
+    if (pick) pick.disabled = true;
     error.textContent = '';
     try {
-      const job = await api('/api/library/import', { method: 'POST', json: body });
+      const job = await api('/api/library/import', { method: 'POST', json: body, desktop: native });
       if (!job?.id) throw new Error('The app didn’t return an import job.');
       upsertJob(job); // the Library reloads when it is done
       dialog.close();
-      toast(`Adding “${body.title || filePath.split(/[\\/]/).pop()}” to the Library…`, {
+      toast(`Adding “${body.title || file?.name || filePath.split(/[\\/]/).pop()}” to the Library…`, {
         action: { label: 'Show', run: () => go(jobPath(job.id)) },
       });
     } catch (err) {
       addBtn.disabled = false;
       error.textContent = [err.message, err.hints?.[0]].filter(Boolean).join(' ');
-      path.focus();
+      if (pick) pick.disabled = false;
+      (pick || path).focus();
     }
   });
   dialog.addEventListener('close', () => dialog.remove());
   document.body.append(dialog);
   dialog.showModal();
-  path.focus();
+  (pick || path).focus();
   return dialog;
 }
 
@@ -963,7 +1134,7 @@ async function deleteOriginal(g, entry) {
     title: 'Delete the original copy?',
     // No size here: a copy can share its disk space with the job's upload, so the toast says what was freed.
     message: `This affects ${n > 1 ? `all ${n} versions` : 'every version'} of “${g.title}”: `
-      + 'they can no longer be compared with the original. Your own files stay where they are.',
+      + 'they can no longer be compared with the original or reworked in Adjust. Your own files stay where they are.',
     confirm: 'Delete copy',
   });
   if (!ok) return;

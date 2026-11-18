@@ -5,19 +5,21 @@
 // /downloader; #/settings/output opens the folder field): the page scrolls there and
 // flashes it. Changes save immediately; a small "Saved ✓" next to the setting confirms it.
 // Paths show short, the full one on hover. A section with nothing to show hides, tab and all.
-import { h, icon, clear, append, shortFolder, fmtBytes, fmtDurationWords } from '../dom.js';
+import { IS_MAC, h, icon, clear, shortFolder, fmtBytes, fmtDurationWords } from '../dom.js';
 import { api } from '../api.js';
+import { chooseNative, nativeWindow } from '../native.js';
 import { store, on, saveSettings, loadHealth, deviceLabel, appName, isFinished, forgetShown, formatInfo, ENHANCE_PRESETS } from '../store.js';
 import { segmented, chips, switchControl, led, toast, toastError, callout, copyText, confirmDialog, closeInfo } from '../ui.js';
 import { go, settingsPath } from '../router.js';
 import { clearFinished, copyDiagnostics } from '../actions.js';
 
 const SECTIONS = [
-  ['files', 'Files'], ['defaults', 'Defaults'], ['look', 'Look'], ['downloads', 'Downloads & sign-in'],
-  ['system', 'Updates & add-ons'], ['storage', 'Storage'], ['about', 'About'],
+  ['general', 'General'], ['defaults', 'Output defaults'], ['downloads', 'Downloads'],
+  ['ai-addon', 'AI add-on'], ['storage', 'Storage'], ['help', 'Help'],
 ];
 // Spots inside a section → the section holding them.
-const SPOTS = { ai: 'system', updates: 'system', downloader: 'system', cookies: 'downloads', output: 'files' };
+const SPOTS = { ai: 'ai-addon', updates: 'help', downloader: 'help', diagnostics: 'help', ffmpeg: 'help', cookies: 'downloads', output: 'defaults' };
+const OLD_SECTIONS = { files: 'output', look: 'general', system: 'updates', about: 'diagnostics' };
 const STALE_DOWNLOADER_DAYS = 60;
 const SIGN_IN_BROWSERS = [
   ['', 'Off'], ['firefox', 'Firefox'], ['chrome', 'Chrome'], ['edge', 'Edge'], ['brave', 'Brave'],
@@ -52,6 +54,7 @@ export const settingsView = {
       title: h('h1', { class: 'page-title', id: 'settingsTitle', tabindex: '-1' }, 'Settings'),
       sub: h('p', { class: 'page-sub' }),
       nav: h('nav', { class: 'settings-nav', 'aria-label': 'Settings sections' }),
+      folderRows: h('div', { class: 'set-rows' }),
       links: {},
       sections: {},
       storageInfo: h('div', { class: 'storage-info', hidden: true, tabindex: '-1' }),
@@ -67,7 +70,7 @@ export const settingsView = {
       refs.nav.append(a);
       const body = h('div', { class: 'set-rows' });
       const sec = h('section', { class: 'block', id: `settings-${key}`, tabindex: '-1', 'aria-labelledby': `settings-${key}-title` },
-        h('h2', { class: 'block-title', id: `settings-${key}-title` }, label), body);
+        h('h2', { class: 'block-title', id: `settings-${key}-title` }, label), key === 'defaults' ? refs.folderRows : null, body);
       refs.sections[key] = { el: sec, body };
       list.append(sec);
     }
@@ -78,14 +81,16 @@ export const settingsView = {
 
     on('health', () => {
       if (!visible) return;
-      if (folderDraft == null) renderFiles(); // never redraw the folder field under the user's typing
-      if (defaultsWaiting) renderDefaults();
-      renderDownloads();
-      renderSystem();
-      renderAbout();
+      keepReadingPosition(() => {
+        if (folderDraft == null) renderFiles(); // never redraw the folder field under the user's typing
+        if (defaultsWaiting) renderDefaults();
+        renderDownloads();
+        renderAi();
+        renderHelp();
+      });
     });
-    on('settings', () => { if (visible && !saving) { renderDefaults(); renderLook(); renderDownloads(); renderSystem(); renderStorage(); } });
-    on('jobs', () => { if (visible) renderStorageInfo(); });
+    on('settings', () => { if (visible && !saving) refreshSettings(); });
+    on('jobs', () => { if (visible && storage.data?.jobs_bytes != null) renderStorageInfo(); });
   },
 
   show(section, { same = false } = {}) {
@@ -115,26 +120,30 @@ function renderAll() {
   refs.sub.textContent = `${appName()} ${store.health?.version || ''}`.trim();
   renderFiles();
   renderDefaults();
-  renderLook();
+  renderGeneral();
   renderDownloads();
-  renderSystem();
+  renderAi();
   renderStorage();
-  renderAbout();
+  renderHelp();
 }
 
 // ---------------------------------------------------------------------------
 // Section nav: jump to a section, follow the scroll position
 // ---------------------------------------------------------------------------
 function reveal(key, { smooth, flash }) {
-  const sectionKey = SPOTS[key] || key;
-  const sec = refs.sections[sectionKey];
-  if (!sec) return false;
+  key = Object.hasOwn(OLD_SECTIONS, key) ? OLD_SECTIONS[key] : key;
+  const sectionKey = Object.hasOwn(SPOTS, key) ? SPOTS[key] : key;
+  const sec = Object.hasOwn(refs.sections, sectionKey) && refs.sections[sectionKey];
+  if (!sec || sec.el.hidden) return false;
   if (key === 'output') openFolderField(); // "Change folder" in the banner: land in the field
   const spot = SPOTS[key] ? sec.el.querySelector(`[data-spot="${key}"]`) : null;
+  const disclosure = spot?.closest('details');
+  if (disclosure) disclosure.open = true;
   setCurrent(sectionKey);
   spyPausedUntil = Date.now() + 900; // let a smooth scroll land before following it again
   (spot || sec.el).scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: spot ? 'center' : 'start' });
-  ((spot || sec.el).querySelector('[data-autofocus]') || sec.el).focus({ preventScroll: true });
+  const control = spot?.querySelector('[data-autofocus]:not(:disabled)') || spot?.querySelector('button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href]');
+  (control || spot || sec.el).focus({ preventScroll: true });
   if (flash) {
     flashing = { key: spot ? key : sectionKey, until: Date.now() + 1800 };
     applyFlash();
@@ -188,17 +197,55 @@ const FOCUS_NEXT = { resetDownloader: ['updateDownloader', 'checkUpdates'] };
  *  A section left empty (e.g. no sign-in on a remote server) hides with its tab. */
 function fill(key, ...nodes) {
   const sec = refs.sections[key];
-  const body = sec.body;
-  const focusedId = body.contains(document.activeElement) ? document.activeElement.id : '';
-  append(clear(body), nodes);
-  const empty = !body.childElementCount;
+  fillRows(sec.body, ...nodes);
+  const empty = !sec.body.childElementCount;
   if (sec.el) sec.el.hidden = empty;
   if (refs.links?.[key]) refs.links[key].hidden = empty;
+  applyFlash();
+}
+
+function fillRows(body, ...nodes) {
+  const focusedId = body.contains(document.activeElement) ? document.activeElement.id : '';
+  body.replaceChildren(...nodes.flat(Infinity).filter(Boolean));
   if (focusedId) {
     const next = [focusedId, ...(FOCUS_NEXT[focusedId] || [])].map((id) => document.getElementById(id)).find(Boolean);
     next?.focus({ preventScroll: true });
   }
-  applyFlash();
+}
+
+/** Keep the focused control in place while visible. After a manual scroll, use the
+ *  row below the sticky tabs instead. Only a synchronous redraw owns this snapshot. */
+function keepReadingPosition(draw) {
+  if (!visible || !scroller?.scrollTop) { draw(); return; }
+  const scrollTop = scroller.scrollTop;
+  const bounds = scroller.getBoundingClientRect();
+  const readingTop = Math.max(bounds.top, refs.nav.getBoundingClientRect().bottom);
+  let anchor = document.activeElement;
+  const rect = anchor?.id && settingsView.el.contains(anchor) && anchor.getBoundingClientRect();
+  if (!rect || rect.top < readingTop || rect.top >= bounds.bottom) {
+    const at = document.elementFromPoint(bounds.left + bounds.width / 2, readingTop + 1);
+    anchor = at?.closest('[data-setting], [id]') || null;
+  }
+  if (!settingsView.el.contains(anchor) || anchor === settingsView.el) anchor = null;
+  const before = anchor?.getBoundingClientRect().top;
+  draw();
+  const replacement = anchor?.id ? document.getElementById(anchor.id)
+    : anchor && settingsView.el.querySelector(`[data-setting="${anchor.dataset.setting}"]`);
+  // Storage totals can arrive above a deep link after it has already landed.
+  const after = replacement?.getBoundingClientRect();
+  const wanted = after && after.bottom > after.top ? scroller.scrollTop + after.top - before : scrollTop;
+  if (scroller.scrollTop !== wanted) scroller.scrollTop = wanted;
+}
+
+function refreshSettings() {
+  keepReadingPosition(() => {
+    renderDefaults();
+    renderGeneral();
+    renderDownloads();
+    renderAi();
+    renderHelp();
+    renderStorage();
+  });
 }
 
 /** Label + help + control. `setting` names the settings key it changes (for "Saved ✓").
@@ -223,19 +270,15 @@ function statusRow(state, title, detail, action, ...more) {
 
 /** Save one change; on failure say why (with the server's hint) and redraw the controls. Returns whether it worked.
  *  `mark: false` leaves "Saved ✓" to the caller (when it redraws the setting first). */
-async function save(patch, { quiet = false, mark = true } = {}) {
+async function save(patch, { quiet = false, mark = true, desktop = false } = {}) {
   saving += 1;
   try {
-    await saveSettings(patch);
+    await saveSettings(patch, { desktop });
     if (mark) savedMark(Object.keys(patch)[0]);
     return true;
   } catch (e) {
     if (!quiet) toastError(e);
-    renderDefaults();
-    renderLook();
-    renderDownloads();
-    renderSystem();
-    renderStorage();
+    refreshSettings();
     if (quiet) throw e;
     return false;
   } finally {
@@ -268,7 +311,7 @@ function renderFiles() {
   const help = h('p', { class: 'adv-help', id: 'outputDirHelp' },
     'Finished files are saved here, one folder per job when there are several files.',
     locked ? ' Set by the server’s configuration, so it can’t be changed here.' : null);
-  fill('files', h('div', { class: 'folder', dataset: { spot: 'output', setting: 'output_dir' } },
+  fillRows(refs.folderRows, h('div', { class: 'folder', tabindex: '-1', id: 'outputFolderSpot', dataset: { spot: 'output', setting: 'output_dir' } },
     h('label', { class: 'adv-label', for: 'outputDir' }, 'Output folder'),
     folderDraft == null ? folderLine(dir, locked) : folderField(),
     help));
@@ -282,15 +325,32 @@ function folderLine(dir, locked) {
       onclick: async () => { try { await api('/api/reveal-output', { method: 'POST' }); } catch (e) { toastError(e); } },
     }, icon('folder', 14), 'Open folder')
     : null;
+  const native = nativeWindow() && store.health?.local;
   const change = locked ? null : h('button', {
     type: 'button', class: 'btn btn-ghost btn-sm', id: 'changeOutputDir', 'aria-label': 'Change the output folder',
-    onclick: () => { openFolderField(); document.getElementById('outputDir')?.focus(); },
+    onclick: native ? chooseOutputFolder : () => { openFolderField(); document.getElementById('outputDir')?.focus(); },
   }, icon('pencil', 14), 'Change');
   return h('div', { class: 'folder-line' },
     icon('folder', 16, 'folder-ico'),
     h('span', { class: 'folder-path', title: dir || null }, shortFolder(dir) || 'Not set'),
     missing ? h('span', { class: 'lib-missing' }, icon('alert', 13), 'Not available') : null,
     open || change ? h('span', { class: 'folder-actions' }, open, change) : null);
+}
+
+async function chooseOutputFolder() {
+  try {
+    const selected = await chooseNative('output');
+    if (!selected) return;
+    const folder = selected.files[0];
+    if (!folder) throw new Error('AudioLab couldn’t open that folder. Choose it again.');
+    await save({ native_output_folder: folder.selection }, { quiet: true, mark: false, desktop: true });
+    await loadHealth().catch(() => {});
+    savedMark('output_dir');
+  } catch (e) {
+    toastError(e);
+  } finally {
+    document.getElementById('changeOutputDir')?.focus({ preventScroll: true });
+  }
 }
 
 /** Opens the folder field with the full path (unless it is open already or set by the server). */
@@ -378,7 +438,7 @@ function renderDefaults() {
         options: (fm.download || []).filter((f) => f.key !== 'video').map((f) => pill(f, true)),
         onChange: (v) => save({ download_format: v }),
       }), { stack: true, setting: 'download_format' }),
-    row('Enhance saves', 'Ticked for every Enhance job.',
+    row('Enhance saves', 'Formats selected when New opens. You can change them for a job.',
       loading || chips({
         label: 'Enhance formats', size: 'sm', values: new Set(s.enhance_formats || []),
         options: enhanceOptions(fm.enhance || [], choice),
@@ -395,14 +455,7 @@ function renderDefaults() {
         onChange: (v) => save({ separate_format: v }),
       }), { stack: true, setting: 'separate_format' }),
     row('Cover art', 'Puts the video thumbnail (or a file’s own picture) into saved and enhanced songs as album art.',
-      switchControl({ checked: s.embed_cover, label: 'Cover art', onChange: (v) => save({ embed_cover: v }) }), { setting: 'embed_cover' }),
-    // Stored as ui_mode ('advanced' = on). Changing it also forgets what was opened or
-    // closed one by one, so the new default shows everywhere.
-    row('Show all options by default', 'Opens “More options” for every task and shows the details (measurements, decisions, full log) on job pages. Each can still be opened or closed on its own.',
-      switchControl({
-        id: 'showAllOptions', checked: s.ui_mode === 'advanced', label: 'Show all options by default',
-        onChange: (v) => { forgetShown(); save({ ui_mode: v ? 'advanced' : 'simple' }); },
-      }), { setting: 'ui_mode' }));
+      switchControl({ checked: s.embed_cover, label: 'Cover art', onChange: (v) => save({ embed_cover: v }) }), { setting: 'embed_cover' }));
 }
 
 /** Enhance formats named as on New: the destination presets first, the format as their second
@@ -413,15 +466,22 @@ function enhanceOptions(all, choice) {
   return [...usual, ...rest];
 }
 
-function renderLook() {
+function renderGeneral() {
   const s = store.settings || {};
-  fill('look',
+  fill('general',
     row('Theme', null,
       segmented({
         label: 'Theme', size: 'sm', value: s.theme || 'auto',
         options: [{ value: 'auto', label: 'Automatic' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }],
         onChange: (v) => save({ theme: v }),
-      }), { stack: true, setting: 'theme' }));
+      }), { stack: true, setting: 'theme' }),
+    // Stored as ui_mode ('advanced' = on). Changing it also forgets what was opened or
+    // closed one by one, so the new default shows everywhere.
+    row('Show all options by default', 'Opens “More options” for every task and shows the details (measurements, decisions, full log) on job pages. Each can still be opened or closed on its own.',
+      switchControl({
+        id: 'showAllOptions', checked: s.ui_mode === 'advanced', label: 'Show all options by default',
+        onChange: (v) => { forgetShown(); save({ ui_mode: v ? 'advanced' : 'simple' }); },
+      }), { setting: 'ui_mode' }));
 }
 
 // ---------------------------------------------------------------------------
@@ -436,33 +496,41 @@ function signInRow() {
   if (!store.health?.local || !('cookies_browser' in s)) return null;
   const locked = (s.locked || []).includes('cookies_browser');
   // This row only shows for a local server, so the browser's platform is the server's.
-  const mac = /Mac/i.test(navigator.platform || navigator.userAgent);
   const select = h('select', {
     class: 'field field-select', id: 'cookiesBrowser', 'aria-label': 'YouTube sign-in', disabled: locked,
     dataset: { autofocus: '' },
   }, SIGN_IN_BROWSERS.map(([value, label]) => h('option', { value, selected: (s.cookies_browser || '') === value },
-    mac && value === 'safari' ? `${label} (needs Full Disk Access)` : label)));
+    IS_MAC && value === 'safari' ? `${label} (needs Full Disk Access)` : label)));
   select.addEventListener('change', () => save({ cookies_browser: select.value }));
-  return h('div', { dataset: { spot: 'cookies' } },
+  return h('div', { id: 'cookiesSpot', tabindex: '-1', dataset: { spot: 'cookies' } },
     row('YouTube sign-in',
       'Used only when YouTube refuses a video without it (age check, bot check, members only), and only sent to YouTube. '
         + 'YouTube can block accounts that download a lot, so a spare Google account is safer. '
-        + (mac ? 'Firefox asks for nothing; Chrome and similar ask for your Mac’s password once.' : 'Firefox works most reliably.'),
+        + (IS_MAC ? 'Firefox asks for nothing; Chrome and similar ask for your Mac’s password once.' : 'Firefox works most reliably.'),
       select, { stack: true, setting: 'cookies_browser' }));
 }
 
 // ---------------------------------------------------------------------------
 // Updates & add-ons: the app itself, the downloader, the AI add-on, the audio engine
 // ---------------------------------------------------------------------------
-function renderSystem() {
+function renderAi() {
+  fill('ai-addon', aiRows());
+}
+
+function renderHelp() {
   const ff = store.health?.ffmpeg || {};
-  fill('system',
-    !ff.ok && ff.error ? callout('danger', 'Audio engine missing', ff.error) : null,
-    appUpdateRow(),
-    checkUpdatesRow(),
-    downloaderRows(),
-    aiRows(),
-    statusRow(ff.ok ? 'ok' : 'bad', 'Audio engine (ffmpeg)', ff.ok ? `Version ${ff.version || '?'} · ${ff.source === 'bundled' ? 'built in' : 'installed on this computer'}` : (ff.error || 'Not found')));
+  const s = store.settings || {};
+  const maintenance = h('details', { class: 'disclosure', id: 'settingsMaintenance', open: !!document.getElementById('settingsMaintenance')?.open },
+    h('summary', { id: 'maintenanceSummary' }, 'Maintenance and diagnostics'),
+    h('div', { class: 'set-rows' },
+      downloaderRows(),
+      h('div', { id: 'ffmpegSpot', class: 'set-rows', tabindex: '-1', dataset: { spot: 'ffmpeg' } },
+        !ff.ok && ff.error ? callout('danger', 'Audio engine missing', ff.error) : null,
+        statusRow(ff.ok ? 'ok' : 'bad', 'Audio engine (ffmpeg)', ff.ok ? `Version ${ff.version || '?'} · ${ff.source === 'bundled' ? 'built in' : 'installed on this computer'}` : (ff.error || 'Not found'))),
+      row('Keep work files', 'For troubleshooting only: keeps the big in-between files (decoded audio, raw stems) after a job finishes. Uses a lot of disk.',
+        switchControl({ id: 'keepWorkFiles', checked: s.keep_work_files, label: 'Keep work files', onChange: (v) => save({ keep_work_files: v }) }), { setting: 'keep_work_files' }),
+      diagnosticRows()));
+  fill('help', appUpdateRow(), checkUpdatesRow(), maintenance);
 }
 
 /** Whether dotted version `a` is newer than `b`, part by part as numbers ("2026.10.26" > "2026.9.1"). */
@@ -511,7 +579,7 @@ function appUpdateRow() {
   } else if (u.kind === 'error') {
     note = u.error; // the server's short reason, if it gave one
   }
-  return h('div', { dataset: { spot: 'updates' } },
+  return h('div', { id: 'updatesSpot', tabindex: '-1', dataset: { spot: 'updates' } },
     statusRow(u.led, appName(), u.detail, action, note ? h('div', { class: 'adv-help' }, note) : null));
 }
 
@@ -519,7 +587,7 @@ function appUpdateRow() {
 async function checkUpdates() {
   if (checkPending || store.health?.updates?.checking) return; // the button only looks disabled
   checkPending = true;
-  renderSystem();
+  keepReadingPosition(renderHelp);
   try {
     const res = await api('/api/system/check-updates', { method: 'POST' });
     if (res && typeof res === 'object' && store.health) store.health = { ...store.health, updates: res };
@@ -529,7 +597,7 @@ async function checkUpdates() {
     checkPending = false;
     await loadHealth().catch(() => {});
     if (visible) {
-      renderSystem();
+      keepReadingPosition(renderHelp);
       const u = appUpdateState(store.health);
       if (u) announce(`${appName()}: ${u.detail}.`);
     }
@@ -598,7 +666,7 @@ function downloaderRows() {
     }, dlPending === 'reset' ? 'Switching…' : 'Use built-in version'));
   }
   return [
-    h('div', { dataset: { spot: 'downloader' } },
+    h('div', { id: 'downloaderSpot', tabindex: '-1', dataset: { spot: 'downloader' } },
       statusRow(d.led, 'Downloader (yt-dlp)', d.detail, actions.childElementCount ? actions : null,
         d.fallback ? h('div', { class: 'adv-help sys-bad' }, d.fallback) : null,
         d.staleDays != null ? h('div', { class: 'adv-help nudge' },
@@ -617,12 +685,12 @@ function downloaderRows() {
 async function downloaderAction(kind, run) {
   if (dlPending) return;
   dlPending = kind;
-  renderSystem();
+  keepReadingPosition(renderHelp);
   try { await run(); } catch (e) { toastError(e); }
   finally {
     await loadHealth().catch(() => {});
     dlPending = null;
-    if (visible) renderSystem();
+    if (visible) keepReadingPosition(renderHelp);
   }
 }
 
@@ -653,7 +721,7 @@ function aiRows() {
     aiDetail = `Ready${ai.version ? ` · ${ai.version}` : ''}${ai.device ? ` · runs on ${deviceLabel(ai.device)}` : ''}${ai.device === 'cpu' ? ' (works, but slowly)' : ''}`;
     if (outdated) aiDetail += ' · update available';
   } else {
-    aiDetail = ai.reason || 'Not installed. Needed for Split and for Enhance → AI stems.';
+    aiDetail = ai.reason || 'Not installed. Needed for Split and for optional AI processing in Enhance.';
   }
   if (!ai.installing && ai.install_ok === false) aiDetail += ' · last install did not finish';
   // One action for whatever is missing; a working install gets none (repair is only for a broken one).
@@ -673,7 +741,7 @@ function aiRows() {
     actions.append(aiButton('removeAi', 'Remove AI add-on', 'btn-ghost btn-danger-text', async () => {
       const ok = await confirmDialog({
         title: 'Remove the AI add-on?',
-        message: 'Removes AudioLab’s optional AI software, models, caches and partial downloads. Split and AI stems will need it again. Your recordings, Library and settings stay.',
+        message: 'Removes AudioLab’s optional AI software, models, caches and partial downloads. Split and Enhance’s AI options will need it again. Your recordings, Library and settings stay.',
         confirm: 'Remove AI add-on',
       });
       if (!ok) return;
@@ -693,10 +761,10 @@ function aiRows() {
     }
   }
   const help = managed
-    ? 'Adds Split and AI stems. One download includes the AI software and both model choices; processing then works offline on this computer.'
-    : canInstall ? 'Adds Split and AI stems. Installs AI software in this source environment; models download on first use.'
+    ? 'Adds Split and optional AI processing in Enhance. One download includes the AI software and both model choices; processing then works offline on this computer.'
+    : canInstall ? 'Adds Split and optional AI processing in Enhance. Installs AI software in this source environment; models download on first use.'
       : 'Save, Convert and Check work without the AI add-on. So does Enhance with “Volume only” or “Tone and volume”.';
-  return h('div', { dataset: { spot: 'ai' } },
+  return h('div', { id: 'aiSpot', tabindex: '-1', dataset: { spot: 'ai' } },
     // Not installed is a choice, not a fault: a dim light, not a red one.
     statusRow(ai.installing ? 'on' : ai.available ? 'ok' : 'dim', 'AI add-on', aiDetail,
       actions.childElementCount ? actions : null,
@@ -727,12 +795,12 @@ function aiButton(id, label, style, action) {
     onclick: async () => {
       if (aiPending) return;
       aiPending = true;
-      renderSystem();
+      keepReadingPosition(renderAi);
       try { await action(); } catch (e) { toastError(e); }
       finally {
         await loadHealth().catch(() => {});
         aiPending = false;
-        if (visible) renderSystem();
+        if (visible) keepReadingPosition(renderAi);
       }
     },
   }, label);
@@ -757,9 +825,7 @@ function renderStorage() {
       row('Keep originals', 'For new Enhance results; about 1 MB per minute for links. Turning it off doesn’t delete the ones already kept.',
         switchControl({ id: 'keepOriginals', checked: s.keep_originals !== false, label: 'Keep originals', onChange: (v) => save({ keep_originals: v }) }), { setting: 'keep_originals' }),
       row('Reuse kept originals', 'A link you save again uses its kept original instead of downloading it again. Its title and chapters are still looked up.',
-        switchControl({ id: 'reuseOriginals', checked: s.reuse_originals !== false, label: 'Reuse kept originals', onChange: (v) => save({ reuse_originals: v }) }), { setting: 'reuse_originals' })),
-    row('Keep work files', 'For troubleshooting only: keeps the big in-between files (decoded audio, raw stems) after a job finishes. Uses a lot of disk.',
-      switchControl({ id: 'keepWorkFiles', checked: s.keep_work_files, label: 'Keep work files', onChange: (v) => save({ keep_work_files: v }) }), { setting: 'keep_work_files' }));
+        switchControl({ id: 'reuseOriginals', checked: s.reuse_originals !== false, label: 'Reuse kept originals', onChange: (v) => save({ reuse_originals: v }) }), { setting: 'reuse_originals' })));
 }
 
 async function loadStorage() {
@@ -787,7 +853,10 @@ function scheduleStorageRefresh() {
 function renderStorageInfo() {
   const el = refs.storageInfo;
   const d = storage.data;
-  if (!d || d.jobs_bytes == null) { el.hidden = true; renderOriginalsInfo(d); return; }
+  if (!d || d.jobs_bytes == null) {
+    keepReadingPosition(() => { el.hidden = true; renderOriginalsInfo(d); });
+    return;
+  }
   const finished = [...store.jobs.values()].filter(isFinished).length;
   // Jobs finished or were cleared elsewhere: the sizes are stale, fetch them again.
   if (storage.finished != null && storage.finished !== finished) {
@@ -815,12 +884,14 @@ function renderStorageInfo() {
   const extra = [];
   if (finished && d.finished_bytes) extra.push(`Clearing frees about ${fmtBytes(d.finished_bytes)}.`);
   if (d.models_bytes) extra.push(`AI add-on / models: ${fmtBytes(d.models_bytes)}.`);
-  el.hidden = false;
-  clear(el).append(row(
-    `Job files: ${fmtBytes(d.jobs_bytes)} · ${finished} finished job${finished === 1 ? '' : 's'}`,
-    ['Logs, previews and copies kept for each job, in app data. Files in your output folder aren’t counted, and clearing jobs keeps them.', ...extra].join(' '),
-    btn));
-  renderOriginalsInfo(d);
+  keepReadingPosition(() => {
+    el.hidden = false;
+    fillRows(el, row(
+      `Job files: ${fmtBytes(d.jobs_bytes)} · ${finished} finished job${finished === 1 ? '' : 's'}`,
+      ['Logs, previews and copies kept for each job, in app data. Files in your output folder aren’t counted, and clearing jobs keeps them.', ...extra].join(' '),
+      btn));
+    renderOriginalsInfo(d);
+  });
 }
 
 /** What is kept now, with "Delete kept originals". Shown (without numbers) even when /api/storage
@@ -851,7 +922,7 @@ function renderOriginalsInfo(d) {
     });
   }
   const amount = !known ? '' : n ? `: ${fmtBytes(d.originals_bytes)} · ${n} file${n === 1 ? '' : 's'}` : ': none';
-  clear(refs.originalsInfo).append(row(
+  fillRows(refs.originalsInfo, row(
     `Kept originals${amount}`,
     'Copies of the originals of Enhance results, in app data. The Library needs them to compare a result at full length, and Adjust to rework it. Your output files aren’t touched.',
     del));
@@ -860,7 +931,7 @@ function renderOriginalsInfo(d) {
 // ---------------------------------------------------------------------------
 // About: version, folders, limits, the system report
 // ---------------------------------------------------------------------------
-function renderAbout() {
+function diagnosticRows() {
   const hth = store.health || {};
   const folderActions = hth.local ? h('div', { class: 'block-actions' },
     [
@@ -872,7 +943,7 @@ function renderAbout() {
         try { await api(path, { method: 'POST' }); } catch (e) { toastError(e); }
       },
     }, icon('folder', 14), label))) : null;
-  fill('about',
+  return h('div', { class: 'set-rows', id: 'diagnosticSpot', tabindex: '-1', dataset: { spot: 'diagnostics' } },
     h('dl', { class: 'facts' },
       [h('dt', null, 'Version'), h('dd', null, `${appName()} ${hth.version || ''}`)],
       hth.output_dir ? [h('dt', null, 'Output folder'), h('dd', null, pathValue(hth.output_dir, 'output folder', 'copyOutputDir'))] : null,

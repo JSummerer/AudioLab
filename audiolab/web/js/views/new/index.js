@@ -6,8 +6,9 @@
 import { h, icon } from '../../dom.js';
 import { store, on } from '../../store.js';
 import { closeInfo } from '../../ui.js';
-import { state, refs, redraw, TASKS, rememberedFormats } from './state.js';
-import { loadUrl, offerLink, pasteLink, setFiles, useJobSource, normalizeUrl } from './source.js';
+import { nativeWindow } from '../../native.js';
+import { state, refs, redraw, TASKS } from './state.js';
+import { loadUrl, offerLink, editLink, pasteLink, chooseFiles, setFiles, useJobSource, normalizeUrl } from './source.js';
 import './options.js';
 import './start.js';
 import './sleeve.js';
@@ -33,7 +34,10 @@ export const newView = {
         input,
         h('button', { type: 'submit', class: 'btn btn-key' }, 'Load')));
     form.addEventListener('submit', (e) => { e.preventDefault(); loadUrl(input.value); });
-    input.addEventListener('paste', () => setTimeout(() => { if (input.value.trim()) pasteLink(input.value); }, 0));
+    input.addEventListener('input', (e) => {
+      if (e.inputType === 'insertFromPaste') pasteLink(input.value);
+      else editLink(input.value);
+    });
     // A link dropped on the field replaces what's in it and loads (other text is inserted as usual).
     input.addEventListener('drop', (e) => {
       const dt = e.dataTransfer;
@@ -60,14 +64,16 @@ export const newView = {
       h('header', { class: 'page-head' },
         h('div', { class: 'page-head-text' },
           this.heading,
-          h('p', { class: 'page-sub' }, 'Save it, make it sound better, split it into stems, or check how good it really is.'))),
+          h('p', { class: 'page-sub' }, 'Save or convert audio, adjust its tone and volume, split it into stems, or measure it.'))),
       h('div', { class: 'create' },
         h('div', { class: 'create-main' },
           h('section', { class: 'step', 'aria-label': 'Source' },
             form,
             h('div', { class: 'source-alt' },
-              h('button', { type: 'button', class: 'btn btn-ghost', onclick: () => document.getElementById('fileInput').click() },
+              h('button', { type: 'button', class: 'btn btn-ghost', onclick: () => chooseFiles() },
                 icon('upload', 16), 'Choose files'),
+              nativeWindow() ? h('button', { type: 'button', class: 'btn btn-ghost', onclick: () => chooseFiles('batch') },
+                icon('folder', 16), 'Choose folder') : null,
               h('span', { class: 'source-alt-note' }, 'or drop them anywhere on this window')),
             refs.source),
           h('section', { class: 'step' },
@@ -102,12 +108,10 @@ export function focusLinkField() {
 }
 
 // Settings → Defaults feed the options, but only when they change (a pick made
-// here survives unrelated settings saves). On the first load the formats last started
-// here come first, while Settings → Defaults are still the ones they were chosen over.
+// here survives unrelated settings saves and navigation until this page reloads).
 function applyDefaults() {
   const s = store.settings;
   if (!s) return;
-  const first = !Object.keys(lastDefaults).length;
   const next = {
     download_format: s.download_format,
     enhance_formats: (s.enhance_formats || []).join(','),
@@ -122,17 +126,4 @@ function applyDefaults() {
     state.enhance.embed_cover = !!next.embed_cover;
   }
   lastDefaults = next;
-  if (first) useLastFormats();
-}
-
-function useLastFormats() {
-  const f = store.health?.formats || {};
-  const offered = (list, key) => (list || []).some((x) => x.key === key);
-  const d = rememberedFormats('download');
-  if (offered(f.download, d)) state.download.format = d;
-  const e = rememberedFormats('enhance');
-  const keys = Array.isArray(e) ? e.filter((k) => offered(f.enhance, k)) : [];
-  if (keys.length) state.enhance.formats = new Set(keys);
-  const s = rememberedFormats('separate');
-  if (offered(f.separate, s)) state.separate.format = s;
 }

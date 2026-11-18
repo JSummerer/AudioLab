@@ -34,6 +34,7 @@ class ProgrammeLevels:
     percentiles: dict[str, float]
     audible_span: tuple[int, int] | None
     stereo: dict[str, float | bool | None]
+    sample_peak: float
     density: dict[str, float] | None = None  # programme_density (long recordings)
     tone_timeline: dict | None = None  # analysis.tone: how the tonal balance moves (chart data)
     overview: dict | None = None
@@ -252,6 +253,7 @@ def scan_levels(
         percentiles=programme_percentiles(np.concatenate(rms) if rms else np.empty(0)),
         audible_span=None if first_audible is None else (first_audible, last_audible),
         stereo=stereo.result(),
+        sample_peak=sample_peak,
         density=programme_density(bins[0], np.concatenate(bin_peaks)) if bins and bin_peaks else None,
         tone_timeline=tone_timeline(np.array(band_blocks), _SCAN_BLOCK_S) if band_blocks else None,
         overview=overview.result() if overview is not None else None,
